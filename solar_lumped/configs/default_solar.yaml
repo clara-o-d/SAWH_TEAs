@@ -1,0 +1,32 @@
+# Reference defaults for solar_lumped (not loaded automatically by code).
+# Authoritative economics: src/solar_lumped/data/economics/lcow_economic_params.csv
+
+device:
+  hydrogel_thickness_mm: 4.0
+  vapor_gap_mm: 40.0
+  insulation_gap_mm: 5.0
+  salt: LiCl
+  salt_to_polymer_ratio: 4.0
+  tilt_deg: 35.0
+
+weather:
+  mode: real  # real (mean diurnal from year) | baseline | atacama-replay | cambridge-replay
+  absorption_hours: 12.0
+  desorption_hours: 12.0
+
+baseline:
+  temperature_c: 25.0
+  relative_humidity: 0.5
+  solar_irradiance_w_per_m2: 600.0
+  h_amb_w_per_m2_k: 10.0
+  initial_equilibrium_rh: 0.20  # fabrication DVS IC (Wilson Methods)
+
+atacama_replay:
+  date: "2024-05-08"
+  lat: -23.65
+  lon: -70.40
+
+cambridge_replay:
+  date: "2024-06-03"
+  lat: 42.36
+  lon: -71.09

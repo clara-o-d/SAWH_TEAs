@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "waste-heat-lumped-sawh"
+version = "0.1.0"
+description = "AirJoule-style waste-heat lumped two-bed SAWH simulation (governing_eq.tex)"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Clara" }]
+
+dependencies = [
+    "scipy>=1.11",
+    "numpy>=1.26",
+    "pandas>=2.0",
+    "matplotlib>=3.8",
+    "requests>=2.31",
+    "requests-cache>=1.2",
+    "retry-requests>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "black>=24.0",
+    "ruff>=0.4",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"waste_heat_lumped.data.economics" = ["*.csv"]
+"waste_heat_lumped.data.materials" = ["*.csv"]
+"waste_heat_lumped.weather" = ["*.csv"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short -q"

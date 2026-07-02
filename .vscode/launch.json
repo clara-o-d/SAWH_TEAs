@@ -1,0 +1,63 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Solar sim: baseline",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/solar_lumped/scripts/run_solar_sim.py",
+      "cwd": "${workspaceFolder}/solar_lumped",
+      "args": [
+        "--weather-mode",
+        "baseline",
+        "--initial-water-l-m2",
+        "1.3"
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/solar_lumped/src"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Solar sim: atacama-replay",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/solar_lumped/scripts/run_solar_sim.py",
+      "cwd": "${workspaceFolder}/solar_lumped",
+      "args": [
+        "--weather-mode",
+        "atacama-replay",
+        "--initial-water-l-m2",
+        "1.3"
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/solar_lumped/src"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    },
+    {
+      "name": "Solar sim: real weather",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/solar_lumped/scripts/run_solar_sim.py",
+      "cwd": "${workspaceFolder}/solar_lumped",
+      "args": [
+        "--weather-mode",
+        "real",
+        "--lat",
+        "-23.65",
+        "--lon",
+        "70.40",
+        "--year",
+        "2024",
+      ],
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/solar_lumped/src"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
+    }
+  ]
+}

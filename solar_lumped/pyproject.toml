@@ -1,0 +1,52 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "solar-lumped-sawh"
+version = "0.1.0"
+description = "Wilson et al. 2025 solar lumped SAWH device simulation with LCOW TEA"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Clara" }]
+
+dependencies = [
+    "scipy>=1.11",
+    "numpy>=1.26",
+    "pandas>=2.0",
+    "matplotlib>=3.8",
+    "requests>=2.31",
+    "requests-cache>=1.2",
+    "retry-requests>=2.0",
+]
+
+[project.optional-dependencies]
+maps = [
+    "cartopy>=0.22",
+    "shapely>=2.0",
+]
+dev = [
+    "pytest>=8.0",
+    "black>=24.0",
+    "ruff>=0.4",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"solar_lumped.data.economics" = ["*.csv"]
+"solar_lumped.data.materials" = ["*.csv"]
+"solar_lumped.weather" = ["*.csv"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short -q"

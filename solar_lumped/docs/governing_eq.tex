@@ -1,0 +1,176 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath, amssymb}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{siunitx}
+
+\title{Governing Equations for a Solar-Driven, Single-Bed PAM--LiCl SAWH Device}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section*{Reference and scope}
+
+This document describes the lumped model implemented in \texttt{solar\_lumped}, following Wilson \& D\'{i}az-Mar\'{i}n \textit{Device} (2025) Eqs.~1--6 and Note~S1 (COMSOL Table~S3 parameters). The device is a single hydrogel bed that alternates between open \emph{absorption} (night) and sealed \emph{desorption} (day) half-cycles. Thermal balances for the gel, solar absorber, and cover glass are solved as quasi-steady algebraic equations; the condenser temperature is transient during desorption.
+
+\textbf{Subscripts:} $g$ = hydrogel; $abs$ = solar absorber; $gl$ = cover glass; $cond$ = aluminum condenser; $amb$ = ambient.
+
+\section{State variables}
+
+All quantities are per unit footprint area (\si{\metre\squared}) unless noted.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Symbol} & \textbf{Units} & \textbf{Role} \\
+\midrule
+$c_w$ & \si{\mol\per\cubic\metre} & Brine water concentration in gel (Eq.~5 state) \\
+$H$ & \si{\metre} & Hydrogel thickness (Eq.~6 state; reference $H_0$) \\
+$T_{cond}$ & \si{\celsius} & Condenser temperature (transient during desorption only) \\
+$T_g, T_{abs}, T_{gl}$ & \si{\celsius} & Quasi-steady thermal states (algebraic each step) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textbf{Absorption phase ODEs:} $\dot{c}_w$, $\dot{H}$ with $Q_{solar}=0$, $\dot{m}_{des}=0$, $\dot{T}_{cond}=0$.
+
+\textbf{Desorption phase ODEs:} $\dot{c}_w$, $\dot{H}$, $\dot{T}_{cond}$ with $T_g$, $T_{abs}$, $T_{gl}$ from the coupled thermal solve.
+
+\section{Thermal balances (Wilson Eqs.~1, 3, 4)}
+
+During each integration step the gel, absorber, and glass temperatures satisfy the steady residual form (Eqs.~1, 3, 4 set to zero):
+
+\begin{equation}
+U_{gel}(T_{abs} - T_g)
+= h_{conv,g}(T_g - T_{cond})
++ \dot{m}_{des}\,h_{des}
++ \varepsilon_{gc}\sigma(T_g^4 - T_{cond}^4)
+\label{eq:gel}
+\end{equation}
+
+\begin{equation}
+k_{air}\frac{T_{abs} - T_{gl}}{L_{ins}}
++ \varepsilon_{ag}\sigma(T_{abs}^4 - T_{gl}^4)
+= h_{amb}(T_{gl} - T_{amb})
++ \sigma(T_{gl}^4 - T_{amb}^4)
+\label{eq:glass}
+\end{equation}
+
+\begin{equation}
+\varepsilon_{abs}\,\tau_{glass}\,Q_{solar}
+= k_{air}\frac{T_{abs} - T_{gl}}{L_{ins}}
++ \varepsilon_{ag}\sigma(T_{abs}^4 - T_{gl}^4)
++ U_{gel}(T_{abs} - T_g)
+\label{eq:absorber}
+\end{equation}
+
+\textbf{Correlations (Note~S1):}
+\begin{itemize}
+\item $h_{conv,g}$: Hollands et al.\ natural convection between parallel plates in the vapor gap $L_g - H$ (tilt-dependent).
+\item $\varepsilon_{gc} = 1/(1/\varepsilon_{gel} + 1/\varepsilon_{Al} - 1)$: parallel-plate radiative exchange.
+\item $U_{gel} = k_{Al}/L_{Al}$: gel--absorber conduction (Table~S3).
+\item Absorption: $Q_{solar}=0$; desorption: $Q_{solar}\ge 0$ from weather profile.
+\end{itemize}
+
+\section{Condenser energy balance (Wilson Eq.~2, transient)}
+
+During desorption only:
+\begin{equation}
+(\rho c_p L)_{cond}\,\frac{dT_{cond}}{dt}
+= h_{conv,g}(T_g - T_{cond})
++ \dot{m}_{des}\,h_{fg}
++ \varepsilon_{gc}\sigma(T_g^4 - T_{cond}^4)
+- A_r\,h_{amb}(T_{cond} - T_{amb})
+\label{eq:condenser}
+\end{equation}
+
+where $A_r$ is the fin area ratio and $h_{conv,cond} = A_r\,h_{amb}$.
+
+\section{Mass transport (Wilson Eqs.~5--6)}
+
+\begin{equation}
+\frac{dc_w}{dt}
+= \frac{g}{H_0}\,\frac{P_{sat}(T_g)}{RT_g}\,(C_R - a_w)
+\label{eq:dcw}
+\end{equation}
+
+\begin{equation}
+\frac{dH}{dt}
+= \frac{MW_{w}}{\rho_{sol}}\,\frac{P_{sat}(T_g)}{RT_g}\,(C_R - a_w)
+\label{eq:dH}
+\end{equation}
+
+\textbf{Concentration ratio $C_R$:}
+\begin{align}
+C_R &= RH_{amb} && \text{(absorption, open chamber)} \\
+C_R &= \frac{P_{sat}(T_{cond})}{P_{sat}(T_g)}\,\frac{T_g + 273.15}{T_{cond} + 273.15}
+&& \text{(desorption, vapor gap)}
+\end{align}
+
+\textbf{Mass-transfer coefficient $g$:}
+\begin{align}
+g &= g_{chamber} && \text{(absorption)} \\
+g &= h_{conv,g}\,\frac{D_{air}}{k_{air}} && \text{(desorption; Lewis-number analogy, Note~S1 Eq.~S5)}
+\end{align}
+
+\textbf{Water activity $a_w$ (PAM--LiCl):} brine activity from salt thermodynamics, capped by the measured DVS isotherm during absorption (Note~S2). During desorption, brine activity alone.
+
+\textbf{Desorption mass flux from gel inventory:}
+\begin{equation}
+\dot{m}_{des} = MW_w\,\bigl(-\dot{c}_w\,H - c_w\,\dot{H}\bigr), \qquad \dot{m}_{des} \ge 0
+\label{eq:mdes}
+\end{equation}
+
+\section{Thermal--mass coupling constraint}
+
+During desorption, $\dot{m}_{des}$ in Eq.~\eqref{eq:gel} must equal the flux implied by Eqs.~\eqref{eq:dcw}--\eqref{eq:mdes}. The implementation finds $\dot{m}_{des}$ as the root of $f(\dot{m}_{des}) = \dot{m}_{calc}(\dot{m}_{des}) - \dot{m}_{des} = 0$ (Brent's method), ensuring Eqs.~1 and 5--6 are self-consistent at each ODE evaluation.
+
+\section{Constraints and cycle structure}
+
+\begin{itemize}
+\item $c_w \in [c_{w,\min}, c_{w,\max}]$; rates clipped at bounds.
+\item $H \ge H_0$; swelling allowed in absorption ($\dot{H}\ge 0$ at $H=H_0$); no shrinkage below $H_0$ in desorption.
+\item Desorption: enforce $\dot{c}_w \le 0$, $\dot{H} \le 0$.
+\item Daily cycle: absorption half-cycle ($\sim$12~h, no solar) followed by desorption half-cycle ($\sim$12~h, solar + condenser transient).
+\item Initial $c_w$ from fabrication equilibrium RH (DVS isotherm at $H_0$) unless overridden.
+\item Thermal efficiency: $\eta_{th} = \dot{m}_{water}\,h_{fg} / \int Q_{solar}\,dt$ over the desorption phase.
+\end{itemize}
+
+\section{Default parameters (Table~S3 / \texttt{table\_s3.py})}
+
+\begin{table}[h]
+\centering
+\small
+\sisetup{table-format=3.3}
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Parameter} & \textbf{Symbol} & \textbf{Default} \\
+\midrule
+Hydrogel reference thickness & $H_0$ & \SI{4}{\milli\metre} \\
+Vapor gap length & $L_g$ & \SI{40}{\milli\metre} \\
+Insulation gap & $L_{ins}$ & \SI{5}{\milli\metre} \\
+Aluminum plate thickness & $L_{Al}$ & \SI{0.125}{\inch} \\
+Chamber convection (abs.) & $g_{chamber}$ & \SI{0.0085}{\metre\per\second} \\
+Solution density & $\rho_{sol}$ & \SI{1250.2}{\kilogram\per\cubic\metre} \\
+Desorption enthalpy & $h_{des}$ & \SI{2.32e6}{\joule\per\kilogram} \\
+Condensation enthalpy & $h_{fg}$ & \SI{2.256e6}{\joule\per\kilogram} \\
+Gel emissivity & $\varepsilon_{gel}$ & 1.0 \\
+Condenser emissivity & $\varepsilon_{Al}$ & 0.05 \\
+Absorber emissivity & $\varepsilon_{abs}$ & 0.95 \\
+Glass transmittance & $\tau_{glass}$ & 0.9 \\
+Tilt angle & --- & \SI{30}{\degree} (baseline) \\
+Fin area ratio & $A_r$ & 7.1 (baseline) \\
+Salt & --- & LiCl, salt:polymer = 4:1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section*{Integration}
+
+The coupled system is integrated with SciPy \texttt{solve\_ivp} (Radau, stiff). State during desorption: $\mathbf{y} = [c_w,\, H,\, T_{cond}]$; during absorption: $\mathbf{y} = [c_w,\, H]$.
+
+\end{document}

@@ -1,0 +1,5 @@
+salt_name,heat_of_desorption_j_per_kg,notes
+LiCl,2850000,"Total desorption enthalpy incl. vaporization; strong Li+ hydration (hygroscopic AWH sorbents ~2800-3200 kJ/kg)"
+NaCl,2500000,"Weaker binding near deliquescence; ~2400-2600 kJ/kg typical for NaCl brines"
+CaCl2,2700000,"Highly hygroscopic; CaCl2·nH2O dehydration literature ~2600-2800 kJ/kg"
+MgCl2,2600000,"Moderate hygroscopicity; MgCl2 brine desorption ~2500-2700 kJ/kg"
