@@ -75,19 +75,17 @@ def test_eq5_mass_transfer_formula_absorption(config: DeviceConfig, mass):
 
 
 def test_eq6_thickness_rate_ratio_to_eq5(config: DeviceConfig, mass):
-    """dH/dt and dc_w/dt share the same driving force; ratio is MW/ρ_sol · H₀/g."""
+    """dH/dt and dc_w/dt share the same driving force; ratio is MW/ρ_sol · H₀.
+
+    dc_w/dt = g/H₀ · (p_sat/RT) · driving  [mol/m³/s]
+    dH/dt   = g    · (MW/ρ)   · (p_sat/RT) · driving  [m/s]
+    ratio   = (MW/ρ) · H₀  [m⁴/mol]
+    """
     h0 = config.hydrogel_thickness_m
     t_gel = 40.0
     t_cond = 30.0
     c_w = 12000.0
     c_r = concentration_ratio_desorption(t_gel, t_cond)
-    g = mass_transfer_g_m_s(
-        phase="desorption",
-        params=mass,
-        h_m=h0,
-        t_gel_c=t_gel,
-        t_cond_c=t_cond,
-    )
     dc = dc_w_dt(
         c_w,
         t_gel_c=t_gel,
@@ -108,7 +106,7 @@ def test_eq6_thickness_rate_ratio_to_eq5(config: DeviceConfig, mass):
     )
     if abs(dc) < 1e-20:
         pytest.skip("No mass transfer at this state")
-    expected_ratio = (WATER_MOLAR_MASS_KG_MOL / mass.rho_solution_kg_m3) / (g / h0)
+    expected_ratio = (WATER_MOLAR_MASS_KG_MOL / mass.rho_solution_kg_m3) * h0
     assert dh / dc == pytest.approx(expected_ratio, rel=1e-9)
 
 
@@ -163,6 +161,7 @@ def test_steady_thermal_residuals_near_zero(config: DeviceConfig, thermal):
         m_des_kg_s_m2=2e-6,
         h_amb=10.0,
         params=thermal,
+        h_m=h0,
         vapor_gap_m=gap_eff,
     )
     r = _residuals(
@@ -174,18 +173,20 @@ def test_steady_thermal_residuals_near_zero(config: DeviceConfig, thermal):
         10.0,
         thermal,
         gap_eff,
+        h0,
     )
     assert float(np.linalg.norm(r)) < 1e-4
 
 
 def test_absorption_coupled_rates_match_doc(config: DeviceConfig, mass, thermal):
-    """Absorption: Q_solar=0, ṁ_des=0, dT_cond/dt=0."""
+    """Absorption: Q_solar=0, ṁ_des=0, dT_cond/dt=0; Note S1 T_gel = T_amb."""
     h0 = config.hydrogel_thickness_m
+    t_amb = 20.0
     rates = evaluate_coupled_rates(
         c_w=9000.0,
         h_m=h0,
-        t_cond_c=20.0,
-        t_amb_c=20.0,
+        t_cond_c=t_amb,
+        t_amb_c=t_amb,
         rh=0.6,
         q_solar_w_m2=0.0,
         h_amb=8.0,
@@ -199,11 +200,14 @@ def test_absorption_coupled_rates_match_doc(config: DeviceConfig, mass, thermal)
     )
     assert rates.m_des_kg_s_m2 == 0.0
     assert rates.dT_cond_dt == 0.0
+    assert rates.t_gel_c == pytest.approx(t_amb)
     assert rates.dc_w_dt > 0.0
 
 
 def test_desorption_m_des_self_consistent(config: DeviceConfig, mass, thermal):
-    """Desorption root find: ṁ_des matches inventory flux from Eqs. 5–6."""
+    """Desorption root find: ṁ_des matches Note S1 flux (Eq. 5 with H₀)."""
+    from solar_lumped.physics.mass_transfer import m_des_kg_s_m2_from_dc_w
+
     h0 = config.hydrogel_thickness_m
     rates = evaluate_coupled_rates(
         c_w=14000.0,
@@ -221,9 +225,7 @@ def test_desorption_m_des_self_consistent(config: DeviceConfig, mass, thermal):
         fin_area_ratio=config.fin_area_ratio,
         h_fg_j_per_kg=config.h_fg_j_per_kg,
     )
-    m_calc = m_des_kg_s_m2_from_state(
-        14000.0, h0 * 1.05, rates.dc_w_dt, rates.dH_dt
-    )
+    m_calc = m_des_kg_s_m2_from_dc_w(rates.dc_w_dt, h0_ref_m=h0)
     assert rates.dc_w_dt <= 0.0
     assert rates.dH_dt <= 0.0
     if rates.m_des_kg_s_m2 > 0.0:

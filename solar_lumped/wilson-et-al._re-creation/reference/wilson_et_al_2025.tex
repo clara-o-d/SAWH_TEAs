@@ -1,0 +1,680 @@
+\documentclass[11pt]{article}
+
+% ---------- Packages ----------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\geometry{margin=1in}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage[colorlinks=true, citecolor=blue, urlcolor=blue, linkcolor=blue]{hyperref}
+\usepackage{authblk}
+\usepackage{setspace}
+\usepackage{titlesec}
+\usepackage{enumitem}
+\usepackage[numbers,sort&compress]{natbib}
+\usepackage{fancyhdr}
+\usepackage{xcolor}
+
+% ---------- Header / Footer ----------
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small \textit{Article}}
+\fancyhead[R]{\small Device}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% ---------- Custom boxes ----------
+\usepackage{tcolorbox}
+\tcbuselibrary{skins}
+
+\newtcolorbox{biggerpicture}{
+  colback=gray!5, colframe=gray!60, boxrule=0.5pt,
+  title={\textbf{THE BIGGER PICTURE}}, coltitle=black,
+  fonttitle=\normalsize, fontupper=\small, sharp corners
+}
+
+% ---------- Title spacing ----------
+\titleformat{\section}{\normalfont\Large\bfseries\color{blue!60!black}}{\thesection}{1em}{}
+\titleformat{\subsection}{\normalfont\large\bfseries\color{blue!60!black}}{\thesubsection}{1em}{}
+\titleformat{\subsubsection}{\normalfont\normalsize\bfseries}{\thesubsubsection}{1em}{}
+
+\title{\LARGE \textbf{Solar-driven atmospheric water harvesting in the Atacama Desert through physics-based optimization of a hygroscopic hydrogel device}}
+
+\author[1,5,6,*]{Chad T. Wilson}
+\author[1,5]{Carlos D. D\'iaz-Mar\'in}
+\author[2]{Juan Pablo Colque}
+\author[1,3]{Joseph P. Mooney}
+\author[1,4,*]{Bachir El Fil}
+
+\affil[1]{Department of Mechanical Engineering, Massachusetts Institute of Technology, Cambridge, MA 02139, USA}
+\affil[2]{Center for Astroengineering, Universidad de Antofagasta, Antofagasta, Chile}
+\affil[3]{School of Engineering, University of Limerick, Limerick V94 T9PX, Ireland}
+\affil[4]{George W. Woodruff School of Mechanical Engineering, Georgia Institute of Technology, Atlanta, GA 30332, USA}
+\affil[5]{These authors contributed equally}
+\affil[6]{Lead contact}
+\affil[*]{Correspondence: \texttt{bachir.elfil@me.gatech.edu} (B.E.F.), \texttt{wilsonct@mit.edu} (C.T.W.)}
+
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\begin{center}
+\small
+DOI: \url{https://doi.org/10.1016/j.device.2025.100798} \\[4pt]
+Device \textbf{3}, 100798, August 15, 2025 \\
+\copyright\ 2025 The Author(s). Published by Elsevier Inc. \\
+This is an open access article under the CC BY-NC-ND license (\url{http://creativecommons.org/licenses/by-nc-nd/4.0/}).
+\end{center}
+
+\vspace{1em}
+
+\begin{biggerpicture}
+Water scarcity is one of the most pressing challenges of our time, threatening the health, economy, and stability of communities worldwide. Traditional solutions like desalination and centralized water-supply systems are successfully deployed in many areas globally but are often expensive, energy intensive, and impractical for remote or arid regions. By harnessing sunlight---a ubiquitous, renewable resource---we developed a passive sorbent-based atmospheric water-harvesting device that captures moisture directly from the air using a hydrogel-salt composite. Our approach shifts the focus from merely improving material performance to optimizing an entire system based on fundamental physical principles of heat and mass transport. The device integrates a hydrogel-salt composite to capture and release water with an optimally designed housing for effective solar absorption, vapor collection, and water condensation. This integration creates a low-cost, scalable technology that can generate potable water even in extreme environments like the Atacama Desert, where conventional water sources fail.
+
+By addressing both the material and system-level challenges, our research not only advances the field of sorbent-based atmospheric water harvesting but also provides a viable solution to global water scarcity. This breakthrough could enable decentralized water production in water-stressed regions, offering a sustainable alternative that meets the needs of communities facing limited access to safe drinking water.
+\end{biggerpicture}
+
+\section*{Summary}
+Moisture-capturing hydrogels are promising material candidates for atmospheric water-harvesting (AWH) systems, potentially addressing the increasingly global challenge of water scarcity. However, despite material-level performance improvements, optimal system integration of hydrogels remains a major limitation to deploying cost-effective, high-performance devices. Here, we design, optimize, and demonstrate deployment of polyacrylamide-lithium chloride (PAM-LiCl) hydrogels in a passive AWH device to provide liquid water with high thermal efficiency. First, a comprehensive heat and mass transport model is developed to enable optimal device architecture design. We then validate this design through fabrication and testing in a variety of extreme environmental conditions. Overall, we present a holistically optimized sorption system and demonstrate water production up to 1.7~L/m$^2$/day with 16\% thermal efficiency. This work highlights the potential for system-level improvement of AWH devices and provides initial design guidelines for producing optimal systems with regards to both material performance and environmental conditions.
+
+\section{Introduction}
+
+Current assessments of the global water supply predict that population and economic growth will lead to an additional 1.8 billion people living in moderate to severe water scarcity regions by 2050, with 80\% of those residing in developing countries~\cite{schlosser2014}. Limited access to potable water not only leads to community health decline and transmission of waterborne diseases~\cite{sharma2017} but also profoundly impacts the economic uncertainty of a region, further reducing the quality of life for local inhabitants~\cite{dolan2021}. While filtration and desalination technologies offer potential solutions to the potable water crisis in coastal regions~\cite{elmaadawy2020}, their high economic, energetic, and environmental costs~\cite{ghaffour2013} motivate decentralized~\cite{fukuda2019} and passive technologies as alternatives, especially for inland regions~\cite{rao2022}. To this end, sorbent-based atmospheric water harvesting (SAWH) has emerged in recent years as a technology with the potential to help mitigate water scarcity at the local level by controllably harvesting moisture from ambient air via solar-driven processes~\cite{lord2021,zeng2024,zhang2022}. Additionally, by leveraging a ubiquitous source of energy, in the form of sunlight, and moisture, SAWH can be successfully deployed in inland, arid climate regions whose geography and low humidity limit other renewable water sources, such as desalination~\cite{curto2021} and dewing~\cite{lee2012}. Recently, significant effort has been made to develop sorbent materials for SAWH devices, including metal organic frameworks (MOFs)~\cite{kalmutzki2018}, zeolites~\cite{kayal2016}, and hygroscopic hydrogels~\cite{kallenberger2018,zhao2019,diazmarin2022a,guo2020,li2023}. These efforts have led to rigorous characterization of each material's properties and performance under controlled laboratory conditions~\cite{zhong2024}.
+
+In particular, hydrogel-salt composites have demonstrated desirable performance, including a large ability to capture moisture, tunable speed of capture and release, and low energy requirements for desorption, making them promising candidates for SAWH~\cite{lu2022,graeber2023,entezari2020,xu2024}. Despite the promise of hydrogel-salt composites, their optimized modeling and demonstration in SAWH has thus far been material focused or has relied extensively on empirical fitting parameters, crucially limiting the performance of SAWH devices. For instance, recent previous studies have developed first-principle thermodynamic and heat and mass transport models to describe the material-level behavior of hydrogel-salt composites~\cite{xu2021,park2022}. Despite the success of these models in quantifying performance as a function of material variables such as pore size, thickness, and chemical composition, the system-level integration of these models into the design of SAWH devices has not been demonstrated. On the other hand, system-level modeling of hydrogel-based SAWH devices has typically relied on empirical fitting parameters~\cite{park2022}. Due to the lack of system-level physics-based models, decisions regarding component materials, insulation, and system length scales are typically empirical, leading to system nonidealities and reduced material performance~\cite{meng2022,wilson2023,li2022}. Alternatively, some devices in the literature have demonstrated holistic model frameworks for system design and optimization. However, these models have used sorbents such as zeolites and MOFs, which suffer from limited uptake and high energy requirement for desorption relative to hydrogel-salt composites, ultimately limiting device performance~\cite{lapotin2021,lapotin2019,diazmarin2024,kim2018}. This motivates the development of device-level models for hydrogel-based SAWH to optimize device performance with a promising sorbent.
+
+In this work, we develop and experimentally validate a system-level heat and mass transport model for hydrogel-salt composite-based atmospheric water harvesting devices, considering impacts of both material and system parameters on heat and mass transfer during device operation. We use this model framework to optimize a passive, solar-driven SAWH device (Figure~\ref{fig:fig1}A) specifically designed to effectively cycle a polyacrylamide-lithium chloride (PAM-LiCl) hydrogel-salt composite and demonstrate its high performance in both urban and rural environments. PAM-LiCl (Figure~\ref{fig:fig1}B) is chosen as the sorbent material due to its favorable moisture uptake, even in low-humidity environments (Figure~\ref{fig:fig1}C), and low desorption enthalpies~\cite{lu2022,diazmarin2024b}. Our device operates on a daily cycle consisting of an absorption phase, during which the hydrogel captures moisture from ambient air during the nighttime, and a desorption phase, where the device is sealed from ambient air, and daytime incident solar irradiation is converted to thermal energy for hydrogel desorption. Our heat and mass transport optimization of this system includes consideration of thermal efficiency of this day-night water production cycle but focuses primarily on daily productivity as the performance metric for maximization. For passive, solar-driven SAWH devices, daily productivity quantifies the amount of water a device produces as liters of water per square meter of solar absorber per day (LMD)~\cite{lapotin2021}. Therefore, it is this metric we aim to improve, with the goal of creating a pathway to supply enough water for an individual's daily requirement~\cite{sawka2005} at a low cost. We use LMD throughout this work to evaluate our modeling results and compare the impact of certain design choices on overall water production. We leverage a fully coupled heat and mass transfer framework to identify significant variables in the energy and vapor pathways of an SAWH device, such as the hydrogel thickness and the vapor gap between the hydrogel and condenser, and then select target length scales for device fabrication based on maximal water productivity and secondarily maximal thermal efficiency.
+
+Through our system-level optimization, with an emphasis on material performance and manufacturability, we achieve both high device efficiency and water productivity in a scalable, cost-effective form factor. We deploy our device both in an urban and rural area, with urban Cambridge, Massachusetts, tests representative of typical testing conditions currently in the literature for SAWH devices, allowing us to draw comparisons between our performance and previously published works. Meanwhile, a rural test in the extreme Atacama Desert in Antofagasta, Chile, demonstrates practical rural usage of our system in an arid region currently facing the impacts of water scarcity~\cite{fuentes2021,aitken2016}. With a maximum demonstrated device productivity of 1.7~L/m$^2$, a thermal efficiency of 16\%, and a cost of \$50--\$150/m$^2$, this system demonstrates the impact of a holistic, physics-based optimization and brings SAWH closer to a realizable treatment for global water scarcity.
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering \vspace{4cm} \textit{[Figure 1: System for hydrogel-based SAWH --- schematic of device components and energy/mass flows (A); PAM-LiCl sorption isotherm at 25$^\circ$C (B); photo of deployed device in the Atacama Desert (C).]} \vspace{4cm}}}
+\caption{\textbf{System for hydrogel-based SAWH} \\
+(A) Schematic of the device, visualizing both key system components as well as energy and mass transfer throughout the cyclical day-night operation. \\
+(B) The PAM-LiCl hydrogel sorbent is illustrated on the microscale, detailing the crosslinked architecture of the salt-loaded hydrogel composite material. The water vapor sorption isotherm at 25$^\circ$C demonstrates the high ability to capture moisture, even in arid environments. \\
+(C) Cumulative view of the SAWH system as deployed in the Atacama Desert in Chile.}
+\label{fig:fig1}
+\end{figure}
+
+\section{Optimization of Device Design}
+
+\subsection{Heat and mass transport model}
+
+Critical to the advancement of SAWH devices is a fundamental understanding of the impact of system and material design on total water production. To this end, we developed a heat and mass transport model of the proposed SAWH device, considering both sorbent behavior and device component choice. We chose a PAM-LiCl hydrogel-salt composite because of its rigorously quantified heat and mass transport properties~\cite{diazmarin2022b}, sorption behavior~\cite{diazmarin2022c}, and high moisture uptake under low-relative humidity (RH) conditions~\cite{graeber2023}. Figure~\ref{fig:fig1}B shows the isotherm for our hydrogel-salt composite at 25$^\circ$C, quantified using dynamic vapor sorption (DVS) testing, as detailed in Note~S2, and used in our model as the sorbent equilibrium uptake based on the ambient nighttime humidity. Our hydrogel synthesis recipe is detailed in Note~S2, which we used for all hydrogels fabricated in this work.
+
+Here, we consider a simplified passive device throughout operation, in both absorption and desorption, and model both energy and mass transport as functions of material choice and system length scales. Figure~\ref{fig:fig2} shows a detailed diagram illustrating our model framework, highlighting the energy and mass flows through the device. Key components in our passive device include (1) an optically transparent glass cover, which transmits solar irradiation while reducing convective and radiative cooling of the absorber stage; (2) a black absorber stage, which efficiently converts incident solar flux into heat and conducts thermal energy to the sorbent; (3) a hydrogel-salt composite, which acts as our sorbent material; (4) a condenser stage, which captures water vapor from the hydrogel and outputs it as liquid water during the desorption phase of operation; and (5) thermal insulation, which reduces heat loss to ambient air. We chose this device design due to its simplicity and high performance, as demonstrated in previous studies with other sorbent materials~\cite{lapotin2021,li2024}. However, as key innovations in this work, we use a hydrogel-salt composite and develop a heat and mass transfer model to choose optimal device parameters, such as hydrogel thickness and air gap thickness. In this model, we assume sufficient insulation on all sides of the device and thus approximate heat transfer as a 1D, time-dependent energy flow from glass to condenser parallel to the direction of vapor flow. We also treat all radiative surfaces as diffuse, gray, opaque surfaces with material-dependent properties for emission and transmission. Furthermore, we assume negligible vapor leakage during operation and a constant ambient temperature of 25$^\circ$C unless stated otherwise. As outlined, the system contains two air-vapor gaps that are also considered in the optimization scheme. The top air gap separates the glass cover from the solar absorber surface and is designed to reduce natural convection, providing an insulating layer of stagnant air. Additionally, the vapor gap between the hydrogel and the condenser surface is a critical length scale for optimization and is designed to maximize device productivity.
+
+Each component energy balance has two forms, based on absorption and desorption, allowing us to model both phases of device operation. For the hydrogel during desorption,
+
+\begin{equation}
+0 = U_{\mathrm{gel}}\left(T_{\mathrm{abs}} - T_{\mathrm{gel}}\right) - h_{\mathrm{conv,g}}\left(T_{\mathrm{gel}} - T_{\mathrm{cond}}\right) - \dot{m}_{\mathrm{des}} h_{\mathrm{des}} - \varepsilon_g \sigma \left(T_{\mathrm{gel}}^4 - T_{\mathrm{cond}}^4\right),
+\label{eq:1}
+\end{equation}
+
+\noindent where $U_{\mathrm{gel}}$ is the total heat transfer coefficient from the solar absorber to the hydrogel surface, $h_{\mathrm{conv,g}}$ is the natural convection heat transfer coefficient in the vapor gap between the hydrogel and condenser, $\dot{m}_{\mathrm{des}}$ is the rate of desorption of water vapor from the hydrogel surface, and $\varepsilon_g$ is the combined radiative heat transfer coefficient between hydrogel and condenser surfaces, as a function of hydrogel and aluminum emissivities, as defined in Note~S1~\cite{kaviany2011}. The thermal storage in the hydrogel is neglected due to the linear temperature profile in the bulk hydrogel (Note~S1). Equation~\ref{eq:1} is an energy balance solving for the hydrogel surface temperature $T_{\mathrm{gel}}$, which, during desorption, is the summation of the heat conducted from the absorber surface to the hydrogel surface ($U_{\mathrm{gel}}(T_{\mathrm{abs}} - T_{\mathrm{gel}})$), the heat lost from the hydrogel via natural convection in the vapor gap to the condenser surface at temperature $T_{\mathrm{cond}}$, ($h_{\mathrm{conv,g}}(T_{\mathrm{gel}} - T_{\mathrm{cond}})$), the energy consumed due to the enthalpy of desorption of water from the hydrogel-salt composite ($\dot{m}_{\mathrm{des}} h_{\mathrm{des}}$), and the heat radiated from the hydrogel to the condenser surface through the gap ($\varepsilon_g \sigma (T_{\mathrm{gel}}^4 - T_{\mathrm{cond}}^4)$). In Equation~\ref{eq:1}, the natural convection coefficient $h_{\mathrm{conv,g}}$ is calculated as a function of gap size and temperature, as defined in Note~S1, using existing literature correlations for thermobuoyant flow between slanted parallel plates~\cite{hollands1976}.
+
+During absorption, the SAWH device is opened to the ambient air (visualized in Note~S2), and the hydrogel is exposed to ambient moisture. To model the hydrogel absorption, Equation~\ref{eq:1} is simplified, reflecting the presence of ambient air and the absence of solar/thermal inputs, as detailed in Note~S1. The hydrogel cools quickly ($\sim$10 min) relative to the duration of absorption ($\sim$10 h). As a consequence, the heat of absorption is negligible relative to ambient convective cooling of the hydrogel, leading to the hydrogel being in thermal equilibrium with the ambient air~\cite{diazmarin2022c}.
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering \vspace{4cm} \textit{[Figure 2: Thermofluidic optimization of the hydrogel SAWH device --- schematic (A) and parametric sweeps of productivity vs. absorber emissivity/glass transmission (B), condenser fin ratio/ambient heat transfer coefficient (C), ambient temperature/humidity (D), vapor gap/hydrogel thickness (E), and incident solar flux/thermal efficiency (F).]} \vspace{4cm}}}
+\caption{\textbf{Thermofluidic optimization of the hydrogel SAWH device} \\
+(A) Physical picture of SAWH as modeled, including all essential components for device operation and primary mass (blue arrows) and thermal (red arrows) and solar (yellow arrows) energy flows. \\
+(B--E) Results of our thermofluidic optimization, including (B) impact of solar absorber emissivity and glass transmission, (C) impact of the finned condenser structure and ambient heat transfer coefficient for both glass cover (dashed) and no glass cover (dotted) designs, (D) impact of environmental temperature and RH, and (E) impact of the vapor gap length and hydrogel thickness on device productivity. \\
+(F) Variability of both productivity and thermal efficiency on incident solar flux for fixed hydrogel thicknesses.}
+\label{fig:fig2}
+\end{figure}
+
+During desorption, the condenser surface temperature is modeled similarly to the hydrogel using Equation~\ref{eq:2},
+
+\begin{equation}
+\left(\rho c_p L\right)_{\mathrm{cond}} \frac{dT_{\mathrm{cond}}}{dt} = h_{\mathrm{conv,g}}\left(T_{\mathrm{gel}} - T_{\mathrm{cond}}\right) - h_{\mathrm{conv,cond}}\left(T_{\mathrm{cond}} - T_{\mathrm{amb}}\right) + \dot{m}_{\mathrm{des}} h_{\mathrm{fg}} + \varepsilon_g \sigma \left(T_{\mathrm{gel}}^4 - T_{\mathrm{cond}}^4\right),
+\label{eq:2}
+\end{equation}
+
+\noindent where $\rho$, $c_p$, $L$ are the density, heat capacity, and thickness of the condenser, respectively, and $h_{\mathrm{conv,cond}}$ is the convection heat transfer coefficient on the condenser finned surface facing the external environment. The first term on the right side represents the convective heating of the condenser by the hot hydrogel. The second term represents convective cooling of the condenser to the ambient air. The third term represents the heating due to condensation, which has an enthalpy of condensation $h_{\mathrm{fg}}$. The last term represents the heating due to thermal radiation from the hydrogel to the condenser surface. We take an approach similar to a previous study~\cite{lapotin2021} for modeling the condenser, prescribing a convective boundary condition at the condenser surface defined by $h_{\mathrm{amb}}$ and a fin area ratio $A_r = 7$, so that $h_{\mathrm{conv,cond}} = 7 h_{\mathrm{amb}}$, which is representative of our commercial fin array geometry and assumes an ideally efficient fin. The condenser is modeled identically to the hydrogel for absorption, with rapid convective cooling and fast thermal diffusion timescales relative to sorption times leading to approximate thermal equilibrium between the condenser and the ambient air during the absorption phase of device operation.
+
+During solar-driven desorption, the absorber temperature, $T_{\mathrm{abs}}$, and glass convective cover temperature, $T_{\mathrm{glass}}$, are related to the solar flux input through Equations~\ref{eq:3} and~\ref{eq:4}, respectively. Since the timescales for thermal diffusion in the glass and absorber are negligible, thermal energy storage within the glass and absorber are neglected in this heat transport model (Note~S1). Optical properties of the glass cover and absorber layer are likewise denoted in Table~S3 with material properties used in model.
+
+For the glass component energy balance,
+
+\begin{equation}
+0 = \frac{k_{\mathrm{air}}}{L_c}\left(T_{\mathrm{abs}} - T_{\mathrm{glass}}\right) + \sigma\left(T_{\mathrm{abs}}^4 - T_{\mathrm{glass}}^4\right) - h_{\mathrm{amb}}\left(T_{\mathrm{glass}} - T_{\mathrm{amb}}\right) - \sigma\left(T_{\mathrm{glass}}^4 - T_{\mathrm{amb}}^4\right),
+\label{eq:3}
+\end{equation}
+
+\noindent where the first right side is the heat conducted through the air gap with a thickness $L_c$ and air thermal conductivity $k_{\mathrm{air}}$. The second term is the radiation between absorber and glass, assuming blackbody surfaces in the infrared spectrum. The third term is the convective cooling of the glass to the ambient air. The fourth term is radiative heat losses from the glass to the ambient air. Absorber and glass, each $\sim$300~mm in length and width, are separated by a 5~mm air gap. Due to this high length-to-separation ratio for parallel plates, we prescribe a shape factor of 1 for radiation between absorber and glass~\cite{kaviany2011}.
+
+Considering the solar absorber, as described in Equation~\ref{eq:4},
+
+\begin{equation}
+0 = \varepsilon_{\mathrm{abs}} \tau_{\mathrm{glass}} Q_{\mathrm{solar}} - \frac{k_{\mathrm{air}}}{L_c}\left(T_{\mathrm{abs}} - T_{\mathrm{glass}}\right) - \sigma\left(T_{\mathrm{abs}}^4 - T_{\mathrm{glass}}^4\right) - U_{\mathrm{gel}}\left(T_{\mathrm{abs}} - T_{\mathrm{gel,s}}\right),
+\label{eq:4}
+\end{equation}
+
+\noindent where the transmittance of the glass and emissivity of the absorber in the solar spectrum are defined as $\tau_{\mathrm{glass}}$ and $\varepsilon_{\mathrm{abs}}$, respectively. The first term, which depends on the solar irradiance, $Q_{\mathrm{solar}}$, represents the radiative energy incident on the SAWH device that is converted to heat at the absorber. The second term is thermal conduction from the absorber to the glass, assuming that the air gap is thin enough to prevent convection. The third term is the radiative loss from the absorber to the glass. The fourth term is thermal conduction loss from the absorber to the hydrogel surface.
+
+Hydrogel-salt composites are typically limited by convective mass transfer of moisture outside of the hydrogel for a wide range of hydrogel thicknesses ($<$4~mm in its desorbed state) and external vapor mass transfer coefficients ($<$0.02~m/s), with a minimal role of water diffusion within the hydrogel~\cite{diazmarin2024b,diazmarin2024c}. Thus, we describe mass transfer as a function of temperature at the hydrogel and surrounding ambient air, scaled by a convection mass transfer coefficient $g_{\mathrm{conv}}$. Thus, mass transport in the system and hydrogel thickness evolution are governed by Equations~\ref{eq:5} and~\ref{eq:6}, respectively:
+
+\begin{equation}
+\frac{dc_w}{dt} = \frac{g_{\mathrm{conv}}}{H_0} \frac{p_{\mathrm{sat}}(T_{\mathrm{gel}})}{R T_{\mathrm{gel}}} \left(C_R - a_{w,s}(T_{\mathrm{gel}})\right)
+\label{eq:5}
+\end{equation}
+
+\begin{equation}
+\frac{dH}{dt} = \frac{MW_w}{\rho_{\mathrm{sol}}} \frac{p_{\mathrm{sat}}(T_{\mathrm{gel}})}{R T_{\mathrm{gel}}} \left(C_R - a_{w,s}(T_{\mathrm{gel}})\right)
+\label{eq:6}
+\end{equation}
+
+\noindent where $c_w$ is the water concentration in the hydrogel, $H$ is the hydrogel thickness, and $a_{w,s}$ is the chemical activity of water in a LiCl solution~\cite{campbell1979,atkins2006}. $C_R$ is the ratio of vapor concentration at the hydrogel temperature to the vapor concentration of the surrounding environment. Therefore, during absorption, when the hydrogel is exposed to ambient air, $C_R = RH = 0.5$, where $RH$ is the ambient RH, and the hydrogel and ambient air were considered at the same temperature. We initially consider for our device design $RH = 0.5$ to reflect typical operating conditions in a semi-arid climate at 25$^\circ$C. During absorption, $g_{\mathrm{conv}}$ is the mass transfer coefficient of moisture from the environment by convection. In contrast, during desorption, the SAWH device is sealed, and then $C_R = \frac{p_{\mathrm{sat}}(T_{\mathrm{cond}}) T_{\mathrm{gel}}}{p_{\mathrm{sat}}(T_{\mathrm{gel}}) T_{\mathrm{cond}}}$ is the relative vapor concentration between the condenser and hydrogel based on the temperature-dependent saturation pressure $p_{\mathrm{sat}}$. Additionally, during desorption, $g_{\mathrm{conv}}$ represents mass transfer from the hydrogel surface to the condenser. Notably, in this analysis we assume a saturation boundary condition at the condenser surface~\cite{lapotin2021,li2024b}. Consequently, our model assumes perfect condensation in the device with no vapor leakage to ambient air.
+
+\subsection{Optimal design from the device-level model}
+
+To solve the final, experimentally validated heat and mass transport model, we used a coupled control volume approach for our key component device. Specifically, all time-dependent energy balances for our coupled heat and mass transfer problem are iteratively solved using COMSOL v.6.2 for all times throughout a single day~\cite{comsol2021}. The ambient temperature $T_{\mathrm{amb}}$ is taken at a fixed 25$^\circ$C, and the solar flux input $Q_{\mathrm{solar}}$ is 600~W/m$^2$ unless noted otherwise. A convection heat transfer coefficient $h_{\mathrm{amb}}$ of 10~W/m$^2$K is used for both top and bottom surfaces of the device, mirroring an ambient breeze ($\sim$0.5~m/s) over a flat solar plate collector~\cite{uba2021}. Error is incorporated in our model in the form of a 25\% variation to this ambient heat transfer coefficient, $h_{\mathrm{amb}} = 10\left(\frac{\mathrm{W}}{\mathrm{m}^2\mathrm{K}}\right) \pm 2.5\left(\frac{\mathrm{W}}{\mathrm{m}^2\mathrm{K}}\right)$, thus capturing the inherent variability of ambient airflow during testing.
+
+Device productivity (LMD) quantifies how much water is produced by the system and scales as the time rate of change of water concentration in the hydrogel, $\frac{dc_w}{dt}$, per square meter of solar absorber surface area ($A_c$) per day, where each day has a 12-h absorption phase followed by a 12-h desorption phase. Thermal efficiency of the system, defined by Equation~\ref{eq:7}, is a measure of how well the system is utilizing supplied solar energy to harvest water from the sorbent material~\cite{wilson2023},
+
+\begin{equation}
+\eta_{\mathrm{thermal}} = \frac{m_w h_{\mathrm{fg}}}{Q_{\mathrm{solar}}},
+\label{eq:7}
+\end{equation}
+
+\noindent where $h_{\mathrm{fg}}$ is the heat of vaporization of water, and $m_w$ is the total daily mass of water collected. In a thermodynamically ideal case, considering both the sensible heating of the hydrogel and the enthalpy of desorption under operating conditions, the limit of our hydrogel's thermal efficiency is $\sim$88\% (Note~S3). Deviation from this thermal efficiency, which arises from thermal losses and mass transfer inefficiencies, is used as a performance metric to evaluate device designs as well as provide a benchmark for ideal SAWH using our hydrogel-salt composite.
+
+Using this heat and mass transport model for the SAWH device (Equations~\ref{eq:1}, \ref{eq:2}, \ref{eq:3}, \ref{eq:4}, \ref{eq:5}, and~\ref{eq:6}), we can parametrically sweep through various designs and operating conditions, allowing us to quantify the relationship between design variables and system performance. Cumulatively, our physical model of the SAWH device (Figure~\ref{fig:fig2}A) elucidates the significance of several design parameters that significantly impact heat and mass transfer in the device. We considered environmental conditions (humidity, ambient temperature, incident solar flux, and ambient convection coefficient) within expected conditions in outdoor conditions and device design parameters (optical properties of the glass cover and solar absorber, condenser finned area, hydrogel thickness, and vapor gap length) over a large range of values to elucidate the device physics and guide optimization. First, due to the radiative energy input for desorption from the sun, both absorber emissivity $\varepsilon_{\mathrm{abs}}$ and glass transmission $\tau_{\mathrm{glass}}$ must be maximized to produce the highest energy flux and, thus, daily water production (Figure~\ref{fig:fig2}B). As seen in Equation~\ref{eq:4}, this translates into higher heat into the solar absorber, which will then drive desorption of the hydrogel-salt composite. For low values of absorber emissivity ($\varepsilon_{\mathrm{abs}} = 0.2$), the hydrogel-salt composite does not heat up enough to produce any water, pointing to a minimum thermal requirement for SAWH.
+
+Additionally, Figure~\ref{fig:fig2}C demonstrates that a glass cover and finned condenser structure both significantly improve device productivity compared to a design without a cover or one with a flat plate condenser, regardless of heat transfer rates to ambient air. This highlights the role of a glass cover in increasing the hydrogel-salt composite temperature to drive efficient desorption while minimizing thermal losses. On the other hand, a colder condenser, as achieved by a larger condenser area, enhances the driving force for desorption, as captured in a lower concentration ratio $C_R$ in Equation~\ref{eq:6}. Interestingly, without a convection cover, lower convection coefficients lead to higher productivity due to lower thermal losses from the absorber, outweighing the impact of reduced condenser heat rejection. This trend is reversed when a convection cover is used. Ambient temperature and humidity also impact device productivity (Figure~\ref{fig:fig2}D), with higher humidity leading to more moisture captured during absorption relative to drier environments. Interestingly, despite the slightly negative impact of elevated temperature on equilibrium absorption of sorbent materials~\cite{liu2023}, and specifically of our PAM-LiCl composite~\cite{diazmarin2022c}, an increased ambient temperature improves device productivity at higher RH. Our device does not operate under equilibrium sorption conditions, as there is a fixed absorption time frame dictated by the day-night cycle. Additionally, an elevated temperature with a fixed RH means that the environment has an increased amount of moisture per unit volume of air (absolute humidity). The saturation pressure $p_{\mathrm{sat}}$ in Equation~\ref{eq:5} increases with temperature and results in faster kinetics for absorption relative to a lower-temperature case. For our fixed time frame and high-RH conditions, where absorption takes longer and equilibrium is not achieved~\cite{diazmarin2024b}, this equates to more moisture capture in the hydrogel-salt composite during absorption. However, the difference in temperature between the hydrogel and condenser surface is reduced due to ambient heating of the condenser at elevated temperatures. Therefore, the hydrogel-salt composite performs notably worse at higher ambient temperatures for low-RH conditions due to the hot condenser, coupled with the minimal increase of moisture absorption, leading to low mass transfer rates in the system.
+
+Furthermore, we demonstrate that for gap lengths less than 40~mm, heat transfer from the hydrogel surface to the condenser through the vapor gap becomes a significant heat loss pathway in the device. This also reduces the density gradient between the hydrogel surface and the condenser driving vapor transport, yielding less water output overall (Figure~\ref{fig:fig2}E). For gap lengths less than 7~mm, our system does not reach the critical Rayleigh number necessary for thermobuoyancy, and mass transport is significantly inhibited~\cite{hollands1976}. Therefore, we confine our analysis to a gap length greater than the critical Rayleigh length scale so that convection enables mass transport in the vapor gap. Additionally, at vapor gap lengths at or above 40~mm, the effect of heat loss from the hydrogel surface due to internal natural convection becomes less significant relative to mass transfer in the gap due to an inverse dependency of $h_{\mathrm{conv,g}}$ on vapor gap length. Balancing compactness with performance, we select a vapor gap length of 40~mm for our optimized design, minimizing hydrogel heat loss while maintaining a small device form factor. Other parameters, such as the thicknesses of the housing, absorber, glass, condenser, and silicone coating, which was used as an anti-corrosion coating, are minimized to reduce the impact on conductive heat transfer and heat storage in the device. To avoid heat loss due to natural convection in the insulating air gap, a gap thickness $L_c = 5$~mm is chosen for the design. This gap thickness will lead to a Rayleigh number below the critical value, ensuring conduction heat transfer in the insulating air gap~\cite{hollands1976}. Black spray paint with an estimated emissivity of $\varepsilon_{\mathrm{abs}} = 0.95$ and borosilicate glass with an estimated transmission of $\tau_{\mathrm{glass}} = 0.9$ are selected to maximize performance while minimizing cost relative to higher-emissivity solar absorbers and higher-transparency materials.
+
+The performance of our device was found to be highly sensitive to initial hydrogel thickness $H_0$ as well. Thick hydrogels have the potential to store more water from ambient air during absorption; however, they will correspondingly store more energy as sensible heating and increase the resistance to thermal conduction, reducing the rate of desorption from the hydrogel surface. Therefore, there exists a balance between hydrogel thickness and solar irradiance, where the large water uptake of a thicker hydrogel makes it more advantageous than a thinner counterpart at high solar fluxes, as there is sufficient energy to desorb the larger amount of water contained within the hydrogel per square meter. In conclusion, we find that, for the average incident solar flux experienced in the summertime in Cambridge, Massachusetts, 600~W/m$^2$, a hydrogel thickness $H_0 = 4$~mm is optimal for both device productivity and thermal efficiency (Figure~\ref{fig:fig2}F).
+
+\section{Results}
+
+\subsection{Experimental characterization of the device in an urban area}
+
+Urban testing of our optimized device took place on the rooftop of MIT in Cambridge, Massachusetts, on June 3, 2024 (Figure~\ref{fig:fig3}A). During the evening absorption phase, our hydrogel stage was placed in a room adjacent to the roof and exposed to $\sim$50\% RH for 12~h. We began the desorption phase of testing by placing the hydrogel stage into the device and clamping it down to the condenser plate using 15 M3 bolts placed around the perimeter of the hydrogel stage using custom-machined steel spacers (Note~S2). The device was then adjusted using a 3-leg pivot system to an angle of $\sim$35$^\circ$ and faced toward the sun zenith to maximize solar exposure~\cite{tutiempo2024}. The device was moved periodically during the test to account for shading from local buildings and sun motion. In total, we estimate that the device was moved 3 times throughout the day, which was simple due to the lightweight and portable design. Incident solar flux was recorded using a nearby MIT weather station, averaging 639~W/m$^2$ for the 9-h daytime desorption test. We placed 4 thermocouples throughout our device to experimentally validate our thermofluidic model, with one on the glass cover, one on the black solar absorber surface, one on the condenser surface at the base of the fin array, and one exposed to ambient air behind the device. Testing began at 9:15~a.m.\ EST and ended at 6:00~p.m.\ EST. Water output was recorded throughout testing via a graduated cylinder hermetically secured to the outlet port, with a release valve in case of internal pressure buildup.
+
+Throughout this daytime desorption test, we achieved a high temperature for the solar absorber and maintained the condenser surface at a near-ambient temperature. As shown in Figure~\ref{fig:fig3}B, the temperature of the solar absorber, condenser, and glass surface all agree well with our heat and mass transport model of the system, highlighting the accuracy of our model and, thus, the optimal design of our water-harvesting device. Indeed, our numerical model predicts $\sim$130~mL of total water output given the recorded solar flux (Figure~\ref{fig:fig3}C), which matches our observed water yield for the day. Furthermore, our device was weighed before and after the desorption phase, showing good agreement with the recorded water output data shown in Figure~\ref{fig:fig3}C ($\Delta m_{\mathrm{gel}} = 131$~g), and, thus, we conclude that no significant vapor leakage occurred throughout the experiment. For this urban test, we achieved a cumulative water productivity of 1.7~L/m$^2$/day with a thermal efficiency of 16\%.
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering \vspace{4cm} \textit{[Figure 3: Experimental results of the SAWH device in an urban environment --- rooftop setup (A); measured vs. modeled temperatures (B); solar flux and water output over 9~h (C).]} \vspace{4cm}}}
+\caption{\textbf{Experimental results of the SAWH device in an urban environment} \\
+(A) Experimental setup of the device on a rooftop in Cambridge, Massachusetts. \\
+(B) Measured temperatures on the absorber, glass, and condenser show good agreement between the thermofluidic model and experimental results. \\
+(C) Incident solar flux and water output data over the 9-h testing period, showing time-dependent water output from the device.}
+\label{fig:fig3}
+\end{figure}
+
+\subsection{Extreme outdoor testing in the Atacama Desert, Chile}
+
+Additionally, we deployed our system in the Atacama Desert outside Antofagasta, Chile, to demonstrate water production in a rural, arid environment where grid-level energy and water are not readily available (Figure~\ref{fig:fig4}A). Spanning over 900~km at an altitude up to 5,700~m, the Atacama Desert is the driest non-polar desert in the world, with some areas receiving less than 1~mm of rain annually~\cite{bull2018}. For testing in this extreme environment, we followed an experimental procedure similar to our urban testing, except for a fixed water outlet container rather than a graduated cylinder. Therefore, only cumulative water production is presented. Ambient conditions, including temperature and humidity during absorption as well as incident solar flux during desorption, were measured by a local weather station of the Ckoirama Observatory of the University of Antofagasta, Chile. Ambient airflow was not measured but varied substantially over the course of the day, with wind speeds ranging from 1 to 15~mph. Therefore, we used a fitted value $h_{\mathrm{amb}} = 1$~W/m$^2$K in our model and increased it to 10~W/m$^2$K at 2~p.m.\ to account for the sudden desert wind we observed during testing. We placed the hydrogel stage outside overnight, exposed to desert conditions, on May 8, 2024, with an average temperature of 11$^\circ$C and a RH of 38\% during the 12-h absorption phase. These conditions are challenging for SAWH devices due to the low moisture content at low temperatures and low humidity, demonstrating the extreme conditions of these tests. We installed the hydrogel stage into the SAWH device at 8~a.m.\ local time following the absorption phase and exposed the solar absorber stage to the sun at an optimal solar irradiance angle $\sim$25$^\circ$ from horizontal~\cite{tutiempo2024}. Similar to previous testing, the device was moved periodically to account for shading from local buildings and motion of the sun. In total, we estimate that the device was moved 3 times throughout the day, which was simple due to its lightweight and portable design.
+
+The solar flux averaged 517~W/m$^2$ during the 8-h desorption test. During desorption, the ambient humidity decreased from $\sim$38\% RH to $\sim$15\% RH, while the temperature increased from $<$5$^\circ$C to $\sim$28$^\circ$C, reflecting the extreme conditions and temperature changes of the desert (Figure~\ref{fig:fig4}B). The solar absorber reached a temperature of $\sim$70$^\circ$C, reflecting the effective conversion of sunlight to heat and the thermal isolation due to the air gap between the glass and absorber. This role of the air gap can be further observed by the considerably lower temperature of the glass cover relative to the absorber. The condenser operated at slightly higher-than-ambient temperatures, as expected by the heat released by condensation and the heat transfer from the hot hydrogel-salt composite. We achieved a temperature difference of $\sim$35$^\circ$C between condenser and absorber, which drove desorption even in an extremely dry environment due to the reduced $C_R$, which must be lower than the absorption RH (Figure~\ref{fig:fig4}C and Equation~\ref{eq:5}). We also highlight that our model accurately predicts the observed temperatures in all components of our device, taking into account the time-varying weather conditions (Figure~\ref{fig:fig4}D). This reinforces the validity of our model as an optimization framework and as a performance prediction tool. Altogether, we achieved a water productivity of 0.62~L/m$^2$/day with a thermal efficiency of 9.3\%. These values were lower than those of our tests in Cambridge, reflecting the very challenging conditions of these tests in the Atacama Desert with low humidity, low temperature, and low irradiance. However, as will be discussed in the next section, they represent notable performance improvements under these environmental conditions.
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering \vspace{4cm} \textit{[Figure 4: Results of outdoor testing in the Atacama Desert --- device in operation (A); RH, temperature, and solar irradiance over absorption/desorption (B); measured vs. modeled temperatures (C); actual vs. predicted water output (D).]} \vspace{4cm}}}
+\caption{\textbf{Results of outdoor testing in the Atacama Desert} \\
+(A and B) Image of the device in operation (A) as well as (B) humidity, temperature, and solar irradiance in the extreme arid environment for the absorption and desorption phases of testing. \\
+(C) Measured and predicted system temperatures in good agreement for outdoor testing in the Atacama Desert. \\
+(D) Actual and predicted water output from the device for this test.}
+\label{fig:fig4}
+\end{figure}
+
+\section{Discussion}
+
+Validation of our thermofluidic model through real outdoor experiments allows us to further draw conclusions about the system based on first-principles. One such observation is the significance of radiative and conductive losses from the absorber to the glass during desorption. Based on the incident solar flux, our system has a maximum thermodynamic efficiency of $\sim$88\% (Note~S3). Our thermofluidic model allows us to investigate the energy loss pathways that lead to a decrease in thermal efficiency, and an energy breakdown of the solar absorber for one such use case is shown in Figure~S3. While the system efficiently uses the thermal energy conducted through the absorber plate to harvest water from the hygroscopic hydrogel, it does not sequester a substantial amount of the original incident solar flux. Motivated in part by maintaining a low device cost, some energy loss is intrinsic to the choice of materials, such as the borosilicate glass~\cite{bassarab2023} ($\tau_{\mathrm{glass}} = 0.9$) and black paint absorber ($\varepsilon_{\mathrm{abs}} = 0.95$). In total, only 35.5\% of the incident solar energy propagated to the hydrogel surface during our device testing in Cambridge, Massachusetts (Note~S3). Future work may further improve the efficiency of this passive SAWH device architecture by deploying a vacuum air gap between the absorber and glass, reducing conduction losses through the air, or by implementing a less absorptive wind cover or a less radiative absorber material. However, design changes will need to consider both performance improvements and additional incurred costs to maintain an affordable system for water harvesting.
+
+To quantify the potability of water produced by our device, we tested several samples from outdoor device operation. Figure~\ref{fig:fig5}A shows results of water quality compared to current EPA standards for common drinking water contaminants~\cite{epa2023}. We quantified contaminant concentration in solution using inductively coupled plasma optical emission spectrometry (Agilent 5100)~\cite{wilschefski2019} and compared it to a commercial water quality standard (Note~S4). Overall, concentrations of silver, magnesium, indium, iron, copper, and potassium all laid significantly below acceptable levels for human consumption. However, lithium and aluminum are present in concentrations slightly above acceptable limits for drinking water in the water samples procured from outdoor experimental testing (Figure~\ref{fig:fig3}). We hypothesize that this contamination is a direct result of an unclean condenser, as lithium chloride salt from handling the hydrogel and aluminum from an unideal sanding of the condenser surface would contribute to the high levels of lithium and aluminum in the water output. For future practitioners, this highlights the need for a clean, well-machined condenser surface, free of contaminants, when deploying our technology in the future for practical human use.
+
+Additionally, we evaluated our atmospheric water-harvesting device on a cost basis to quantify the levelized cost of water (LCOW) as a function of system lifetime, given current material choices and fabrication strategies~\cite{siegel2020}. Details of this technoeconomic analysis are summarized in Note~S4. In total, our system costs \$56--\$166/m$^2$, leading to a LCOW comparable to that of tap water in Boston, Massachusetts~\cite{bwsc2024}, for a device lifetime of 20 years (Figure~\ref{fig:fig5}B). Currently, the device lifetime is feasible, as no system component will intrinsically fail in under 20 years; however, significant additional work in cyclic testing is required to support this conclusion.
+
+Comparison of various SAWH devices is difficult, as drawing parallels between systems requires knowledge of the entire device as well as environmental testing conditions for both absorption and desorption. We attempt to remedy this (Figure~\ref{fig:fig5}) by providing both testing conditions (Figure~\ref{fig:fig5}C) and performance metrics (Figure~\ref{fig:fig5}D) for several recently developed sorbent-based devices~\cite{xu2021,li2022,lapotin2021,shao2023,song2023,zhou2023}. In this discussion, we focus only on outdoor evaluation of a device, where the nonidealities of testing conditions more rigorously evaluate the system design compared to a controlled laboratory environment. Due to our holistic approach to SAWH design and thermofluidic optimization of key system components, our device achieves high water productivity in humidities lower than current state of the art and does so with improved thermal efficiency. By designing for efficient use of solar thermal energy and controlling the vapor pathway, we demonstrate how system-level variables can impact the performance of a sorption material. Overall, our design strategy and execution lead to improved SAWH performance, even under desert conditions, and illustrate a pathway for future improvement of a wide range of solar-driven SAWH systems.
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering \vspace{4cm} \textit{[Figure 5: Water quality, technoeconomic evaluation, and performance comparison --- contaminant concentrations vs. EPA standards (A); LCOW vs. device lifetime (B); testing conditions of published devices (C); thermal efficiency and productivity comparison (D).]} \vspace{4cm}}}
+\caption{\textbf{Water quality, technoeconomic evaluation of the system, and performance comparison with current published passive SAWH devices} \\
+(A) Water quality compared to EPA standards for drinking water in the US~\cite{epa2023}. All elements of concern fall below acceptable levels for drinking water, except lithium and aluminum, which are present as a direct result of an unclean condenser surface. \\
+(B) Technoeconomic analysis of the SAWH device, both actively and passively cooled versions, compared to bottled water and tap water in two major US cities. For a material lifetime of 1 year, a device lifetime of $>$1 year results in our device being a cost-competitive water source compared to bottled water. \\
+(C) Extreme operating conditions found during outdoor testing of the devices. \\
+(D) Resulting thermal efficiency and productivity of systems, highlighting our performance with respect to thermal efficiency and water productivity for passive SAWH devices.}
+\label{fig:fig5}
+\end{figure}
+
+\section{Conclusion}
+
+In this work, we demonstrated effective system-level design, optimization, fabrication, and implementation of a passive solar-driven SAWH device. We developed a heat and mass transport model of our passive SAWH device and leveraged it to identify key system parameters that significantly impact both the productivity and thermal efficiency of our hydrogel-salt composite. Then, we optimized our device design by selecting parameters that maximize water productivity and thermal efficiency in a semi-arid environment. After fabricating our optimized system, we tested in an urban environment similar to previous studies and demonstrated a productivity of 1.7~L/m$^2$/day with a thermal efficiency of 16\%. Finally, we tested our hydrogel device in the Atacama Desert to quantify performance in a realistic, water-scarce environment with extreme weather conditions. By focusing on the system rather than the material, we are able to demonstrate high performance in both a controlled outdoor environment and an extreme desert environment, leveraging a hydrogel-salt composite for practical, cost-effective water harvesting using solar energy. Our model framework has the potential to be applied for future versions of passive devices, further improving performance by designing systems that fully leverage selected sorbents in SAWH applications.
+
+\section{Methods}
+
+\subsection{Synthesis of PAM-LiCl hydrogels}
+
+We synthesized our hydrogel-salt composite via radical polymerization of acrylamide monomers (AMs; Sigma-Aldrich) in an aqueous solution of LiCl (Sigma-Aldrich). Our composite was fabricated to achieve 4~g salt/1~g polymer. The water-to-salt concentration was chosen so that the hydrogel was at equilibrium with an ambient at 20\% RH. First, we dissolved 173.36~g of LiCl in 477.8~mL of deionized water and stirred the solution until it reached room temperature, for approximately $\sim$1~h. Then, we added 44.68~g AM and stirred for an additional 15~min. Next, we added 0.1518~g ammonium persulfate (Sigma-Aldrich), 0.267~g N,N'-methylenebisacrylamide (Sigma-Aldrich), and 128.3~$\mu$L tetramethylethylenediamine (Sigma-Aldrich) to the solution, stirred for 1~min, and poured the solution directly into the hydrogel stage of the device. The hydrogel-salt composite polymerized rapidly but was allowed 6~h to set prior to use to ensure equilibrium.
+
+\subsection{DVS experiments}
+
+We characterized the sorption isotherm of our PAM-LiCl hydrogel-salt composite using the DVS vacuum instrument (Surface Measurement Systems). To do so, we first dried a 30~g sample at 80$^\circ$C for 6~h, followed by thermal equilibration at 25$^\circ$C for 4~h. Then, we recorded the mass rate of change of our sample as a function of time for a series of 5\% RH steps, ranging from 0\% to 90\%, by controlling the vapor pressure of water vapor at 25$^\circ$C. The sample was allowed to equilibrate at each humidity step, where the continuation criterion was set to a sample mass change less than 0.002~wt\%/min to ensure isotherm precision. Finally, the measurements halted at 90\% RH for a set 90~min, with a maximum testing duration of 10,000~min.
+
+\subsection{Fabrication of the device}
+
+Commercial black spray paint was applied directly to an aluminum stage and used as the solar absorber for our final device. Aluminum was used as the structural interfacial material between the paint and hydrogel rather than a more conductive material, such as copper, due to the low cost of bulk aluminum. Acrylic was used as the vapor barrier for desorption, preventing leakages while confining vapor transport to between the hydrogel and condenser surface only, and commercial polyisocyanurate board foam (Lowe's) was used as a thermal barrier to minimize heat leakage from the absorber to ambient air. For successful vapor confinement, we designed dynamic sealing surfaces perpendicular to the direction of device clamping. This incites a maximal sealing pressure and thus inhibits leakage from the vapor gap to ambient air. Food-grade ethylene propylene diene monomer rubber was used as the gasket material at the dynamic seal to prevent vapor leakage while minimizing potential contamination. Additionally, all material interfaces are permanently sealed with either a silicone-based sealant (GE Advanced Silicone Caulk) or water-resistant adhesive (J-B Weld MarineWeld) depending on a free or load-bearing interfacial surface, respectively. An aluminum heat sink with an area ratio $A_r = 5$ was machined to fit into the aluminum housing of the device (Tyenaza, Amazon.com) and interfaced with the backside of the condenser surface using Super Lube 98003 Silicone Heat Sink Compound. Extended details regarding device fabrication can be found in Note~S2. During absorption, all mounting bolts are removed, and the top hydrogel stage is disconnected from the body of the device and placed out in the open for moisture capture. When transitioning to desorption, the hydrogel stage is re-installed onto the top of the device and mounted to the body using M3 screws and threaded bolts. Detailed computer-aided design snapshots labeling components are shown in Figure~S2.
+
+\section*{Resource Availability}
+
+\subsection*{Lead contact}
+Requests for further information and resources should be directed to and will be fulfilled by the lead contact, Chad T. Wilson (\texttt{wilsonct@mit.edu}).
+
+\subsection*{Materials availability}
+This study did not generate unique materials or chemicals.
+
+\subsection*{Data and code availability}
+All data in this study are available within the article and supplemental information. Weather data cited here are available upon request.
+
+\section*{Acknowledgments}
+C.T.W. and B.E.F. acknowledge financial support from the Defense Advanced Research Projects Agency (DARPA) Atmospheric Water Extraction (AWE) program under contract HR001120S0014. C.D.D.-M. acknowledges financial support from the Office of Energy Efficiency and Renewable Energy for funding under grant DE-EE0009679 and the MIT Martin Family Sustainability Fellowship. J.P.M.\ gratefully acknowledges the support from the EU Commission Marie Sk{\l}odowska-Curie Actions Fellowship under grant 101059502. We gratefully acknowledge financial support from the MIT Sloan Latin America Office through a seed fund. We gratefully acknowledge Carlos Araya, Felipe Gallardo, and Cristian Baquedano for their valuable assistance in the field tests in Chile. This work made use of the MRSEC Shared Experimental Facilities at MIT, supported by the National Science Foundation under award DMR-1419807. We gratefully acknowledge the supervision and mentorship of Prof.\ Gang Chen. C.D.D.-M., C.T.W., and B.E.F.\ gratefully acknowledge their advisor, Prof.\ Evelyn N. Wang, for her guidance on this work until the date of her confirmation (12/22/2022) by the US Senate to serve as director of the Advanced Research Projects Agency-Energy.
+
+\section*{Author Contributions}
+C.T.W.\ and C.D.D.-M.\ conceived the research idea. C.T.W.\ and C.D.D.-M.\ built the model, conducted experiments, and analyzed the data. C.T.W.\ designed and fabricated the device. J.P.C.\ contributed to experiments in the Atacama Desert. J.P.M.\ contributed to experiments in Cambridge, Massachusetts. B.E.F.\ contributed to the technical discussions. All authors contributed to the manuscript writing.
+
+\section*{Declaration of Interests}
+The authors declare no competing interests.
+
+\section*{Supplemental Information}
+Supplemental information can be found online at \url{https://doi.org/10.1016/j.device.2025.100798}.
+
+\medskip
+\noindent Received: October 20, 2024 \\
+Revised: March 3, 2025 \\
+Accepted: April 16, 2025 \\
+Published: May 9, 2025
+
+% ---------------- References ----------------
+\begin{thebibliography}{99}
+
+\bibitem{schlosser2014} Schlosser, C.A., Strzepek, K., Gao, X., Fant, C., Blanc, {\'E}., Paltsev, S., Jacoby, H., Reilly, J., and Gueneau, A. (2014). The future of global water stress: An integrated assessment. Earth's Futur. \textbf{2}, 341--361.
+
+\bibitem{sharma2017} Sharma, S., and Bhattacharya, A. (2017). Drinking water contamination and treatment techniques. Appl. Water Sci. \textbf{7}, 1043--1067.
+
+\bibitem{dolan2021} Dolan, F., Lamontagne, J., Link, R., Hejazi, M., Reed, P., and Edmonds, J. (2021). Evaluating the economic impact of water scarcity in a changing world. Nat. Commun. \textbf{12}, 1915.
+
+\bibitem{elmaadawy2020} Elmaadawy, K., Kotb, K.M., Elkadeem, M.R., Sharshir, S.W., D{\'a}n, A., Moawad, A., and Liu, B. (2020). Optimal sizing and techno-enviro-economic feasibility assessment of large-scale reverse osmosis desalination powered with hybrid renewable energy sources. Energy Convers. Manag. \textbf{224}, 113377.
+
+\bibitem{ghaffour2013} Ghaffour, N., Missimer, T.M., and Amy, G.L. (2013). Technical review and evaluation of the economics of water desalination: Current and future challenges for better water supply sustainability. Desalination \textbf{309}, 197--207.
+
+\bibitem{fukuda2019} Fukuda, S., Noda, K., and Oki, T. (2019). How global targets on drinking water were developed and achieved. Nat. Sustain. \textbf{2}, 429--434.
+
+\bibitem{rao2022} Rao, A.K., Fix, A.J., Yang, Y.C., and Warsinger, D.M. (2022). Thermodynamic limits of atmospheric water harvesting. Energy Environ. Sci. \textbf{15}, 4025--4037.
+
+\bibitem{lord2021} Lord, J., Thomas, A., Treat, N., Forkin, M., Bain, R., Dulac, P., Behroozi, C.H., Mamutov, T., Fongheiser, J., Kobilansky, N., et al. (2021). Global potential for harvesting drinking water from air using solar energy. Nature \textbf{598}, 611--617.
+
+\bibitem{zeng2024} Zeng, W., You, T., and Wu, W. (2024). Passive atmospheric water harvesting: Materials, devices, and perspectives. Nano Energy \textbf{125}, 109572.
+
+\bibitem{zhang2022} Zhang, Y., and Tan, S.C. (2022). Best practices for solar water production technologies. Nat. Sustain. \textbf{5}, 554--556.
+
+\bibitem{curto2021} Curto, D., Franzitta, V., and Guercio, A. (2021). A review of the water desalination technologies. Appl. Sci. \textbf{11}, 670.
+
+\bibitem{lee2012} Lee, A., Moon, M.W., Lim, H., Kim, W.D., and Kim, H.Y. (2012). Water harvest via dewing. Langmuir \textbf{28}, 10183--10191.
+
+\bibitem{kalmutzki2018} Kalmutzki, M.J., Diercks, C.S., and Yaghi, O.M. (2018). Metal--Organic Frameworks for Water Harvesting from Air. Adv. Mater. \textbf{30}, e1704304--e1704326.
+
+\bibitem{kayal2016} Kayal, S., Baichuan, S., and Saha, B.B. (2016). Adsorption characteristics of AQSOA zeolites and water for adsorption chillers. Int. J. Heat Mass Transf. \textbf{92}, 1120--1127.
+
+\bibitem{kallenberger2018} Kallenberger, P.A., and Fr{\"o}ba, M. (2018). Water harvesting from air with a hygroscopic salt in a hydrogel-derived matrix. Commun. Chem. \textbf{1}, 6--11.
+
+\bibitem{zhao2019} Zhao, F., Zhou, X., Liu, Y., Shi, Y., Dai, Y., and Yu, G. (2019). Super Moisture-Absorbent Gels for All-Weather Atmospheric Water Harvesting. Adv. Mater. \textbf{31}, e1806446.
+
+\bibitem{diazmarin2022a} D{\'i}az-Mar{\'i}n, C.D., Zhang, L., Fil, B.E., Lu, Z., Alshrah, M., Grossman, J.C., and Wang, E.N. (2022). Heat and mass transfer in hygroscopic hydrogels. Int. J. Heat Mass Transf. \textbf{195}, 1--66.
+
+\bibitem{guo2020} Guo, Y., Bae, J., Fang, Z., Li, P., Zhao, F., and Yu, G. (2020). Hydrogels and Hydrogel-Derived Materials for Energy and Water Sustainability. Chem. Rev. \textbf{120}, 7642--7707.
+
+\bibitem{li2023} Li, T., Yan, T., Wang, P., Xu, J., Huo, X., Bai, Z., Shi, W., Yu, G., and Wang, R. (2023). Scalable and efficient solar-driven atmospheric water harvesting enabled by bidirectionally aligned and hierarchically structured nanocomposites. Nat. Water \textbf{1}, 971--981.
+
+\bibitem{zhong2024} Zhong, Y., Zhang, L., Li, X., El Fil, B., D{\'i}az-Mar{\'i}n, C.D., Li, A.C., Liu, X., LaPotin, A., and Wang, E.N. (2024). Bridging materials innovations to sorption-based atmospheric water harvesting devices. Nat. Rev. Mater. \textbf{9}, 681--698.
+
+\bibitem{lu2022} Lu, H., Shi, W., Zhang, J.H., Chen, A.C., Guan, W., Lei, C., Greer, J.R., Boriskina, S.V., and Yu, G. (2022). Tailoring the Desorption Behavior of Hygroscopic Gels for Atmospheric Water Harvesting in Arid Climates. Adv. Mater. \textbf{34}, e2205344--e2205348.
+
+\bibitem{graeber2023} Graeber, G., D{\'i}az-Mar{\'i}n, C.D., Gaugler, L.C., Zhong, Y., Fil, B.E., Liu, X., and Wang, E.N. (2023). Extreme Water Uptake of Hygroscopic Hydrogels Through Maximized Swelling-Induced Salt Loading. Adv. Mater. \textbf{36}, 1--28.
+
+\bibitem{entezari2020} Entezari, A., Ejeian, M., and Wang, R. (2020). Super Atmospheric Water Harvesting Hydrogel with Alginate Chains Modified with Binary Salts. ACS Mater. Lett. \textbf{2}, 471--477.
+
+\bibitem{xu2024} Xu, J., Huo, X., Yan, T., Wang, P., Bai, Z., Chao, J., Yang, R., Wang, R., and Li, T. (2024). All-in-one hybrid atmospheric water harvesting for all-day water production by natural sunlight and radiative cooling. Energy Environ. Sci. \textbf{17}, 4988--5001.
+
+\bibitem{xu2021} Xu, J., Li, T., Yan, T., Wu, S., Wu, M., Chao, J., Huo, X., Wang, P., and Wang, R. (2021). Ultrahigh solar-driven atmospheric water production enabled by scalable rapid-cycling water harvester with vertically aligned nanocomposite sorbent. Energy Environ. Sci. \textbf{14}, 5979--5994.
+
+\bibitem{park2022} Park, H., Haechler, I., Schnoering, G., Ponte, M.D., Schutzius, T.M., and Poulikakos, D. (2022). Enhanced Atmospheric Water Harvesting with Sunlight-Activated Sorption Ratcheting. ACS Appl. Mater. Interfaces \textbf{14}, 2237--2245.
+
+\bibitem{meng2022} Meng, Y., Dang, Y., and Suib, S.L. (2022). Materials and devices for atmospheric water harvesting. Cell Rep. Phys. Sci. \textbf{3}, 100976.
+
+\bibitem{wilson2023} Wilson, C.T., Cha, H., Zhong, Y., Li, A.C., Lin, E., and El Fil, B. (2023). Design considerations for next-generation sorbent-based atmospheric water-harvesting devices. Device \textbf{1}, 100052.
+
+\bibitem{li2022} Li, T., Wu, M., Xu, J., Wang, P., Bai, Z., Wang, R., Du, R., Yan, T., and Wang, S. (2022). Simultaneous atmospheric water production and 24-hour power generation enabled by moisture-induced energy harvesting. Nat. Commun. \textbf{13}, 6771.
+
+\bibitem{lapotin2021} LaPotin, A., Zhong, Y., Zhang, L., Zhao, L., Leroy, A., Kim, H., Rao, S.R., and Wang, E.N. (2021). Dual-Stage Atmospheric Water Harvesting Device for Scalable Solar-Driven Water Production. Joule \textbf{5}, 166--182.
+
+\bibitem{lapotin2019} LaPotin, A., Kim, H., Rao, S.R., and Wang, E.N. (2019). Adsorption-Based Atmospheric Water Harvesting: Impact of Material and Component Properties on System-Level Performance. Acc. Chem. Res. \textbf{52}, 1588--1597.
+
+\bibitem{diazmarin2024} Diaz-Marin, C., Masetti, L., Roper, M., and Grossman, J. (2024). Physics-based prediction of moisture-capture properties of hydrogels. Nat. Commun. \textbf{15}, 8948.
+
+\bibitem{kim2018} Kim, H., Rao, S.R., Kapustin, E.A., Zhao, L., Yang, S., Yaghi, O.M., and Wang, E.N. (2018). Adsorption-based atmospheric water harvesting device for arid climates. Nat. Commun. \textbf{9}, 1191--1198.
+
+\bibitem{sawka2005} Sawka, M.N., Cheuvront, S.N., and Carter, R., 3rd. (2005). Human Water Needs. Nutr. Rev. \textbf{63}, S30--S39.
+
+\bibitem{fuentes2021} Fuentes, I., Fuster, R., Avil{\'e}s, D., and Vervoort, W. (2021). Water scarcity in central Chile: the effect of climate and land cover changes on hydrologic resources. Hydrol. Sci. J. \textbf{66}, 1028--1044.
+
+\bibitem{aitken2016} Aitken, D., Rivera, D., Godoy-Fa{\'u}ndez, A., and Holzapfel, E. (2016). Water scarcity and the impact of the mining and agricultural sectors in Chile. Sustain. Times \textbf{8}, 128.
+
+\bibitem{diazmarin2022b} D{\'i}az-Mar{\'i}n, C.D., Zhang, L., Fil, B.E., Lu, Z., Alshrah, M., Grossman, J.C., and Wang, E.N. (2022). Heat and mass transfer in hygroscopic hydrogels. Int. J. Heat Mass Transf. \textbf{195}, 1--66.
+
+\bibitem{diazmarin2022c} D{\'i}az-Mar{\'i}n, C.D., Zhang, L., Lu, Z., Alshrah, M., Grossman, J.C., and Wang, E.N. (2022). Kinetics of Sorption in Hygroscopic Hydrogels. Nano Lett. \textbf{22}, 1100--1107.
+
+\bibitem{li2024} Li, X., El Fil, B., Li, B., Graeber, G., Li, A.C., Zhong, Y., Alshrah, M., Wilson, C.T., and Lin, E. (2024). Design of a Compact Multicyclic High-Performance Atmospheric Water Harvester for Arid Environments. ACS Energy Lett. \textbf{9}, 3391--3399.
+
+\bibitem{hollands1976} Hollands, K.G.T., Unny, T.E., Raithby, G.D., and Konicek, L. (1976). Free convective heat transfer across inclined air layers. J. Heat Transfer \textbf{98}, 189--193.
+
+\bibitem{diazmarin2024b} D{\'i}az-Mar{\'i}n, C.D., Masetti, L., Roper, M.A., and Grossman, J.C. (2024). Physics-based prediction of moisture-capture properties of hydrogels. Nat. Commun. \textbf{15}, 8948.
+
+\bibitem{diazmarin2024c} D{\'i}az-Mar{\'i}n, C.D., Deshmukh, A., Roper, M.A., Lienhard, J.H., and Chen, G. (2024). Dynamic water absorption-desorption by aqueous salt solutions. Cell Reports Phys. Sci. \textbf{5}, 101929.
+
+\bibitem{campbell1979} Campbell, A.N., and Bhatnagar, O.N. (1979). Osmotic and activity coefficients of lithium chloride in water from 50 to 150$^\circ$C. Can. J. Chem. \textbf{57}, 2542--2545.
+
+\bibitem{atkins2006} Atkins, P., and Paula, J. de (2006). Atkins' Physical Chemistry, Eighth Edition (Oxford University Press).
+
+\bibitem{li2024b} Li, X., El Fil, B., Li, B., Graeber, G., Li, A.C., Zhong, Y., Alshrah, M., Wilson, C.T., and Lin, E. (2024). Design of a Compact Multicyclic High-Performance Atmospheric Water Harvester for Arid Environments. ACS Energy Lett. \textbf{9}, 3391--3399.
+
+\bibitem{comsol2021} COMSOL (2021). COMSOL Multiphysics\textregistered\ V.~6.2 (Stockholm, Sweden: COMSOL AB).
+
+\bibitem{uba2021} Uba, F., Essandoh, E.O., Akolgo, G.A., Opoku, R., Oppong-Kyereh, L., and Gyimah, E.A. (2021). Experimental Estimation of the Heat Transfer Coefficient of an Unglazed Solar Plate for Unsteady Humid Outdoor Condition. Model. Simul. Eng. \textbf{2021}, 1--12.
+
+\bibitem{liu2023} Liu, X., Zhang, L., El Fil, B., D{\'i}az-Mar{\'i}n, C.D., Zhong, Y., Li, X., Lin, S., and Wang, E.N. (2023). Unusual Temperature Dependence of Water Sorption in Semicrystalline Hydrogels. Adv. Mater. \textbf{35}, e2211763.
+
+\bibitem{tutiempo2024} Tutiempo Network, S.L. (2024). TuTiempo.net. \url{https://en.tutiempo.net/solar-radiation/}.
+
+\bibitem{bull2018} Bull, A.T., Andrews, B.A., Dorador, C., and Goodfellow, M. (2018). Introducing the Atacama Desert. Antonie Leeuwenhoek \textbf{111}, 1269--1272.
+
+\bibitem{bassarab2023} Bassarab, V.V., Shalygin, V.A., Shakhmin, A.A., Sokolov, V.S., and Kropotov, G.I. (2023). Spectroscopy of a borosilicate crown glass in the wavelength range of 0.2~$\mu$m--15~cm. J. Opt. \textbf{25}, 065401.
+
+\bibitem{epa2023} Office of Water, EPA 823-B.-23-001 (2023). Water Quality Standards Handbook -- Chapter 3: Water Quality Criteria (US Environmental Protection Agency), pp.~1--48.
+
+\bibitem{wilschefski2019} Wilschefski, S.C., and Baxter, M.R. (2019). Inductively Coupled Plasma Mass Spectrometry: Introduction to Analytical Aspects. Clin. Biochem. Rev. \textbf{40}, 115--133.
+
+\bibitem{siegel2020} Siegel, N.P., and Conser, B. (2020). A techno-economic analysis of solar-driven atmospheric water harvesting. In Energy Sustainability (American Society of Mechanical Engineers), pp.~1--9.
+
+\bibitem{bwsc2024} Commission, B.W. (2024). Current Water, Sewer, and Stormwater Rates. \url{https://www.bwsc.org/residential-customers/rates}.
+
+\bibitem{shao2023} Shao, Z., Tang, Y.C., Lv, H., Wang, Z.S., Poredo\v{s}, P., Feng, Y., Sun, R., Feng, X., Chen, Z., Gao, Z., et al. (2023). High-performance solar-driven MOF AWH device with ultra-dense integrated modular design and reflux synthesis of Ni$_2$Cl$_2$(BTDD). Device \textbf{1}, 100058.
+
+\bibitem{song2023} Song, W., Zheng, Z., Alawadhi, A.H., and Yaghi, O.M. (2023). MOF water harvester produces water from Death Valley desert air in ambient sunlight. Nat. Water \textbf{1}, 626--634.
+
+\bibitem{zhou2023} Zhou, Z., Wang, G., Pei, X., and Zhou, L. (2023). Solar-powered MXene biopolymer aerogels for sorption-based atmospheric water harvesting. J. Clean. Prod. \textbf{425}, 138948.
+
+\bibitem{kaviany2011} Kaviany, M. (2011). Essentials of Heat Transfer: Principles, Materials, and Applications (Cambridge University Press).
+
+\end{thebibliography}
+
+\clearpage
+\appendix
+\renewcommand{\thesection}{S\arabic{section}}
+\setcounter{section}{0}
+\renewcommand{\thefigure}{S\arabic{figure}}
+\renewcommand{\thetable}{S\arabic{table}}
+\renewcommand{\theequation}{S\arabic{equation}}
+\setcounter{figure}{0}
+\setcounter{table}{0}
+\setcounter{equation}{0}
+
+\begin{center}
+{\LARGE \textbf{Supplemental Information}} \\[6pt]
+{\large Solar-driven atmospheric water harvesting in the Atacama Desert through physics-based optimization of a hygroscopic hydrogel device}\\[6pt]
+Chad T. Wilson, Carlos D. D{\'i}az-Mar{\'i}n, Juan Pablo Colque, Joseph P. Mooney, and Bachir El Fil
+\end{center}
+
+\section{Thermofluidic model structure and assumptions}
+
+For the hydrogel during desorption, we model thermal conductivity through the material prior to the desorption surface using a cumulative heat transfer coefficient
+\begin{equation}
+U_{\mathrm{gel}} = \left(\frac{L_{\mathrm{Al}}}{k_{\mathrm{Al}}} + \frac{L_{\mathrm{sil}}}{k_{\mathrm{sil}}} + \frac{L_{\mathrm{gel}}}{k_{\mathrm{eff}}}\right)^{-1},
+\end{equation}
+where $U_{\mathrm{gel}}$ is the total heat transfer coefficient through the aluminum, silicone coating, and hydrogel subassembly. Aluminum serves as the structural material to support the gel while propagating thermal heat, while a thin silicone coating physically separates the metal from the hydrogel to prevent hydrogel degradation. The rate of desorption of water vapor from the hydrogel surface is defined as $\dot{m}_{\mathrm{des}} = -\rho_{\mathrm{sol}} A_c \frac{dH}{dt}$, and is a function of time-dependent water concentration in the hydrogel material $c_w$.
+
+The temperature profile in the bulk hydrogel is approximately linear for all cases. This arises due to a thermal diffusion timescale on the order of $\tau_d = \frac{H^2}{\alpha} \approx 100$~s, much less than the timescale for absorption and desorption. This implies that heat diffuses quickly in the hydrogel, leading to a linear, quasi-steady temperature profile~\cite{sdiazmarin2022}. Therefore, we estimate time-dependent thermal energy storage in the bulk hydrogel as a function of surface temperature $T_{\mathrm{gel}}$.
+
+Generally, the hydrogel temperature during absorption can be modeled using Equation~S1,
+\begin{equation}
+\left(\rho c_p H_0\right)_{\mathrm{gel}} \frac{dT_{\mathrm{gel}}}{dt} = -h_{\mathrm{amb}}\left(T_{\mathrm{gel}} - T_{\mathrm{amb}}\right) + \frac{dc_w}{dt} c_w h_{\mathrm{abs}}
+\end{equation}
+where $h_{\mathrm{amb}}$ is the heat transfer coefficient due to ambient air at temperature $T_{\mathrm{amb}}$ during absorption. Thermal storage in the hydrogel, which corresponds to the left-hand term, is determined by the hydrogel density $\rho$, hydrogel heat capacity $c_p$, initial hydrogel thickness $H_0$ at fabrication (25$^\circ$C, 20\% RH) and hydrogel surface temperature $T_{\mathrm{gel}}$, due to the linear temperature profile in the bulk hydrogel. The left-hand side of the equation can be neglected, reflecting the fast thermal storage timescale relative to the absorption timescale. Additionally, in our analysis the heat of absorption $h_{\mathrm{abs}}$ is negligible relative to ambient convective cooling of the hydrogel~\cite{sdiazmarin2022b} and thus not included. Therefore, the hydrogel cools quickly in ambient at the conclusion of desorption and the hydrogel-salt composite is at approximately thermal equilibrium with the ambient.
+
+Likewise, the short thermal diffusion timescale of the bulk condenser ($<$1~s) leads to time-dependent thermal energy storage represented as a function of condenser surface temperature $T_{\mathrm{cond}}$. Similarly to the hydrogel, the presence of only natural convection cooling equates to approximately thermal equilibrium of the aluminum condenser with ambient during absorption.
+
+Both glass and absorber components have similarly low timescales for thermal diffusion ($\sim$30~s and $\sim$0.1~s, respectively). Furthermore, each is a convectively limited heat transfer component, as shown by low Biot (Bi) numbers, where $\mathrm{Bi} = \frac{hL}{k}$ for each respective component: $\mathrm{Bi}_{\mathrm{glass}} \sim 0.002$, $\mathrm{Bi}_{\mathrm{absorber}} \sim 0.02 \ll 1$, supporting our lumped body approach to modelling both the absorber and glass components. Our heat and mass transport equations were iteratively solved using a time-dependent segregated solver in COMSOL v6.2~\cite{scomsol2021}, with time steps of 100 seconds for the duration of a 24-hour test.
+
+Radiation between hydrogel and aluminum condenser surfaces is approximated using an infinite parallel plate approach, given order-of-magnitude differences between device cross-sectional areas and vapor gap lengths~\cite{skaviany2011}. Radiative heat transfer between hydrogel and condenser surfaces is a function of $\varepsilon_g$,
+\begin{equation}
+\varepsilon_g = \left(\frac{1}{\varepsilon_{\mathrm{gel}}} + \frac{1}{\varepsilon_{\mathrm{Al}}} - 1\right)^{-1}
+\end{equation}
+where $\varepsilon_{\mathrm{gel}}$ and $\varepsilon_{\mathrm{Al}}$ are the emissivity of the hydrogel and the condenser surfaces, respectively.
+
+Natural convection between the gel and condenser surfaces is a function of both gel and condenser temperature, as well as material properties for humid air~\cite{sbell2014}. The Nusselt number correlation for natural convection between two slanted plates given by Hollands et al.~\cite{shollands1976} is used, shown in Equation~S3,
+\begin{equation}
+\mathrm{Nu} = 1 + 1.44\left[1 - \frac{1708\sin(1.8\theta)^{1.6}}{\mathrm{Ra}\cos(\theta)}\right]\left[1 - \frac{1708}{\mathrm{Ra}\cos(\theta)}\right]^{*} + \left[\left(\frac{\mathrm{Ra}\cos(\theta)}{5830}\right)^{1/3} - 1\right]^{*}
+\end{equation}
+where the angle of the device $\theta \approx 30^\circ$ and the Rayleigh number $\mathrm{Ra} = \frac{g\beta\Delta T L_g^3}{\nu\alpha}$.
+
+Finally, the natural convection heat transfer coefficient $h_{\mathrm{conv,g}}$ is defined as a function of this Nusselt number,
+\begin{equation}
+h_{\mathrm{conv,g}} = \mathrm{Nu} \cdot \frac{k_{\mathrm{air}}}{T_{\mathrm{gel}} - T_{\mathrm{cond}}}
+\end{equation}
+
+Due to a Lewis number Le~$\sim$~1, we deploy a heat-to-mass transfer analogy~\cite{sambrosini2006} to define a mass transfer coefficient similarly to its heat transfer counterpart for desorption, as described by Equation~S5,
+\begin{equation}
+\mathrm{Sh} = \mathrm{Nu} = \frac{h_{\mathrm{conv,g}}\left(T_{\mathrm{gel}} - T_{\mathrm{cond}}\right)}{k_{\mathrm{air}}}
+\end{equation}
+with properties of air taken at the average temperature $\frac{1}{2}\left(T_{\mathrm{gel}} - T_{\mathrm{cond}}\right)$. This mass transfer coefficient based on heat-to-mass transport analogy was used to calculate a temperature- and time-dependent mass transport rate during desorption. However, as absorption was isothermal, an empirically determined mass transport coefficient was used for the absorption case based on environmental RH.
+
+For mass transport validation experiments the humidity of absorption was controlled by placing the sample in an environmental chamber (Binder, model KBF 115). To determine the mass transfer coefficient in this controlled environment, we first ran a series of evaporation experiments using deionized water with a fixed cross-sectional area $A_c$, following best practices from the literature~\cite{spoos2020}.
+
+Figure~S1 illustrates this experimental procedure as well as the results, from which a mass transfer coefficient $g_{\mathrm{conv}} = g_{\mathrm{chamber}}$ can be calculated using Equation~S6,
+\begin{equation}
+g_{\mathrm{chamber}} = \frac{\frac{dm}{dt}}{1 - RH} \frac{R T_{\mathrm{chamber}}}{p_{\mathrm{sat}}(T_{\mathrm{chamber}}) A_c M_w}
+\end{equation}
+where $\frac{dm}{dt}$ is the experimentally measured rate of change in sample mass for a given relative humidity (RH). Thus, the mass transfer coefficient used in numerical models is an average of Equation~S6 at varying relative humidities, using the slope of the best fit line in Figure~S1B.
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering \vspace{5cm} \textit{[Figure S1: Mass transfer coefficient quantification --- environmental chamber setup (A); evaporation rate vs.\ (1$-$RH) (B); simplified device model schematic (C); water content vs.\ time for absorption/desorption with model fit (D).]} \vspace{5cm}}}
+\caption{\textbf{Experimental quantification of mass transfer coefficient inside environmental chamber.} Simplified testing of hydrogel SAWH to validate mass transfer through the vapor gap, and experimental quantification of mass transfer coefficient inside environmental chamber. (A) Experimental setup to evaluate the mass transfer coefficient internal to the environmental chamber and (B) results of the experiment at varying internal humidities, where mass rate of change of the water sample was recorded. (C) Heat and mass transport model of the simplified system, where mass transfer through the vapor gap is a function of hydrogel and condenser surface temperatures. (D) Agreement between model and experiment supports choice of both absorption and desorption mass transfer coefficients.}
+\label{fig:S1}
+\end{figure}
+
+We found an average mass transfer coefficient of $g_{\mathrm{chamber}} = 0.0085$~m/s associated with the chamber, and for consistency used this value in all subsequent models of hydrogel absorption.
+
+Additionally, we ran a simplified desorption experiment to validate the heat-to-mass transfer analogy assumption used in our thermofluidic model. This experimental prototype consisted of fixed parameters, including heat input, ambient temperature and humidity, gel size, and vapor gap length as well as an excess of insulation to improve experimental fitting with 1D model results. The hydrogel was fabricated at 25$^\circ$C, 20\% RH and absorbed moisture in a 25$^\circ$C, 50\% RH environment. We experimentally measured the temperature of the gel surface and the condenser surface and used the temperature data as inputs to our thermofluidic model of the vapor gap. Solving for absorption using our environmental chamber mass transfer coefficient and desorption using our calculated mass transfer coefficient based on Equation~S3 and a heat-to-mass transfer analogy, we see good agreement in Figure~S1C-D between model and experiments, thus validating our heat-to-mass transfer analogy approach.
+
+\section{Experimental procedures}
+
+\subsection{Synthesis of PAM-LiCl hydrogels}
+
+Ingredients and their quantities used for synthesizing PAM-LiCl hydrogels, as deployed in this publication, are listed in Table~S1.
+
+\begin{table}[h]
+\centering
+\caption{Ingredients and their quantities}
+\label{tab:S1}
+\begin{tabular}{lc}
+\toprule
+Ingredient & Quantity [g] \\
+\midrule
+De-ionized water & 477.800 \\
+Lithium chloride (LiCl) & 173.360 \\
+Acrylamide (AM) & 44.680 \\
+Ammonium Persulfate (APS) & 0.152 \\
+N,N'-methylenebisacrylamide (MBA) & 0.267 \\
+Tetramethylethylenediamine (TEMED) & 0.128 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Fabrication of device, continuation}
+
+Despite our model relying on passive cooling of the condensers by ambient airflow, previous work from LaPotin et al.\ indicated the unreliability of ambient air to passively cool downward-oriented fin arrays~\cite{slapotin2021}. Therefore, to minimize the potential impact of variable ambient air flow speeds on device performance, we arranged 5 dc fans in a checkerboard pattern on the back of the device, providing $\approx$0.5~m/s airflow to the condenser backing regardless of ambient wind (Figure~S2). We coupled each fan to a 5~Vdc PV cell to maintain the solar-driven nature of our device. Wind speeds during the testing presented in this work exceeded flow speeds supplied by the fans ($\gg$0.5~m/s) and so the inclusion of active cooling is negligible for environmental testing presented in this work. However, this result is dependent on environmental conditions, and so future devices may require active cooling for laboratory testing or outdoor locations where ambient wind is negligible. During absorption all mounting bolts are removed and the top hydrogel stage, shown in Figure~S2, is disconnected from the body of the device. The hydrogel stage is then manually placed in an open-air environment, leveraging ambient airflow for absorption during the night. When transitioning to desorption, the hydrogel stage is re-installed onto the top of the device and is mounted to the body using M3 screws and threaded bolts, as labelled in Figure~S2.
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering \vspace{5cm} \textit{[Figure S2: CAD rendering of final SAWH device --- front view showing solar absorber, hydrogel stage, glass, acrylic spacers, solar panel array, bolts, insulation, aluminum housing, condenser, cooling fans, and outlet; back view showing the same components from the reverse side.]} \vspace{5cm}}}
+\caption{\textbf{Computer-aided design of final SAWH device}, detailing key component locations in both the front (left) and back (right) of the device.}
+\label{fig:S2}
+\end{figure}
+
+\section{Thermodynamic efficiency and potential for future design improvements}
+
+Maximum thermodynamic efficiency of the gel in solar-thermal operation is calculated using Equation~S7,
+\begin{equation}
+\eta_{\mathrm{max}} = \frac{m_w h_{\mathrm{fg}}}{m_w h_{\mathrm{des}} + \rho_{\mathrm{gel}} c_{p,\mathrm{gel}} V_{\mathrm{gel}} \Delta T_{\mathrm{gel}}}
+\end{equation}
+where $h_{\mathrm{des}}$ is the enthalpy of desorption for the salt-loaded hydrogel. Our thermofluidic model shows energy loss pathways that lead to a decrease in efficiency from this thermodynamic ideal. Specifically, Figure~S3 quantifies energy loss using our heat and mass transport COMSOL model, and incorporates environmental conditions present during testing in Cambridge, MA.
+
+\begin{figure}[h]
+\centering
+\fbox{\parbox{0.8\textwidth}{\centering \vspace{4cm} \textit{[Figure S3: Energy flow breakdown at the absorber during desorption --- 100\% solar irradiance input, with 14.5\% reflected at glass, 21.3\% and 28.7\% radiative/conductive exchange between absorber and glass, 35.5\% reaching the hydrogel, of which 7\% goes to sensible storage and the remainder drives desorption/condensation.]} \vspace{4cm}}}
+\caption{\textbf{Breakdown of energy flows at the absorber during desorption.} This illustration highlights the reduction in thermal energy going to the gel due to radiative and conductive losses to the glass, as predicted using our numerical model for environmental testing conditions in Cambridge, MA.}
+\label{fig:S3}
+\end{figure}
+
+\section{Technoeconomic analysis and water quality of SAWH device}
+
+To quantify the cost of our SAWH device we performed a cost analysis based on the levelized cost of water~\cite{ssiegel2020}, assuming a hydrogel lifetime of 1 year. Results of our technoeconomic analysis are shown in Figure~5, including comparison to both national bottled water and tap water sources in Boston, MA~\cite{sbwsc2024} and Seattle, WA~\cite{sspu2024}.
+
+We estimate the cost of a square meter device based on the cost of the different components used in manufacturing a passive SAWH device~\cite{swilson2023}. Table~S2 lists the costs considered and the amount used in the estimation. We estimate the cost of the device as 56--166~\$/m$^2$ for a passively and actively cooled design, respectively, with a fixed hydrogel cost of \$0.4--\$1.1 per kg of material~\cite{szhong2024}.
+
+\begin{table}[h]
+\centering
+\caption{Cost and amount of components for SAWH device}
+\label{tab:S2}
+\begin{tabular}{lccc}
+\toprule
+Component & Amount per m$^2$ SAWH device & Cost of component (\$) & Ref. \\
+\midrule
+Aluminum heater stage & 5.42~kg & 11.95 & \cite{salibaba1} \\
+Aluminum condenser stage & 13.55~kg & 29.87 & \cite{salibaba1} \\
+Acrylic enclosure & 0.004~m$^3$ & 5.95 & \cite{salibaba2} \\
+Insulation and gaskets & 4~m$^2$ & 2.00 & \cite{salibaba3} \\
+Clamps & 1.93~kg & 3.47 & \cite{salibaba4} \\
+Fixtures and bolts & 100~qty & 1.00 & \cite{salibaba5} \\
+Electronics, PV cells & 50~qty & 20.00 & \cite{salibaba6} \\
+Condenser fans & 50~qty & 34.50 & \cite{salibaba7} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Currently our system costs \$56--\$166 per m$^2$, leading to a levelized cost of water comparable to that of U.S. tap water for a device lifetime of 20 years. Water produced by our system in Cambridge, MA was tested for common contaminants and compared to EPA standards for drinking water in the U.S.~\cite{sepa2023}. We quantified contaminant concentration in solution using inductively coupled plasma mass spectrometry (ICP-MS), a popular tool for such contaminant testing in liquid samples~\cite{swilschefski2019}, and compared it to a water quality standard of known 10~$\mu$g per mL concentrations, supplied by Inorganic Ventures, Inc.\ (item no.\ CMS-5).
+
+\section{Final dimensions and material properties used in COMSOL SAWH device model}
+
+\begin{table}[h]
+\centering
+\caption{Final dimensions and material properties used in the COMSOL SAWH device model}
+\label{tab:S3}
+\begin{tabular}{llll}
+\toprule
+Parameter & Value & Unit & Ref. \\
+\midrule
+$L_{\mathrm{housing}}$ & 1 & mm & --- \\
+$L_c$ & 5 & mm & --- \\
+$L_{\mathrm{glass}}$ & 0.125 & in & --- \\
+$D_{\mathrm{Al}}/D_{\mathrm{glass}}$ & 0.4 & mm$^2$/s & \cite{ssorensen2021} \\
+RH$_{\mathrm{ambient}}$ & 0.5 & --- & Ambient humidity \\
+$g_{\mathrm{chamber}}$ & 0.0085 & m/s & --- \\
+$p_{\mathrm{ambient}}$ & 101.3 & kPa & Ambient pressure \\
+$\theta$ & 30 & deg & Angle of device, relative to horizontal \\
+$\rho_{\mathrm{gel}}$ & 1250.2 & kg/m$^3$ & Density of composite at 20\% RH \\
+$S_l$ & 4 & g$_{\mathrm{salt}}$/g$_{\mathrm{polymer}}$ & Salt loading of composite \\
+$A_c$ & 0.078 & m$^2$ & --- \\
+$A_r$ & 7.1 & --- & --- \\
+$h_{\mathrm{fg}}$ & 2256 & kJ/kg & \cite{sbell2014} \\
+$h_{\mathrm{des}}$ & 2320 & kJ/kg & \cite{sdiazmarin2022} \\
+$h_{\mathrm{amb}}$ & 10 & W/m$^2$/K & \cite{suba2021} \\
+$k_{\mathrm{air}}$ & 0.0286 & W/m/K & \cite{sbell2014} \\
+$k_w$ & 0.6 & W/m/K & \cite{sbell2014} \\
+$c_{p,w}$ & 4184 & J/kg/K & \cite{sbell2014} \\
+$k_{\mathrm{housing}}$ & 0.2 & W/m/K & \cite{sazo2024} \\
+$k_{\mathrm{Al}}$ & 167 & W/m/K & \cite{sazo2024} \\
+$k_{\mathrm{glass}}$ & 1.2 & W/m/K & \cite{ssorensen2021} \\
+$\varepsilon_{\mathrm{abs}}$ & 0.95 & --- & --- \\
+$\varepsilon_{\mathrm{gel}}$ & 1 & --- & Estimated as water, blackbody \\
+$\varepsilon_{\mathrm{Al}}$ & 0.05 & --- & \cite{skaviany2011} \\
+$\tau_{\mathrm{glass}}$ & 0.9 & --- & \cite{sbassarab2023} \\
+$T_{\mathrm{amb}}$ & 293.15 & K & --- \\
+$MW_w$ & 18 & g/mol & Molecular weight of water \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{thebibliography}{99}
+
+\bibitem{sdiazmarin2022} D{\'i}az-Mar{\'i}n, C.D., Zhang, L., Fil, B.El, Lu, Z., Alshrah, M., Grossman, J.C., and Wang, E.N. (2022). Heat and mass transfer in hygroscopic hydrogels. Int. J. Heat Mass Transf. \textbf{195}, 1--66.
+
+\bibitem{sdiazmarin2022b} D{\'i}az-Mar{\'i}n, C.D., Zhang, L., Lu, Z., Alshrah, M., Grossman, J.C., and Wang, E.N. (2022). Kinetics of Sorption in Hygroscopic Hydrogels. Nano Lett. \textbf{22}, 1100--1107.
+
+\bibitem{scomsol2021} COMSOL (2021). COMSOL Multiphysics\textregistered\ v.~6.2. COMSOL AB, Stockholm, Sweden.
+
+\bibitem{skaviany2011} Kaviany, M. (2011). Essentials of Heat Transfer.
+
+\bibitem{sbell2014} Bell, I.H., Wronski, J., Quoilin, S., and Lemort, V. (2014). Pure and pseudo-pure fluid thermophysical property evaluation and the open-source thermophysical property library CoolProp. Ind. Eng. Chem. Res. \textbf{53}, 2498--2508.
+
+\bibitem{shollands1976} Hollands, K.G.T., Unny, T.E., Raithby, G.D., and Konicek, L. (1976). Free convective heat transfer across inclined air layers. J. Heat Transfer \textbf{98}, 189--193.
+
+\bibitem{sambrosini2006} Ambrosini, W., Forgione, N., Manfredini, A., and Oriolo, F. (2006). On various forms of the heat and mass transfer analogy: Discussion and application to condensation experiments. Nucl. Eng. Des. \textbf{236}, 1013--1027.
+
+\bibitem{spoos2020} Po{\'o}s, T., and Varju, E. (2020). Mass transfer coefficient for water evaporation by theoretical and empirical correlations. Int. J. Heat Mass Transf. \textbf{153}, 119500.
+
+\bibitem{slapotin2021} LaPotin, A., Zhong, Y., Zhang, L., Zhao, L., Leroy, A., Kim, H., Rao, S.R., and Wang, E.N. (2021). Dual-Stage Atmospheric Water Harvesting Device for Scalable Solar-Driven Water Production. Joule \textbf{5}, 166--182.
+
+\bibitem{ssiegel2020} Siegel, N.P., and Conser, B. (2020). A techno-economic analysis of solar-driven atmospheric water harvesting. In Energy Sustainability (American Society of Mechanical Engineers), pp.~1--9.
+
+\bibitem{sbwsc2024} Commission, B.W.\ and S.\ (2024). Current Water, Sewer, and Stormwater Rates. \url{https://www.bwsc.org/residential-customers/rates}.
+
+\bibitem{sspu2024} Utilities, S.P.\ (2024). Residential Water Rates. \url{https://www.seattle.gov/utilities/your-services/accounts-and-payments/rates/water/residential-water-rates}.
+
+\bibitem{swilson2023} Wilson, C.T., Cha, H., Zhong, Y., Li, A.C., Lin, E., and El Fil, B. (2023). Design considerations for next-generation sorbent-based atmospheric water-harvesting devices. Device \textbf{1}, 100052.
+
+\bibitem{szhong2024} Zhong, Y., Zhang, L., Li, X., El Fil, B., D{\'i}az-Mar{\'i}n, C.D., Li, A.C., Liu, X., LaPotin, A., and Wang, E.N. (2024). Bridging materials innovations to sorption-based atmospheric water harvesting devices. Nat. Rev. Mater.
+
+\bibitem{salibaba1} Alibaba.com. Aluminium Sheet Price Per Kg 6061 Aluminium Alloy Sheet. \url{https://www.alibaba.com}.
+
+\bibitem{salibaba2} Alibaba.com. Acrylic Sheet Perspex, Transparent Clear Acrylic Sheet Board Plexiglass Sheets for Laser Cutting. \url{https://www.alibaba.com}.
+
+\bibitem{salibaba3} Alibaba.com. Fiber Glass Insulation, Glass Wool Thermal Insulation Materials. \url{https://www.alibaba.com}.
+
+\bibitem{salibaba4} Alibaba.com. Polished ASTM AISI SS Stainless Steel Bar Rod. \url{https://www.alibaba.com}.
+
+\bibitem{salibaba5} Alibaba.com. Grade Stainless Steel Screw Thread Rebar Elevator Bucket Hexagon Bolts. \url{https://www.alibaba.com}.
+
+\bibitem{salibaba6} Alibaba.com. Waterproof PET Solar Panel, Mini PET Solar Cell Panel. \url{https://www.alibaba.com}.
+
+\bibitem{salibaba7} Alibaba.com. Mini 5V Fan Supplier, Small DC 12V Cooling Fan. \url{https://www.alibaba.com}.
+
+\bibitem{sepa2023} Office of Water, EPA 823-B.-23-001 (2023). Water Quality Standards Handbook -- Chapter 3: Water Quality Criteria.
+
+\bibitem{swilschefski2019} Wilschefski, S.C., and Baxter, M.R. (2019). Inductively Coupled Plasma Mass Spectrometry: Introduction to Analytical Aspects. Clin. Biochem. Rev. \textbf{40}, 115--133.
+
+\bibitem{ssorensen2021} S{\o}rensen, S.S., B{\o}dker, M.S., Johra, H., Youngman, R.E., Logunov, S.L., Bockowski, M., Rzoska, S.J., Mauro, J.C., and Smedskjaer, M.M. (2021). Thermal conductivity of densified borosilicate glasses. J. Non. Cryst. Solids \textbf{557}.
+
+\bibitem{suba2021} Uba, F., Essandoh, E.O., Akolgo, G.A., Opoku, R., Oppong-Kyereh, L., and Gyimah, E.A. (2021). Experimental Estimation of the Heat Transfer Coefficient of an Unglazed Solar Plate for Unsteady Humid Outdoor Condition. Model. Simul. Eng. \textbf{2021}, 5522882.
+
+\bibitem{sazo2024} AZoNetwork (2024). AZO Materials. \url{https://www.azom.com/}.
+
+\bibitem{sbassarab2023} Bassarab, V.V., Shalygin, V.A., Shakhmin, A.A., Sokolov, V.S., and Kropotov, G.I. (2023). Spectroscopy of a borosilicate crown glass in the wavelength range of 0.2~$\mu$m--15~cm. J. Opt. \textbf{25}.
+
+\end{thebibliography}
+
+\end{document}

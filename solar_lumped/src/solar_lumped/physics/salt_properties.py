@@ -10,11 +10,12 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from solar_lumped.physics import table_s3
+
 WATER_MOLAR_MASS_KG_MOL: float = 0.018015
 GAS_CONSTANT_J_MOL_K: float = 8.314462618
 C_W_MAX_MOL_M3: float = 400000.0
 C_W_MIN_MOL_M3: float = 100.0
-DRY_COMPOSITE_DENSITY_KG_M3: float = 1000.0
 
 
 CANDIDATE_SALTS: tuple[str, ...] = ("LiCl", "NaCl", "CaCl2", "MgCl2")
@@ -162,6 +163,17 @@ def pam_licl_uptake_g_g_at_rh(rh_fraction: float) -> float:
     return float(np.interp(r, rh_pct, uptake))
 
 
+# Dry-basis composite density for all gravimetric-uptake <-> c_w conversions.
+# Table S3 reports the composite density at fabrication (25 °C, 20% RH); the DVS
+# isotherm uptake is gravimetric per gram of *dry* composite, so the dry-basis
+# density is rho_composite(20% RH) / (1 + uptake(20% RH)). Using the wet (20% RH)
+# density here would over-count the sorbent dry mass by (1 + u20) ≈ 2.26x and
+# inflate the absolute water inventory / desorption swing accordingly.
+DRY_COMPOSITE_DENSITY_KG_M3: float = table_s3.RHO_COMPOSITE_KG_M3 / (
+    1.0 + pam_licl_uptake_g_g_at_rh(0.20)
+)
+
+
 def pam_licl_water_activity_from_uptake_g_g(uptake_g_g: float) -> float:
     """Invert DVS isotherm: water activity from gravimetric uptake."""
     rh_pct, uptake = _load_pam_licl_dvs_isotherm()
@@ -190,11 +202,21 @@ def pam_licl_gravimetric_uptake_g_g(
     h0_ref_m: float,
     dry_density_kg_m3: float = DRY_COMPOSITE_DENSITY_KG_M3,
 ) -> float:
-    """Gravimetric moisture content m_w / m_dry (g/g) on a footprint basis."""
+    """Gravimetric moisture content m_w / m_dry (g/g) on a footprint basis.
+
+    Water inventory is referenced to the fixed fabrication thickness H₀, not the
+    swollen H(t): Wilson defines c_w and the desorption flux ṁ_des = MW·H₀·dc_w/dt
+    (Note S1) on the H₀ basis, so the sorbate inventory per area is c_w·H₀. The
+    swelling H(t) (Eq. 6) enters only the vapor-gap convection (L_g − H) and the
+    U_gel conductance (H/k_gel), never the water inventory or its activity. Using
+    the swollen H here would double-count dilution and break consistency with the
+    yield integral. ``h_m`` is retained for signature compatibility but unused.
+    """
+    del h_m
     m_dry = pam_licl_dry_mass_kg_m2(h0_ref_m, dry_density_kg_m3=dry_density_kg_m3)
     if m_dry <= 0.0:
         return 0.0
-    mass_water = max(0.0, c_w) * h_m * WATER_MOLAR_MASS_KG_MOL
+    mass_water = max(0.0, c_w) * h0_ref_m * WATER_MOLAR_MASS_KG_MOL
     return mass_water / m_dry
 
 
@@ -236,9 +258,12 @@ def licl_water_activity_at_brine_fraction(
     f = float(brine_salt_fraction)
     if not (0.0 <= f < 1.0) or not math.isfinite(f):
         return float("nan")
-    if temperature_c > 100.0:
-        return float("nan")
-    tr = (temperature_c + 273.15) / 647.0
+    # Campbell (1979) osmotic/activity data for LiCl span 50–150 °C. The gel
+    # surface can exceed 100 °C under high solar flux (Fig. 2F), so evaluate up
+    # to 150 °C and clamp above that rather than returning NaN (which would
+    # zero the desorption driving force and collapse yield at high Q_solar).
+    t_corr = min(float(temperature_c), 150.0)
+    tr = (t_corr + 273.15) / 647.0
     p0, p1, p2 = 0.28, 4.3, 0.60
     p3, p4, p5 = 0.21, 5.10, 0.49
     p6, p7, p8, p9 = 0.362, -4.75, -0.40, 0.03
@@ -286,11 +311,11 @@ def pam_licl_composite_salt_fraction(
     salt_to_polymer_ratio: float,
 ) -> float:
     """Salt mass fraction in wet PAM-LiCl: m_s / (m_w + m_s + m_p) on a footprint basis."""
-    h = max(h_m, h0_ref_m * 0.25)
+    del h_m  # inventory referenced to H₀ (see pam_licl_gravimetric_uptake_g_g)
     salt_mol_m2 = c_s * h0_ref_m
     mass_salt = salt_mol_m2 * formula_weight_g_mol / 1000.0
     mass_polymer = mass_salt / max(salt_to_polymer_ratio, 1e-9)
-    mass_water = max(0.0, c_w) * h * WATER_MOLAR_MASS_KG_MOL
+    mass_water = max(0.0, c_w) * h0_ref_m * WATER_MOLAR_MASS_KG_MOL
     total = mass_water + mass_salt + mass_polymer
     if total <= 0.0:
         return 1.0
@@ -306,10 +331,10 @@ def licl_brine_salt_fraction_from_gel(
     formula_weight_g_mol: float,
 ) -> float:
     """Brine salt mass fraction m_s / (m_s + m_w) — LiCl solution a_w,s (Eq. 5)."""
-    h = max(h_m, h0_ref_m * 0.25)
+    del h_m  # inventory referenced to H₀ (see pam_licl_gravimetric_uptake_g_g)
     salt_mol_m2 = c_s * h0_ref_m
     mass_salt = salt_mol_m2 * formula_weight_g_mol / 1000.0
-    mass_water = max(0.0, c_w) * h * WATER_MOLAR_MASS_KG_MOL
+    mass_water = max(0.0, c_w) * h0_ref_m * WATER_MOLAR_MASS_KG_MOL
     total = mass_salt + mass_water
     if total <= 0.0:
         return 1.0
@@ -379,7 +404,7 @@ def equilibrium_c_w_at_rh(
         return C_W_MAX_MOL_M3
 
     h_ref = h0_ref_m if h0_ref_m is not None else 0.004
-    h = h_m if h_m is not None else h_ref
+    del h_m  # inventory referenced to H₀ (see pam_licl_gravimetric_uptake_g_g)
 
     if salt_name == "LiCl":
         f_b = licl_equilibrium_brine_salt_fraction(rh, temperature_c)
@@ -397,7 +422,7 @@ def equilibrium_c_w_at_rh(
     mass_water = mass_salt * (1.0 - f_b) / f_b
     if mass_water <= 0.0:
         return C_W_MIN_MOL_M3
-    c_w = mass_water / (h * WATER_MOLAR_MASS_KG_MOL)
+    c_w = mass_water / (h_ref * WATER_MOLAR_MASS_KG_MOL)
     return max(C_W_MIN_MOL_M3, min(C_W_MAX_MOL_M3, c_w))
 
 
@@ -413,13 +438,13 @@ def equilibrium_c_w_from_dvs_at_rh(
     dry_density_kg_m3: float = DRY_COMPOSITE_DENSITY_KG_M3,
 ) -> float:
     """Paper Note S2: DVS isotherm sets sorbent equilibrium uptake at ambient RH."""
+    del h_m  # inventory referenced to H₀ (see pam_licl_gravimetric_uptake_g_g)
     if rh <= 0.0:
         return C_W_MIN_MOL_M3
     u = pam_licl_uptake_g_g_at_rh(rh)
     m_dry = dry_density_kg_m3 * h0_ref_m
     mass_water_kg_m2 = u * m_dry
-    h = max(h_m, h0_ref_m * 0.25)
-    c_w = mass_water_kg_m2 / (h * WATER_MOLAR_MASS_KG_MOL)
+    c_w = mass_water_kg_m2 / (h0_ref_m * WATER_MOLAR_MASS_KG_MOL)
     return max(C_W_MIN_MOL_M3, min(C_W_MAX_MOL_M3, c_w))
 
 

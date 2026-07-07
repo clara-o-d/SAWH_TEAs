@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Literal
 
 from solar_lumped.physics.correlations import (
     hollands_vapor_gap_h_conv_w_m2_k,
     mass_transfer_g_from_h_conv_m_s,
+    vapor_gap_mass_transfer_inhibited,
 )
 from solar_lumped.physics.salt_properties import (
     C_W_MAX_MOL_M3,
@@ -68,6 +70,8 @@ def _mass_transfer_driving_force(
             params=params,
             h_m=h_m,
         )
+        if not math.isfinite(aw):
+            return 0.0
         return c_r - aw
 
     aw = water_activity_from_c_w(
@@ -81,6 +85,8 @@ def _mass_transfer_driving_force(
         h_m=h_m,
         h0_ref_m=params.h0_ref_m,
     )
+    if not math.isfinite(aw):
+        return 0.0
     return c_r - aw
 
 
@@ -111,7 +117,9 @@ def mass_transfer_g_m_s(
         return params.g_conv_m_s
     if t_cond_c is None:
         raise ValueError("t_cond_c required for desorption mass transfer")
-    gap_m = max(params.vapor_gap_m - h_m, 1e-4)
+    gap_m = max(params.vapor_gap_m - h_m, 0.0)
+    if vapor_gap_mass_transfer_inhibited(gap_m):
+        return 0.0
     h_conv = hollands_vapor_gap_h_conv_w_m2_k(
         gap_m, t_gel_c, t_cond_c, tilt_deg=params.tilt_deg
     )
@@ -178,7 +186,11 @@ def dc_w_dt(
         h_m=h_m,
         phase=phase,
     )
+    if not math.isfinite(driving):
+        return 0.0
     rate = pref * (p_sat / (GAS_CONSTANT_J_MOL_K * t_k)) * driving
+    if not math.isfinite(rate):
+        return 0.0
     if c_w >= C_W_MAX_MOL_M3 and rate > 0.0:
         return 0.0
     if c_w <= C_W_MIN_MOL_M3 and rate < 0.0:
@@ -196,8 +208,13 @@ def dH_dt(
     phase: MassTransferPhase = "absorption",
     t_cond_c: float | None = None,
 ) -> float:
-    """Eq. 6: dH/dt (m/s) — hydrogel thickness rate."""
-    del t_cond_c
+    """Eq. 6: dH/dt (m/s) — hydrogel thickness rate.
+
+    Consistent with Note S1 dc_w/dt:
+        dH/dt = g · (MW / ρ_sol) · (p_sat / RT) · driving
+    This equals dc_w/dt · (MW · H₀ / ρ_sol), ensuring H and c_w evolve at
+    the same timescale (both driven by the mass-transfer velocity g).
+    """
     t_k = max(t_gel_c + 273.15, 200.0)
     p_sat = saturation_vapor_pressure_pa(t_gel_c)
     driving = _mass_transfer_driving_force(
@@ -208,8 +225,16 @@ def dH_dt(
         h_m=h_m,
         phase=phase,
     )
+    g = mass_transfer_g_m_s(
+        phase=phase,
+        params=params,
+        h_m=h_m,
+        t_gel_c=t_gel_c,
+        t_cond_c=t_cond_c,
+    )
     return (
-        WATER_MOLAR_MASS_KG_MOL
+        g
+        * WATER_MOLAR_MASS_KG_MOL
         / params.rho_solution_kg_m3
         * (p_sat / (GAS_CONSTANT_J_MOL_K * t_k))
         * driving

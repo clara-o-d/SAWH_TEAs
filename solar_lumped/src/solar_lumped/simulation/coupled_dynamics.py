@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Literal
 
@@ -9,6 +10,7 @@ from scipy.optimize import brentq
 
 from solar_lumped.physics.correlations import (
     condenser_h_conv_w_m2_k,
+    hollands_vapor_gap_h_conv_w_m2_k,
     parallel_plate_emissivity,
     radiative_exchange_w_m2,
 )
@@ -23,7 +25,7 @@ from solar_lumped.physics.mass_transfer import (
     concentration_ratio_desorption,
     dH_dt,
     dc_w_dt,
-    m_des_kg_s_m2_from_state,
+    m_des_kg_s_m2_from_dc_w,
 )
 from solar_lumped.physics.salt_properties import clamp_temperature_c
 
@@ -63,6 +65,7 @@ def _m_des_calc(
         m_des_kg_s_m2=max(0.0, m_des),
         h_amb=h_amb,
         params=thermal,
+        h_m=h_m,
         t_guess=t_guess,
         vapor_gap_m=vapor_gap_m,
     )
@@ -91,7 +94,8 @@ def _m_des_calc(
         dc = 0.0
     if dh > 0.0:
         dh = 0.0
-    m_calc = m_des_kg_s_m2_from_state(c_w, h_m, dc, dh)
+    # Note S1: ṁ_des = −dc_w/dt · MW · H₀ (thermal coupling uses reference thickness)
+    m_calc = m_des_kg_s_m2_from_dc_w(dc, h0_ref_m=mass.h0_ref_m)
     return m_calc, state.t_gel_c, dc, state
 
 
@@ -124,6 +128,8 @@ def _solve_m_des_coupled(
             vapor_gap_m=vapor_gap_m,
             t_guess=t_guess,
         )
+        if not math.isfinite(m_calc):
+            return -m_des
         return m_calc - m_des
 
     m_at_zero, t_gel0, dc0, state0 = _m_des_calc(
@@ -139,6 +145,19 @@ def _solve_m_des_coupled(
         vapor_gap_m=vapor_gap_m,
         t_guess=t_guess,
     )
+    if not math.isfinite(m_at_zero) or not math.isfinite(t_gel0):
+        state0 = solve_steady_thermal(
+            t_cond_c=t_cond_c,
+            t_amb_c=t_amb_c,
+            q_solar_w_m2=q_solar_w_m2,
+            m_des_kg_s_m2=0.0,
+            h_amb=h_amb,
+            params=thermal,
+            h_m=h_m,
+            t_guess=t_guess,
+            vapor_gap_m=vapor_gap_m,
+        )
+        return 0.0, state0.t_gel_c, 0.0, state0
     if m_at_zero <= 0.0:
         return 0.0, t_gel0, dc0, state0
 
@@ -148,7 +167,10 @@ def _solve_m_des_coupled(
     if residual(hi) >= 0.0:
         return 0.0, t_gel0, dc0, state0
 
-    m_star = float(brentq(residual, 0.0, hi, xtol=1e-14))
+    try:
+        m_star = float(brentq(residual, 0.0, hi, xtol=1e-14))
+    except ValueError:
+        return 0.0, t_gel0, dc0, state0
     m_calc, t_gel, dc, state = _m_des_calc(
         m_star,
         c_w=c_w,
@@ -182,23 +204,30 @@ def evaluate_coupled_rates(
     fin_area_ratio: float,
     h_fg_j_per_kg: float,
     t_guess: tuple[float, float, float] | None = None,
+    h_amb_cond: float | None = None,
 ) -> CoupledRates:
-    """Return (dc_w/dt, dH/dt, dT_cond/dt) with self-consistent T_gel and m_des."""
-    gap_eff = max(vapor_gap_m - h_m, 1e-6)
+    """Return (dc_w/dt, dH/dt, dT_cond/dt) with self-consistent T_gel and m_des.
+
+    ``h_amb_cond`` sets the condenser-backing convection coefficient; when None the
+    ambient ``h_amb`` (which also drives the absorber/glass) is reused. Providing a
+    separate value models fan-forced condenser cooling decoupled from ambient wind.
+    """
+    gap_eff = max(vapor_gap_m - h_m, 0.0)
     q_sol = max(0.0, q_solar_w_m2)
 
     if phase == "absorption":
-        state = solve_steady_thermal(
-            t_cond_c=t_cond_c,
-            t_amb_c=t_amb_c,
-            q_solar_w_m2=0.0,
+        # Note S1 Eq. S1: fast gel thermal storage → T_gel ≈ T_amb during open absorption
+        t_gel = t_amb_c
+        h_conv_g = hollands_vapor_gap_h_conv_w_m2_k(
+            gap_eff, t_gel, t_cond_c, tilt_deg=thermal.tilt_deg
+        ) if gap_eff > 0.0 else 0.0
+        state = ThermalState(
+            t_gel_c=t_gel,
+            t_abs_c=t_amb_c,
+            t_glass_c=t_amb_c,
+            h_conv_g=h_conv_g,
             m_des_kg_s_m2=0.0,
-            h_amb=h_amb,
-            params=thermal,
-            t_guess=t_guess,
-            vapor_gap_m=gap_eff,
         )
-        t_gel = state.t_gel_c
         c_r = concentration_ratio_absorption(rh)
         dc = dc_w_dt(
             c_w,
@@ -259,7 +288,8 @@ def evaluate_coupled_rates(
         dh = 0.0
 
     h_conv_g = state.h_conv_g
-    h_conv_cond = condenser_h_conv_w_m2_k(h_amb, fin_area_ratio=fin_area_ratio)
+    h_amb_for_cond = h_amb if h_amb_cond is None else h_amb_cond
+    h_conv_cond = condenser_h_conv_w_m2_k(h_amb_for_cond, fin_area_ratio=fin_area_ratio)
     eps_gc = parallel_plate_emissivity(thermal.eps_gel, thermal.eps_al)
     q_rad = radiative_exchange_w_m2(t_gel, t_cond, emissivity=eps_gc)
     tmass = max(condenser_thermal_mass_j_m2_k, 1.0)

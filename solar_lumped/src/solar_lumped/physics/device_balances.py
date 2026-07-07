@@ -2,14 +2,12 @@
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 
 import numpy as np
 from scipy.optimize import root
 
 from solar_lumped.physics.correlations import (
-    STEFAN_BOLTZMANN_W_M2_K4,
     conduction_air_gap_w_m2,
     hollands_vapor_gap_h_conv_w_m2_k,
     parallel_plate_emissivity,
@@ -32,13 +30,20 @@ class ThermalState:
 class DeviceThermalParams:
     insulation_gap_m: float = table_s3.L_INS_M
     vapor_gap_m: float = table_s3.L_G_M
-    u_gel_w_m2_k: float = table_s3.U_GEL_W_M2_K
     eps_abs: float = table_s3.EPS_ABS
     tau_glass: float = table_s3.TAU_GLASS
     eps_gel: float = table_s3.EPS_GEL
     eps_al: float = table_s3.EPS_AL
+    eps_glass: float = table_s3.EPS_GLASS
     tilt_deg: float = table_s3.TILT_DEG
     h_des_j_per_kg: float = table_s3.H_DES_J_PER_KG
+    has_glass: bool = True
+    # Depression (K) of the effective radiant sink temperature below air temperature
+    # for the outermost surface. Wilson's typeset Eq. 3 radiates to T_amb (0 K here,
+    # used for Fig. 2 / Cambridge). Their COMSOL Atacama field model radiates the glass
+    # to a surroundings/sky temperature below air temperature (Surface-to-Ambient
+    # Radiation); reproducing the digitized field-test curves requires this term.
+    sky_temp_depression_c: float = 0.0
 
 
 def _residuals(
@@ -50,34 +55,55 @@ def _residuals(
     h_amb: float,
     params: DeviceThermalParams,
     vapor_gap_effective_m: float,
+    h_m: float,
 ) -> np.ndarray:
     t_gel, t_abs, t_glass = float(x[0]), float(x[1]), float(x[2])
+    u_gel = table_s3.u_gel_w_m2_k(h_m)
     h_conv_g = hollands_vapor_gap_h_conv_w_m2_k(
         vapor_gap_effective_m, t_gel, t_cond_c, tilt_deg=params.tilt_deg
     )
-    q_cond_ag = conduction_air_gap_w_m2(t_abs, t_glass, params.insulation_gap_m)
-    q_rad_ag = radiative_exchange_w_m2(t_abs, t_glass, emissivity=1.0)
-    q_rad_ga = radiative_exchange_w_m2(t_glass, t_amb_c, emissivity=1.0)
     eps_gc = parallel_plate_emissivity(params.eps_gel, params.eps_al)
     q_rad_gc = radiative_exchange_w_m2(t_gel, t_cond_c, emissivity=eps_gc)
 
-    # Eq 3 glass
-    r3 = q_cond_ag + q_rad_ag - h_amb * (t_glass - t_amb_c) - q_rad_ga
-    # Eq 4 absorber
-    r4 = (
-        params.eps_abs * params.tau_glass * q_solar_w_m2
-        - q_cond_ag
-        - q_rad_ag
-        - params.u_gel_w_m2_k * (t_abs - t_gel)
-    )
     # Eq 1 gel
     q_des = m_des_kg_s_m2 * params.h_des_j_per_kg
     r1 = (
-        params.u_gel_w_m2_k * (t_abs - t_gel)
+        u_gel * (t_abs - t_gel)
         - h_conv_g * (t_gel - t_cond_c)
         - q_des
         - q_rad_gc
     )
+
+    # Absorber→glass: Wilson Eq. 4 writes σ(T_abs⁴ − T_glass⁴) without an
+    # explicit emissivity factor (cavity / blackbody approximation).
+    eps_ag = 1.0
+    # Glass→surroundings: Wilson Eq. 3 writes σ(T_glass⁴ − T_amb⁴) with no emissivity
+    # factor (blackbody in the IR). The sink temperature is ambient by default; the
+    # COMSOL Atacama field model uses a surroundings/sky temperature below air temp.
+    eps_ga = 1.0
+    t_sky_c = t_amb_c - params.sky_temp_depression_c
+
+    if not params.has_glass:
+        q_rad_abs_amb = radiative_exchange_w_m2(t_abs, t_sky_c, emissivity=params.eps_abs)
+        r4 = (
+            params.eps_abs * q_solar_w_m2
+            - h_amb * (t_abs - t_amb_c)
+            - q_rad_abs_amb
+            - u_gel * (t_abs - t_gel)
+        )
+        r3 = t_glass - t_amb_c
+    else:
+        q_cond_ag = conduction_air_gap_w_m2(t_abs, t_glass, params.insulation_gap_m)
+        q_rad_ag = radiative_exchange_w_m2(t_abs, t_glass, emissivity=eps_ag)
+        q_rad_ga = radiative_exchange_w_m2(t_glass, t_sky_c, emissivity=eps_ga)
+        r3 = q_cond_ag + q_rad_ag - h_amb * (t_glass - t_amb_c) - q_rad_ga
+        r4 = (
+            params.eps_abs * params.tau_glass * q_solar_w_m2
+            - q_cond_ag
+            - q_rad_ag
+            - u_gel * (t_abs - t_gel)
+        )
+
     return np.array([r1, r3, r4], dtype=float)
 
 
@@ -89,11 +115,15 @@ def solve_steady_thermal(
     m_des_kg_s_m2: float,
     h_amb: float,
     params: DeviceThermalParams,
+    h_m: float,
     t_guess: tuple[float, float, float] | None = None,
     vapor_gap_m: float | None = None,
 ) -> ThermalState:
     """Solve Eqs. 1, 3, 4 for (T_gel, T_abs, T_glass)."""
-    gap_m = vapor_gap_m if vapor_gap_m is not None else params.vapor_gap_m
+    if vapor_gap_m is None:
+        gap_m = max(params.vapor_gap_m - h_m, 0.0)
+    else:
+        gap_m = vapor_gap_m
     if t_guess is None:
         t_gel0 = clamp_temperature_c(max(t_amb_c + 5.0, t_cond_c + 5.0))
         t_abs0 = clamp_temperature_c(t_gel0 + min(30.0, max(5.0, q_solar_w_m2 / 40.0)))
@@ -108,7 +138,7 @@ def solve_steady_thermal(
     sol = root(
         _residuals,
         x0=np.array([t_gel0, t_abs0, t_glass0]),
-        args=(t_cond_c, t_amb_c, q_solar_w_m2, m_des_kg_s_m2, h_amb, params, gap_m),
+        args=(t_cond_c, t_amb_c, q_solar_w_m2, m_des_kg_s_m2, h_amb, params, gap_m, h_m),
         method="hybr",
         tol=1e-8,
     )
@@ -139,7 +169,9 @@ def thermal_residual_norm(
     m_des_kg_s_m2: float,
     h_amb: float,
     params: DeviceThermalParams,
+    h_m: float = table_s3.H0_M,
 ) -> float:
+    gap_m = max(params.vapor_gap_m - h_m, 0.0)
     state = solve_steady_thermal(
         t_cond_c=t_cond_c,
         t_amb_c=t_amb_c,
@@ -147,6 +179,8 @@ def thermal_residual_norm(
         m_des_kg_s_m2=m_des_kg_s_m2,
         h_amb=h_amb,
         params=params,
+        h_m=h_m,
+        vapor_gap_m=gap_m,
     )
     r = _residuals(
         np.array([state.t_gel_c, state.t_abs_c, state.t_glass_c]),
@@ -156,6 +190,7 @@ def thermal_residual_norm(
         m_des_kg_s_m2,
         h_amb,
         params,
-        params.vapor_gap_m,
+        gap_m,
+        h_m,
     )
     return float(np.linalg.norm(r))

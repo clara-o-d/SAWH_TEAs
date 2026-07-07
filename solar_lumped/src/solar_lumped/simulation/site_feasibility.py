@@ -66,6 +66,7 @@ def passive_gel_temperature_c(profile: DailyWeatherProfile, config: DeviceConfig
         m_des_kg_s_m2=0.0,
         h_amb=des.h_amb_w_m2_k[i_peak],
         params=thermal,
+        h_m=config.hydrogel_thickness_m,
         vapor_gap_m=config.vapor_gap_m,
     )
     return float(state.t_gel_c)

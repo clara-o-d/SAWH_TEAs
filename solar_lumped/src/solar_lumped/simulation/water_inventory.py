@@ -61,8 +61,12 @@ def water_inventory_series(
         ["absorption"] * len(w_abs) + ["desorption"] * (len(w_des) - 1),
         dtype=object,
     )
-    m_des = np.concatenate([abs_res.m_des_kg_s_m2, des_res.m_des_kg_s_m2[1:]])
-    collected_water_l_m2 = cumulative_desorption_yield_l_m2(time_s, m_des)
+    # Integrate desorption flux on native desorption timeline, then embed in full series
+    collected_des = cumulative_desorption_yield_l_m2(
+        des_res.time_s, des_res.m_des_kg_s_m2
+    )
+    collected_water_l_m2 = np.zeros(len(time_s), dtype=float)
+    collected_water_l_m2[len(w_abs) - 1 :] = collected_des
     return WaterInventorySeries(
         time_s=time_s,
         water_l_m2=water_l_m2,

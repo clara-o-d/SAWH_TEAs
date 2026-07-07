@@ -16,7 +16,7 @@ from solar_lumped.physics.salt_properties import (
     equilibrium_c_w_from_dvs_at_rh,
 )
 
-PHASE_DT_S = 60.0  # 1-min integration / weather step (was 15 min)
+PHASE_DT_S = 100.0  # Wilson Note S1 / COMSOL time step (s)
 PHASE_HOURS = 12.0
 STEPS_PER_PHASE = int(round(PHASE_HOURS * 3600.0 / PHASE_DT_S))
 SOLAR_NIGHT_THRESHOLD_W_M2 = 5.0
@@ -31,6 +31,11 @@ class PhaseProfile:
     solar_w_m2: tuple[float, ...]
     h_amb_w_m2_k: tuple[float, ...]
     dt_s: float = PHASE_DT_S
+    # Optional separate convection coefficient for the condenser backing. When set,
+    # it decouples condenser cooling from the ambient h_amb that drives the
+    # absorber/glass. Wilson's Atacama device forces ~0.5 m/s over the condenser with
+    # fans (Fig. S2) regardless of the variable ambient wind. None → use h_amb.
+    h_amb_cond_w_m2_k: tuple[float, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)

@@ -16,7 +16,8 @@ from solar_lumped.weather.profiles import (
 _PACKAGE_DIR = Path(__file__).resolve().parent
 ATACAMA_RH_CSV = _PACKAGE_DIR / "Atacama_RH.csv"
 ATACAMA_TEMP_CSV = _PACKAGE_DIR / "Atacama_Temp.csv"
-ATACAMA_SOLAR_CSV = _PACKAGE_DIR / "solar_kW_m2.csv"
+ATACAMA_AMB_CSV = _PACKAGE_DIR / "Atacama_amb.csv"
+ATACAMA_SOLAR_CSV = _PACKAGE_DIR / "Atacama_solar_kW_m2.csv"
 
 # 24 h timeline origin: 18:00 (6 pm) on absorption night, matching paper figure.
 CYCLE_ORIGIN_HOUR = 18.0
@@ -25,10 +26,18 @@ DESORPTION_HOURS = 12.0
 
 # Atacama field protocol (Methods): install at 8 a.m., ~8 h desorption in sun.
 ATACAMA_INSTALL_HOUR_FROM_ORIGIN = 14.0  # 18:00 + 14 h = 08:00
-ATACAMA_FIELD_DESORPTION_HOURS = 8.0
+ATACAMA_WIND_STEP_HOUR_FROM_ORIGIN = 20.0  # 18:00 + 20 h = 14:00 (2 p.m.)
+# Digitized Fig. 4 curves begin ~0.15 h after 8 a.m. (first data point ≈ 8:09 a.m.),
+# so the model desorption is started there rather than exactly at 8:00 a.m. The
+# window still ends at 4 p.m. (8 h from 8 a.m.).
+ATACAMA_DESORPTION_START_OFFSET_H = 0.15
+ATACAMA_FIELD_DESORPTION_HOURS = 8.0 - ATACAMA_DESORPTION_START_OFFSET_H
 ATACAMA_FIELD_DESORPTION_STEPS = int(
     round(ATACAMA_FIELD_DESORPTION_HOURS * 3600.0 / PHASE_DT_S)
 )
+# Wilson Fig. S2: fan-forced condenser cooling ≈ 0.5 m/s → h ≈ 10 W/m²K, decoupled
+# from the variable ambient wind that drives the absorber/glass h_amb schedule.
+ATACAMA_CONDENSER_FAN_H_AMB_W_M2_K = 10.0
 
 
 def _load_figure_csv(path: Path) -> tuple[np.ndarray, np.ndarray]:
@@ -71,13 +80,15 @@ def _interp_clamped(
 
 
 def _atacama_h_amb_w_m2_k(hours_from_6pm: float) -> float:
-    """Paper Atacama: h=1 W/m²K overnight; h=10 from 08:00 (hour 14 on Fig. 4 axis).
+    """Wilson Atacama Methods: h_amb = 1 W/m²K, stepped to 10 W/m²K at 2 p.m.
 
-    The Fig. 4 timeline starts at 18:00; field desorption begins at hour 14 (= 08:00).
-    Previously this used hour 20 (14:00 wall time), leaving morning desorption at h=1
-    and overheating the condenser.
+    Fig. 4 timeline origin is 18:00; 2 p.m. local = hour 20 on that axis.
     """
-    return 10.0 if hours_from_6pm >= ATACAMA_INSTALL_HOUR_FROM_ORIGIN else 1.0
+    return (
+        10.0
+        if hours_from_6pm >= ATACAMA_WIND_STEP_HOUR_FROM_ORIGIN
+        else 1.0
+    )
 
 
 def _build_atacama_profile(
@@ -88,19 +99,23 @@ def _build_atacama_profile(
 ) -> DailyWeatherProfile:
     h_rh, rh = _load_figure_csv(ATACAMA_RH_CSV)
     h_t, temp_c = _load_figure_csv(ATACAMA_TEMP_CSV)
+    h_amb_fig, amb_c = _load_figure_csv(ATACAMA_AMB_CSV)
     h_s, solar_kw = _load_figure_csv(ATACAMA_SOLAR_CSV)
 
     abs_h = _phase_hour_grid(0.0, ABSORPTION_HOURS, STEPS_PER_PHASE)
     des_h = _phase_hour_grid(desorption_start_h, desorption_hours, desorption_steps)
+    # Fig. 4 ambient curve is digitized on hours from 8 a.m. install (0–8 h).
+    des_h_from_install = des_h - ATACAMA_INSTALL_HOUR_FROM_ORIGIN
 
     abs_rh = _interp_clamped(h_rh, rh, abs_h)
     des_rh = _interp_clamped(h_rh, rh, des_h)
     abs_t = _interp_clamped(h_t, temp_c, abs_h)
-    des_t = _interp_clamped(h_t, temp_c, des_h)
+    des_t = _interp_clamped(h_amb_fig, amb_c, des_h_from_install)
     des_solar = _interp_clamped(h_s, solar_kw, des_h) * 1000.0  # kW/m² → W/m²
 
     abs_hamb = tuple(_atacama_h_amb_w_m2_k(float(h)) for h in abs_h)
     des_hamb = tuple(_atacama_h_amb_w_m2_k(float(h)) for h in des_h)
+    des_hcond = (ATACAMA_CONDENSER_FAN_H_AMB_W_M2_K,) * desorption_steps
 
     return DailyWeatherProfile(
         absorption=PhaseProfile(
@@ -115,6 +130,7 @@ def _build_atacama_profile(
             relative_humidity=tuple(float(x) for x in des_rh),
             solar_w_m2=tuple(max(0.0, float(x)) for x in des_solar),
             h_amb_w_m2_k=des_hamb,
+            h_amb_cond_w_m2_k=des_hcond,
             dt_s=PHASE_DT_S,
         ),
     )
@@ -130,9 +146,15 @@ def atacama_figure_profile() -> DailyWeatherProfile:
 
 
 def atacama_field_profile() -> DailyWeatherProfile:
-    """Atacama field validation: 12 h open absorption, install 8 a.m., 8 h desorption."""
+    """Atacama field validation: 12 h open absorption, desorption from ~8:09 a.m.
+
+    Desorption begins where the digitized Fig. 4 curves start (≈0.15 h after
+    8 a.m.) and runs through 4 p.m.
+    """
     return _build_atacama_profile(
-        desorption_start_h=ATACAMA_INSTALL_HOUR_FROM_ORIGIN,
+        desorption_start_h=(
+            ATACAMA_INSTALL_HOUR_FROM_ORIGIN + ATACAMA_DESORPTION_START_OFFSET_H
+        ),
         desorption_hours=ATACAMA_FIELD_DESORPTION_HOURS,
         desorption_steps=ATACAMA_FIELD_DESORPTION_STEPS,
     )
