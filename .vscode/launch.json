@@ -58,6 +58,18 @@
       },
       "console": "integratedTerminal",
       "justMyCode": false
+    },
+    {
+      "name": "Díaz-Marín: Figure 5",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/solar_lumped/diaz-marin-et-al._re-creation/scripts/figure5.py",
+      "cwd": "${workspaceFolder}/solar_lumped/diaz-marin-et-al._re-creation/scripts",
+      "env": {
+        "PYTHONPATH": "${workspaceFolder}/solar_lumped/src:${workspaceFolder}/solar_lumped/scripts"
+      },
+      "console": "integratedTerminal",
+      "justMyCode": false
     }
   ]
 }

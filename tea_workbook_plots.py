@@ -73,6 +73,7 @@ def _segment_colors(labels: list[str]) -> list[str]:
         "Hydrogel: salt": "#55A868",
         "Hydrogel: acrylamide": "#88C999",
         "Hydrogel: additives": "#AAD4B8",
+        "MOF sorbent": "#4C72B0",
         "Fixed energy": "#C44E52",
         "Extra cycling energy": "#CCB974",
     }

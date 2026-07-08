@@ -1,4 +1,4 @@
-"""MOF / zeolite adsorbent isotherm and mass-transfer rates (governing_eq.tex Eqs. mass)."""
+"""MOF adsorbent isotherm and mass-transfer rates (tabulated MIL-100(Fe) @ 303 K)."""
 
 from __future__ import annotations
 
@@ -6,11 +6,13 @@ from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
 
+import numpy as np
 import pandas as pd
 
 from waste_heat_lumped.physics import device_defaults as dd
 from waste_heat_lumped.physics.salt_properties import (
     GAS_CONSTANT_J_MOL_K,
+    WATER_MOLAR_MASS_KG_MOL,
     clamp_temperature_c,
     saturation_vapor_pressure_pa,
 )
@@ -19,11 +21,8 @@ from waste_heat_lumped.physics.salt_properties import (
 @dataclass(frozen=True, slots=True)
 class MofProperties:
     name: str
+    isotherm_file: str
     q_max_kg_kg: float
-    q1_max_kg_kg: float
-    k1_pa_inv: float
-    q2_max_kg_kg: float
-    k2_pa_inv: float
     h_ads_j_per_kg: float
     h_des_j_per_kg: float
     m_ads_kg_m2: float
@@ -31,8 +30,42 @@ class MofProperties:
     price_usd_per_kg: float
 
 
+def _materials_dir() -> Path:
+    return Path(__file__).resolve().parent.parent / "data" / "materials"
+
+
 def _catalog_path() -> Path:
-    return Path(__file__).resolve().parent.parent / "data" / "materials" / "mof_catalog.csv"
+    return _materials_dir() / "mof_catalog.csv"
+
+
+def _isotherm_path(filename: str) -> Path:
+    return _materials_dir() / filename
+
+
+@lru_cache(maxsize=8)
+def _load_isotherm(filename: str) -> tuple[np.ndarray, np.ndarray]:
+    """Load tabulated isotherm: RH fraction, equilibrium loading q (kg water / kg MOF).
+
+    Source columns: relative pressure (%), H2O uptake (mol/kg). Relative pressure is
+    treated as RH at the measurement temperature (303 K).
+    """
+    path = _isotherm_path(filename)
+    rh_pct: list[float] = []
+    mol_per_kg: list[float] = []
+    with path.open() as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            parts = [p.strip() for p in line.split(",")]
+            rh_pct.append(float(parts[0]))
+            mol_per_kg.append(float(parts[1]))
+    if not rh_pct:
+        raise ValueError(f"No isotherm data in {path}")
+    order = np.argsort(rh_pct)
+    rh_frac = np.array(rh_pct, dtype=float)[order] / 100.0
+    q_kg_kg = np.array(mol_per_kg, dtype=float)[order] * WATER_MOLAR_MASS_KG_MOL
+    return rh_frac, q_kg_kg
 
 
 @lru_cache(maxsize=1)
@@ -41,13 +74,12 @@ def _load_catalog() -> dict[str, MofProperties]:
     out: dict[str, MofProperties] = {}
     for _, row in df.iterrows():
         name = str(row["mof"]).strip()
+        iso_file = str(row["isotherm_file"]).strip()
+        _, q_tab = _load_isotherm(iso_file)
         out[name] = MofProperties(
             name=name,
-            q_max_kg_kg=float(row["q_max_kg_kg"]),
-            q1_max_kg_kg=float(row["q1_max_kg_kg"]),
-            k1_pa_inv=float(row["K1_pa_inv"]),
-            q2_max_kg_kg=float(row["q2_max_kg_kg"]),
-            k2_pa_inv=float(row["K2_pa_inv"]),
+            isotherm_file=iso_file,
+            q_max_kg_kg=float(np.max(q_tab)),
             h_ads_j_per_kg=float(row["h_ads_j_per_kg"]),
             h_des_j_per_kg=float(row["h_des_j_per_kg"]),
             m_ads_kg_m2=float(row["m_ads_kg_m2"]),
@@ -64,19 +96,15 @@ def get_mof(name: str) -> MofProperties:
     return catalog[name]
 
 
-def loading_from_aw_dual_site(
-    aw: float,
+def loading_at_rh(
+    rh_fraction: float,
     *,
     props: MofProperties,
-    p_sat_pa: float,
 ) -> float:
-    """Dual-site Langmuir uptake q(aw) at fixed T (K1,K2 referenced to P_sat)."""
-    aw = max(0.0, min(1.0, float(aw)))
-    k1 = props.k1_pa_inv * p_sat_pa
-    k2 = props.k2_pa_inv * p_sat_pa
-    q1 = props.q1_max_kg_kg * (k1 * aw) / (1.0 + k1 * aw)
-    q2 = props.q2_max_kg_kg * (k2 * aw) / (1.0 + k2 * aw)
-    return min(props.q_max_kg_kg, q1 + q2)
+    """Forward isotherm q(RH) from tabulated MIL-100(Fe) data at 303 K."""
+    rh_tab, q_tab = _load_isotherm(props.isotherm_file)
+    rh = max(0.0, min(1.0, float(rh_fraction)))
+    return float(np.interp(rh, rh_tab, q_tab))
 
 
 def water_activity_from_loading(
@@ -85,25 +113,17 @@ def water_activity_from_loading(
     temperature_c: float,
     props: MofProperties,
 ) -> float:
-    """Invert q(aw) via bisection; aw decreases with loading at fixed T."""
+    """Invert tabulated q(RH): water activity (≈ RH) at equilibrium loading."""
+    del temperature_c  # isotherm measured at 303 K
     q = max(0.0, min(props.q_max_kg_kg, float(q_kg_kg)))
     if q <= 1e-12:
         return 0.0
-    p_sat = saturation_vapor_pressure_pa(temperature_c)
-
-    def q_at(aw: float) -> float:
-        return loading_from_aw_dual_site(aw, props=props, p_sat_pa=p_sat)
-
-    if q >= q_at(1.0) - 1e-10:
-        return 1.0
-    lo, hi = 0.0, 1.0
-    for _ in range(60):
-        mid = 0.5 * (lo + hi)
-        if q_at(mid) < q:
-            lo = mid
-        else:
-            hi = mid
-    return 0.5 * (lo + hi)
+    rh_tab, q_tab = _load_isotherm(props.isotherm_file)
+    if q >= float(q_tab[-1]) - 1e-12:
+        return float(rh_tab[-1])
+    if q <= float(q_tab[0]):
+        return float(rh_tab[0])
+    return float(np.interp(q, q_tab, rh_tab))
 
 
 def equilibrium_loading_at_rh(
@@ -112,8 +132,8 @@ def equilibrium_loading_at_rh(
     temperature_c: float,
     props: MofProperties,
 ) -> float:
-    p_sat = saturation_vapor_pressure_pa(temperature_c)
-    return loading_from_aw_dual_site(rh, props=props, p_sat_pa=p_sat)
+    del temperature_c  # isotherm measured at 303 K
+    return loading_at_rh(rh, props=props)
 
 
 def m_ads_kg_s_m2(
@@ -132,8 +152,7 @@ def m_ads_kg_s_m2(
     if driving <= 0.0:
         return 0.0
     rate_mol_m3_s = props.g_conv_m_s * (p_sat / (GAS_CONSTANT_J_MOL_K * t_k)) * driving
-    # Convert volumetric rate to kg/m²/s using coating inventory scale
-    dq_dt = rate_mol_m3_s * 0.018015 / props.m_ads_kg_m2
+    dq_dt = rate_mol_m3_s * WATER_MOLAR_MASS_KG_MOL / props.m_ads_kg_m2
     return max(0.0, dq_dt * props.m_ads_kg_m2)
 
 

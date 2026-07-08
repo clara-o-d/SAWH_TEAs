@@ -21,13 +21,11 @@ from solar_lumped.physics.device_balances import (
 )
 from solar_lumped.physics.mass_transfer import (
     MassTransferParams,
-    concentration_ratio_absorption,
-    concentration_ratio_desorption,
-    dH_dt,
-    dc_w_dt,
     m_des_kg_s_m2_from_dc_w,
 )
 from solar_lumped.physics.salt_properties import clamp_temperature_c
+from solar_lumped.physics.sorbent import evaluate_mass_rates
+from solar_lumped.simulation.device_config import DeviceConfig
 
 CyclePhase = Literal["absorption", "desorption"]
 
@@ -47,7 +45,7 @@ class CoupledRates:
 def _m_des_calc(
     m_des: float,
     *,
-    c_w: float,
+    loading: float,
     h_m: float,
     t_cond_c: float,
     t_amb_c: float,
@@ -56,6 +54,7 @@ def _m_des_calc(
     mass: MassTransferParams,
     thermal: DeviceThermalParams,
     vapor_gap_m: float,
+    config: DeviceConfig,
     t_guess: tuple[float, float, float] | None,
 ) -> tuple[float, float, float, ThermalState]:
     state = solve_steady_thermal(
@@ -69,39 +68,25 @@ def _m_des_calc(
         t_guess=t_guess,
         vapor_gap_m=vapor_gap_m,
     )
-    c_r = concentration_ratio_desorption(state.t_gel_c, t_cond_c)
-    dc = dc_w_dt(
-        c_w,
-        t_gel_c=state.t_gel_c,
-        c_r=c_r,
-        params=mass,
+    dc, dh, m_calc = evaluate_mass_rates(
+        loading=loading,
         h_m=h_m,
-        phase="desorption",
-        t_cond_c=t_cond_c,
-    )
-    dh = dH_dt(
-        c_w,
         t_gel_c=state.t_gel_c,
-        c_r=c_r,
-        params=mass,
-        h_m=h_m,
-        phase="desorption",
         t_cond_c=t_cond_c,
+        rh=0.0,
+        phase="desorption",
+        mass=mass,
+        config=config,
+        vapor_gap_m=vapor_gap_m,
     )
-    if h_m <= mass.h0_ref_m + 1e-12:
-        dh = 0.0
-    if dc > 0.0:
-        dc = 0.0
-    if dh > 0.0:
-        dh = 0.0
-    # Note S1: ṁ_des = −dc_w/dt · MW · H₀ (thermal coupling uses reference thickness)
-    m_calc = m_des_kg_s_m2_from_dc_w(dc, h0_ref_m=mass.h0_ref_m)
+    if config.sorbent == "hydrogel":
+        m_calc = m_des_kg_s_m2_from_dc_w(dc, h0_ref_m=mass.h0_ref_m)
     return m_calc, state.t_gel_c, dc, state
 
 
 def _solve_m_des_coupled(
     *,
-    c_w: float,
+    loading: float,
     h_m: float,
     t_cond_c: float,
     t_amb_c: float,
@@ -110,6 +95,7 @@ def _solve_m_des_coupled(
     mass: MassTransferParams,
     thermal: DeviceThermalParams,
     vapor_gap_m: float,
+    config: DeviceConfig,
     t_guess: tuple[float, float, float] | None,
 ) -> tuple[float, float, float, ThermalState]:
     """Root of m_calc(m) - m = 0 so Eqs. 1–4 and Eq. 5 agree (avoids fixed-point cycling)."""
@@ -117,7 +103,7 @@ def _solve_m_des_coupled(
     def residual(m_des: float) -> float:
         m_calc, _, _, _ = _m_des_calc(
             m_des,
-            c_w=c_w,
+            loading=loading,
             h_m=h_m,
             t_cond_c=t_cond_c,
             t_amb_c=t_amb_c,
@@ -126,6 +112,7 @@ def _solve_m_des_coupled(
             mass=mass,
             thermal=thermal,
             vapor_gap_m=vapor_gap_m,
+            config=config,
             t_guess=t_guess,
         )
         if not math.isfinite(m_calc):
@@ -134,7 +121,7 @@ def _solve_m_des_coupled(
 
     m_at_zero, t_gel0, dc0, state0 = _m_des_calc(
         0.0,
-        c_w=c_w,
+        loading=loading,
         h_m=h_m,
         t_cond_c=t_cond_c,
         t_amb_c=t_amb_c,
@@ -143,6 +130,7 @@ def _solve_m_des_coupled(
         mass=mass,
         thermal=thermal,
         vapor_gap_m=vapor_gap_m,
+        config=config,
         t_guess=t_guess,
     )
     if not math.isfinite(m_at_zero) or not math.isfinite(t_gel0):
@@ -173,7 +161,7 @@ def _solve_m_des_coupled(
         return 0.0, t_gel0, dc0, state0
     m_calc, t_gel, dc, state = _m_des_calc(
         m_star,
-        c_w=c_w,
+        loading=loading,
         h_m=h_m,
         t_cond_c=t_cond_c,
         t_amb_c=t_amb_c,
@@ -182,6 +170,7 @@ def _solve_m_des_coupled(
         mass=mass,
         thermal=thermal,
         vapor_gap_m=vapor_gap_m,
+        config=config,
         t_guess=(state0.t_gel_c, state0.t_abs_c, state0.t_glass_c),
     )
     return m_calc, t_gel, dc, state
@@ -203,10 +192,13 @@ def evaluate_coupled_rates(
     condenser_thermal_mass_j_m2_k: float,
     fin_area_ratio: float,
     h_fg_j_per_kg: float,
+    config: DeviceConfig,
     t_guess: tuple[float, float, float] | None = None,
     h_amb_cond: float | None = None,
 ) -> CoupledRates:
-    """Return (dc_w/dt, dH/dt, dT_cond/dt) with self-consistent T_gel and m_des.
+    """Return (dloading/dt, dH/dt, dT_cond/dt) with self-consistent T_gel and m_des.
+
+    ``c_w`` stores hydrogel mol/m³ or MOF kg/kg loading depending on ``config.sorbent``.
 
     ``h_amb_cond`` sets the condenser-backing convection coefficient; when None the
     ambient ``h_amb`` (which also drives the absorber/glass) is reused. Providing a
@@ -228,25 +220,17 @@ def evaluate_coupled_rates(
             h_conv_g=h_conv_g,
             m_des_kg_s_m2=0.0,
         )
-        c_r = concentration_ratio_absorption(rh)
-        dc = dc_w_dt(
-            c_w,
-            t_gel_c=t_gel,
-            c_r=c_r,
-            params=mass,
+        dc, dh, _ = evaluate_mass_rates(
+            loading=c_w,
             h_m=h_m,
-            phase="absorption",
-        )
-        dh = dH_dt(
-            c_w,
             t_gel_c=t_gel,
-            c_r=c_r,
-            params=mass,
-            h_m=h_m,
+            t_cond_c=None,
+            rh=rh,
             phase="absorption",
+            mass=mass,
+            config=config,
+            vapor_gap_m=vapor_gap_m,
         )
-        if h_m <= mass.h0_ref_m + 1e-12:
-            dh = max(0.0, dh)
         return CoupledRates(
             dc_w_dt=dc,
             dH_dt=dh,
@@ -258,7 +242,7 @@ def evaluate_coupled_rates(
 
     t_cond = clamp_temperature_c(t_cond_c)
     m_des, t_gel, dc, state = _solve_m_des_coupled(
-        c_w=c_w,
+        loading=c_w,
         h_m=h_m,
         t_cond_c=t_cond,
         t_amb_c=t_amb_c,
@@ -267,25 +251,20 @@ def evaluate_coupled_rates(
         mass=mass,
         thermal=thermal,
         vapor_gap_m=gap_eff,
+        config=config,
         t_guess=t_guess,
     )
-    c_r = concentration_ratio_desorption(t_gel, t_cond)
-    dh = dH_dt(
-        c_w,
-        t_gel_c=t_gel,
-        c_r=c_r,
-        params=mass,
+    _, dh, _ = evaluate_mass_rates(
+        loading=c_w,
         h_m=h_m,
-        phase="desorption",
+        t_gel_c=t_gel,
         t_cond_c=t_cond,
+        rh=rh,
+        phase="desorption",
+        mass=mass,
+        config=config,
+        vapor_gap_m=vapor_gap_m,
     )
-    h0 = mass.h0_ref_m
-    if h_m <= h0 + 1e-12:
-        dh = 0.0
-    if dc > 0.0:
-        dc = 0.0
-    if dh > 0.0:
-        dh = 0.0
 
     h_conv_g = state.h_conv_g
     h_amb_for_cond = h_amb if h_amb_cond is None else h_amb_cond

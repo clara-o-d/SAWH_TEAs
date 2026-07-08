@@ -30,6 +30,7 @@ def test_table_s3_device_defaults():
     assert cfg.fin_area_ratio == table_s3.FIN_AREA_RATIO
     assert cfg.h_fg_j_per_kg == table_s3.H_FG_J_PER_KG
     thermal = cfg.thermal_params()
+    assert thermal.h_des_j_per_kg == table_s3.H_DES_J_PER_KG
     assert table_s3.u_gel_w_m2_k(cfg.hydrogel_thickness_m) == pytest.approx(
         table_s3.U_GEL_W_M2_K
     )
@@ -105,7 +106,7 @@ def test_water_inventory_series_baseline():
     from solar_lumped.simulation.water_inventory import water_inventory_series
 
     y, _, abs_res, des_res = run_daily_cycle(baseline_profile(), DeviceConfig.baseline())
-    series = water_inventory_series(abs_res, des_res, h0_ref_m=DeviceConfig.baseline().hydrogel_thickness_m)
+    series = water_inventory_series(abs_res, des_res, config=DeviceConfig.baseline())
     assert len(series.time_s) == len(series.water_l_m2) == len(series.phase)
     assert len(series.collected_water_l_m2) == len(series.time_s)
     assert series.water_l_m2[0] > 0.0

@@ -197,6 +197,7 @@ def test_absorption_coupled_rates_match_doc(config: DeviceConfig, mass, thermal)
         condenser_thermal_mass_j_m2_k=config.condenser_thermal_mass_j_m2_k(),
         fin_area_ratio=config.fin_area_ratio,
         h_fg_j_per_kg=config.h_fg_j_per_kg,
+        config=config,
     )
     assert rates.m_des_kg_s_m2 == 0.0
     assert rates.dT_cond_dt == 0.0
@@ -224,6 +225,7 @@ def test_desorption_m_des_self_consistent(config: DeviceConfig, mass, thermal):
         condenser_thermal_mass_j_m2_k=config.condenser_thermal_mass_j_m2_k(),
         fin_area_ratio=config.fin_area_ratio,
         h_fg_j_per_kg=config.h_fg_j_per_kg,
+        config=config,
     )
     m_calc = m_des_kg_s_m2_from_dc_w(rates.dc_w_dt, h0_ref_m=h0)
     assert rates.dc_w_dt <= 0.0
@@ -253,6 +255,7 @@ def test_eq2_condenser_rate_matches_formula(config: DeviceConfig, mass, thermal)
         condenser_thermal_mass_j_m2_k=config.condenser_thermal_mass_j_m2_k(),
         fin_area_ratio=config.fin_area_ratio,
         h_fg_j_per_kg=config.h_fg_j_per_kg,
+        config=config,
     )
     t_gel = rates.t_gel_c
     m_des = rates.m_des_kg_s_m2
@@ -288,6 +291,7 @@ def test_thickness_constraints_at_h0(config: DeviceConfig, mass, thermal):
         condenser_thermal_mass_j_m2_k=config.condenser_thermal_mass_j_m2_k(),
         fin_area_ratio=config.fin_area_ratio,
         h_fg_j_per_kg=config.h_fg_j_per_kg,
+        config=config,
     )
     assert abs_rates.dH_dt >= 0.0
 
@@ -306,6 +310,7 @@ def test_thickness_constraints_at_h0(config: DeviceConfig, mass, thermal):
         condenser_thermal_mass_j_m2_k=config.condenser_thermal_mass_j_m2_k(),
         fin_area_ratio=config.fin_area_ratio,
         h_fg_j_per_kg=config.h_fg_j_per_kg,
+        config=config,
     )
     assert des_rates.dH_dt == 0.0
 

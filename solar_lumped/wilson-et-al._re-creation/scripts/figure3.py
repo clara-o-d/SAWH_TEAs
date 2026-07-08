@@ -8,6 +8,11 @@ temperature from the paper figures (CSVs in the weather directory).
 
 Uncertainty band: h_amb = 10 ± 2.5 W/m²K, matching Wilson Methods.
 
+Optional ``--wilson-initial-temps``: start desorption at the first digitized
+Fig. 3C reference point for each component (absorber / glass / condenser).
+
+``--desorption-solver {quasi_steady,segregated,coupled_bdf}`` (default: quasi_steady).
+
 Output saved to:  wilson-et-al._re-creation/outputs/figure3/figure3b.png
 """
 
@@ -32,8 +37,9 @@ for _p in (_SRC, _SOLAR_ROOT):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
+from solar_lumped.physics import table_s3
 from solar_lumped.simulation.coupled_dynamics import evaluate_coupled_rates
-from solar_lumped.simulation.device_config import DeviceConfig
+from solar_lumped.simulation.device_config import DeviceConfig, register_desorption_solver_cli
 from solar_lumped.simulation.ode_system import run_daily_cycle
 from solar_lumped.simulation.water_inventory import cumulative_desorption_yield_l_m2
 from solar_lumped.weather.profiles import (
@@ -49,6 +55,10 @@ _OUT_DIR.mkdir(parents=True, exist_ok=True)
 _REF_DIR = _WILSON_DIR / "reference" / "figure3"
 _WEATHER_DIR = _SRC / "solar_lumped" / "weather"
 _REF_LABEL = "Wilson et al. (digitized)"
+
+_REF_ABSORBER_CSV = "Cambridge_absorber.csv"
+_REF_GLASS_CSV = "Cambridge_glass.csv"
+_REF_CONDENSER_CSV = "Cambridge_condenser.csv"
 
 # Solar absorber footprint area (Wilson Table S3). The digitized Fig. 3C water
 # output is reported as device-total mL (paper: "~130 mL total", Δm_gel = 131 g);
@@ -160,13 +170,21 @@ def _make_profile(
 # 3. Device configuration (optimised Cambridge device, Wilson Methods)
 # ---------------------------------------------------------------------------
 
-def _make_config() -> DeviceConfig:
-    return DeviceConfig(
-        hydrogel_thickness_m=0.004,   # H0 = 4 mm
-        vapor_gap_m=0.040,            # L_g = 40 mm
-        fin_area_ratio=7.0,           # A_r = 7
-        tilt_deg=35.0,                # Cambridge rooftop tilt
-    )
+def _make_config(
+    *,
+    wilson_initial_temps: bool = False,
+    desorption_solver: str = "quasi_steady",
+) -> DeviceConfig:
+    kwargs: dict[str, object] = {
+        "hydrogel_thickness_m": 0.004,   # H0 = 4 mm
+        "vapor_gap_m": 0.040,            # L_g = 40 mm
+        "fin_area_ratio": table_s3.FIN_AREA_RATIO,  # A_r = 7.1 (Wilson Table S3)
+        "tilt_deg": 35.0,                # Cambridge rooftop tilt (~35°, Methods)
+        "desorption_solver": desorption_solver,
+    }
+    if wilson_initial_temps:
+        kwargs["coupled_initial_temps_c"] = _cambridge_initial_temps_c()
+    return DeviceConfig(**kwargs)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +228,7 @@ def _reconstruct_all_temps(
             condenser_thermal_mass_j_m2_k=tmass,
             fin_area_ratio=config.fin_area_ratio,
             h_fg_j_per_kg=config.h_fg_j_per_kg,
+            config=config,
             t_guess=guess,
         )
         t_abs_hist.append(rates.thermal.t_abs_c)
@@ -224,17 +243,25 @@ def run_simulation(
     temp_grid: np.ndarray,
     *,
     h_amb: float,
+    wilson_initial_temps: bool = False,
+    desorption_solver: str = "quasi_steady",
 ) -> dict[str, np.ndarray]:
     """
     Run one daily cycle and return a dict of temperature arrays vs time.
     Keys: 'time_hr', 't_abs', 't_glass', 't_cond', 't_gel', 't_amb'.
     """
-    config = _make_config()
+    config = _make_config(
+        wilson_initial_temps=wilson_initial_temps,
+        desorption_solver=desorption_solver,
+    )
     profile = _make_profile(solar_grid, temp_grid, h_amb=h_amb)
 
     _, _, _, des_res = run_daily_cycle(profile, config)
 
-    t_abs, t_glass = _reconstruct_all_temps(des_res, profile.desorption, config)
+    if des_res.t_abs_c is not None and des_res.t_glass_c is not None:
+        t_abs, t_glass = des_res.t_abs_c, des_res.t_glass_c
+    else:
+        t_abs, t_glass = _reconstruct_all_temps(des_res, profile.desorption, config)
     time_hr = des_res.time_s / 3600.0
 
     # Ambient temperature at each ODE output time point (for reference)
@@ -273,6 +300,26 @@ _COL_AMB = "#2040b0"      # blue — ambient reference
 
 def _fill(ax, t, lo, hi, color):
     ax.fill_between(t, lo, hi, color=color, alpha=0.18, linewidth=0)
+
+
+def _first_ref_temp(filename: str, default: float) -> float:
+    """First y-value from a digitized reference CSV (Wilson start-of-curve point)."""
+    loaded = _load_ref_csv(filename)
+    if loaded is None:
+        return default
+    _, y = loaded
+    mask = ~np.isnan(y)
+    if not mask.any():
+        return default
+    return float(y[mask][0])
+
+
+def _cambridge_initial_temps_c() -> tuple[float, float, float, float]:
+    """Wilson digitized Fig. 3C first points: gel=abs, glass, condenser."""
+    t_abs = _first_ref_temp(_REF_ABSORBER_CSV, _T_ABS_C)
+    t_glass = _first_ref_temp(_REF_GLASS_CSV, _T_ABS_C)
+    t_cond = _first_ref_temp(_REF_CONDENSER_CSV, _T_ABS_C)
+    return (t_abs, t_abs, t_glass, t_cond)
 
 
 def _load_ref_csv(filename: str) -> tuple[np.ndarray, np.ndarray] | None:
@@ -434,8 +481,31 @@ def plot_figure3b(
 # ---------------------------------------------------------------------------
 
 def main() -> Path:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description="Wilson Figure 3 — Cambridge field-test temperature model",
+    )
+    register_desorption_solver_cli(parser)
+    parser.add_argument(
+        "--wilson-initial-temps",
+        action="store_true",
+        help=(
+            "Start desorption at the first digitized Wilson Fig. 3C temperatures "
+            "(absorber, glass, condenser CSVs)."
+        ),
+    )
+    args = parser.parse_args()
+
     print("Wilson Figure 3B — Cambridge temperature model")
     print("=" * 50)
+    print(f"  desorption_solver = {args.desorption_solver}")
+    if args.wilson_initial_temps:
+        ic = _cambridge_initial_temps_c()
+        print(
+            f"  wilson_initial_temps: gel/abs={ic[0]:.1f} °C, "
+            f"glass={ic[2]:.1f} °C, cond={ic[3]:.1f} °C"
+        )
 
     print("\nLoading and interpolating Cambridge weather CSVs…")
     t_grid_hr, solar_grid, temp_grid = _load_cambridge_weather()
@@ -445,14 +515,18 @@ def main() -> Path:
         f"  T_amb: min={temp_grid.min():.1f}, max={temp_grid.max():.1f} °C"
     )
 
+    sim_kw = {
+        "wilson_initial_temps": args.wilson_initial_temps,
+        "desorption_solver": args.desorption_solver,
+    }
     print("\nRunning simulations for h_amb = 7.5, 10.0, 12.5 W/m²K…")
-    res_lo = run_simulation(solar_grid, temp_grid, h_amb=_H_AMB_LO)
+    res_lo = run_simulation(solar_grid, temp_grid, h_amb=_H_AMB_LO, **sim_kw)
     print(f"  h_amb={_H_AMB_LO}: T_abs peak = {res_lo['t_abs'].max():.1f} °C")
 
-    res_mid = run_simulation(solar_grid, temp_grid, h_amb=_H_AMB_MID)
+    res_mid = run_simulation(solar_grid, temp_grid, h_amb=_H_AMB_MID, **sim_kw)
     print(f"  h_amb={_H_AMB_MID}: T_abs peak = {res_mid['t_abs'].max():.1f} °C")
 
-    res_hi = run_simulation(solar_grid, temp_grid, h_amb=_H_AMB_HI)
+    res_hi = run_simulation(solar_grid, temp_grid, h_amb=_H_AMB_HI, **sim_kw)
     print(f"  h_amb={_H_AMB_HI}: T_abs peak = {res_hi['t_abs'].max():.1f} °C")
 
     print("\nPlotting Figure 3…")

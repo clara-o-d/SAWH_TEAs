@@ -4,7 +4,7 @@ Generate Wilson et al. (2025) Figure 2 sweep data (panels B–F).
 
 Baseline conditions (from paper Methods):
   T_amb = 25 °C, Q_solar = 600 W/m², RH = 0.5, h_amb = 10 W/m²K,
-  H₀ = 4 mm, L_g = 40 mm, ε_abs = 0.95, τ_glass = 0.9, A_r = 7
+  H₀ = 4 mm, L_g = 40 mm, ε_abs = 0.95, τ_glass = 0.9, A_r = 7.1
 
 Error bands: h_amb = 10 ± 2.5 W/m²K (±25%) per Wilson Methods section.
 
@@ -33,6 +33,7 @@ for _p in (_SRC, _SOLAR_ROOT):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
+from solar_lumped.physics import table_s3
 from solar_lumped.physics.device_balances import DeviceThermalParams
 from solar_lumped.simulation.device_config import DeviceConfig, register_desorption_solver_cli
 from solar_lumped.simulation.ode_system import run_daily_cycle
@@ -52,10 +53,10 @@ _H_AMB = 10.0
 _H_AMB_LO = 7.5
 _H_AMB_HI = 12.5
 
-_DESORPTION_SOLVER = "coupled_bdf"
+_DESORPTION_SOLVER = "quasi_steady"
 _H0_MM = 4.0
 _LG_MM = 40.0
-_A_R = 7.0
+_A_R = 7.1
 _EPS_ABS = 0.95
 _TAU_GLASS = 0.9
 
@@ -75,6 +76,7 @@ def _make_thermal(
         tau_glass=tau_glass,
         has_glass=has_glass,
         vapor_gap_m=vapor_gap_m,
+        h_des_j_per_kg=table_s3.H_DES_J_PER_KG,
     )
 
 
@@ -366,7 +368,7 @@ def main() -> Path:
     global _DESORPTION_SOLVER
 
     parser = argparse.ArgumentParser(description="Wilson Figure 2 — parametric sweep data")
-    register_desorption_solver_cli(parser, default="coupled_bdf")
+    register_desorption_solver_cli(parser)
     args = parser.parse_args()
     _DESORPTION_SOLVER = args.desorption_solver
 

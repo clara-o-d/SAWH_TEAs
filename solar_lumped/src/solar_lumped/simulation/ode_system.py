@@ -24,10 +24,8 @@ from solar_lumped.physics.mass_transfer import (
     dc_w_dt,
     m_des_kg_s_m2_from_dc_w,
 )
-from solar_lumped.physics.salt_properties import (
-    clamp_temperature_c,
-    fabrication_c_w_initial,
-)
+from solar_lumped.physics.salt_properties import clamp_temperature_c
+from solar_lumped.physics.sorbent import clip_loading, evaluate_mass_rates, initial_loading
 from solar_lumped.simulation.coupled_dynamics import evaluate_coupled_rates
 from solar_lumped.simulation.device_config import DeviceConfig
 from solar_lumped.weather.profiles import DailyWeatherProfile, PhaseProfile
@@ -46,9 +44,8 @@ class PhaseResult:
     t_gel_c: np.ndarray
     water_collected_kg_m2: float
     m_des_kg_s_m2: np.ndarray
-    # Populated only by the segregated transient solver (surfaces carry thermal
-    # capacitance there); None for the quasi-steady solver, where absorber/glass
-    # temperatures are reconstructed algebraically from the mass state.
+    # Surface temperatures along the trajectory. Populated by transient solvers and
+    # by quasi_steady (algebraic Eqs 1/3/4 each step, with k=0 pinned when ICs set).
     t_abs_c: np.ndarray | None = None
     t_glass_c: np.ndarray | None = None
 
@@ -96,6 +93,7 @@ def _integrate_absorption(
             condenser_thermal_mass_j_m2_k=config.condenser_thermal_mass_j_m2_k(),
             fin_area_ratio=config.fin_area_ratio,
             h_fg_j_per_kg=config.h_fg_j_per_kg,
+            config=config,
             t_guess=t_guess,
         )
         dh = rates.dH_dt if h_m > h_min + 1e-12 else max(0.0, rates.dH_dt)
@@ -140,6 +138,7 @@ def _integrate_absorption(
             condenser_thermal_mass_j_m2_k=config.condenser_thermal_mass_j_m2_k(),
             fin_area_ratio=config.fin_area_ratio,
             h_fg_j_per_kg=config.h_fg_j_per_kg,
+            config=config,
             t_guess=guess,
         )
         guess = (
@@ -149,7 +148,7 @@ def _integrate_absorption(
         )
         t_gel_hist.append(rates.t_gel_c)
 
-    c_w_out = np.clip(sol.y[0], C_W_MIN_MOL_M3, C_W_MAX_MOL_M3)
+    c_w_out = np.array([clip_loading(float(v), config=config) for v in sol.y[0]])
     h_out = np.clip(sol.y[1], h_min, h_max)
     return PhaseResult(
         time_s=sol.t,
@@ -178,7 +177,18 @@ def _integrate_desorption(
     t_span = (0.0, dt * n)
     t_eval = np.linspace(0.0, t_span[1], n + 1)
     h_min = config.hydrogel_thickness_m
-    t_cond0 = clamp_temperature_c(profile.temperature_c[0])
+    surface_ic = config.desorption_surface_ic_c()
+    if surface_ic is not None:
+        t_gel_ic, t_abs_ic, t_glass_ic, t_cond_ic = (
+            clamp_temperature_c(t) for t in surface_ic
+        )
+        t_cond0 = t_cond_ic
+        t_guess0 = (t_gel_ic, t_abs_ic, t_glass_ic)
+    else:
+        t_cond0 = clamp_temperature_c(profile.temperature_c[0])
+        if t_guess0 is None:
+            t_amb = t_cond0
+            t_guess0 = (t_amb, t_amb, t_amb)
     t_guess: tuple[float, float, float] | None = t_guess0
 
     def rhs(t: float, y: np.ndarray) -> np.ndarray:
@@ -200,6 +210,7 @@ def _integrate_desorption(
             condenser_thermal_mass_j_m2_k=tmass,
             fin_area_ratio=config.fin_area_ratio,
             h_fg_j_per_kg=config.h_fg_j_per_kg,
+            config=config,
             t_guess=t_guess,
             h_amb_cond=(
                 profile.h_amb_cond_w_m2_k[i]
@@ -231,6 +242,8 @@ def _integrate_desorption(
         raise RuntimeError(f"Desorption integration failed: {sol.message}")
 
     t_gel_hist: list[float] = []
+    t_abs_hist: list[float] = []
+    t_glass_hist: list[float] = []
     t_cond_hist: list[float] = []
     m_des_hist: list[float] = []
     guess: tuple[float, float, float] | None = t_guess0
@@ -251,6 +264,7 @@ def _integrate_desorption(
             condenser_thermal_mass_j_m2_k=tmass,
             fin_area_ratio=config.fin_area_ratio,
             h_fg_j_per_kg=config.h_fg_j_per_kg,
+            config=config,
             t_guess=guess,
             h_amb_cond=(
                 profile.h_amb_cond_w_m2_k[i]
@@ -263,21 +277,23 @@ def _integrate_desorption(
             rates.thermal.t_abs_c,
             rates.thermal.t_glass_c,
         )
-        t_gel_hist.append(rates.t_gel_c)
+        if k == 0 and surface_ic is not None:
+            t_gel_hist.append(t_gel_ic)
+            t_abs_hist.append(t_abs_ic)
+            t_glass_hist.append(t_glass_ic)
+        else:
+            t_gel_hist.append(rates.t_gel_c)
+            t_abs_hist.append(rates.thermal.t_abs_c)
+            t_glass_hist.append(rates.thermal.t_glass_c)
         t_cond_hist.append(float(sol.y[2, k]))
-        h_k = max(float(sol.y[1, k]), h_min)
-        dc_k = min(0.0, rates.dc_w_dt)
-        # Yield follows Wilson Note S1: ṁ_des = −dc_w/dt · MW · H₀ (reference thickness).
-        # This is consistent with how the desorption ODE and thermal coupling are derived.
-        m_note_s1 = m_des_kg_s_m2_from_dc_w(dc_k, h0_ref_m=h_min)
-        m_des_hist.append(m_note_s1)
+        m_des_hist.append(rates.m_des_kg_s_m2)
 
     water = 0.0
     for k in range(len(sol.t) - 1):
         dt_step = float(sol.t[k + 1] - sol.t[k])
         water += 0.5 * (m_des_hist[k] + m_des_hist[k + 1]) * dt_step
 
-    c_w_out = np.clip(sol.y[0], C_W_MIN_MOL_M3, C_W_MAX_MOL_M3)
+    c_w_out = np.array([clip_loading(float(v), config=config) for v in sol.y[0]])
     h_out = np.maximum(sol.y[1], h_min)
     return PhaseResult(
         time_s=sol.t,
@@ -287,6 +303,8 @@ def _integrate_desorption(
         t_gel_c=np.array(t_gel_hist),
         water_collected_kg_m2=max(0.0, water),
         m_des_kg_s_m2=np.array(m_des_hist),
+        t_abs_c=np.array(t_abs_hist),
+        t_glass_c=np.array(t_glass_hist),
     )
 
 
@@ -435,20 +453,22 @@ def _integrate_desorption_segregated(
         ) / (a_gel + u_gel + h_conv_g + h_r_gc)
 
         # 4) Mass transfer (Eqs. 5/6) at the updated gel temperature.
-        c_r = concentration_ratio_desorption(t_gel, t_cond)
-        dc = min(0.0, dc_w_dt(
-            c_w, t_gel_c=t_gel, c_r=c_r, params=mass, h_m=h_m,
-            phase="desorption", t_cond_c=t_cond,
-        ))
-        dh = dH_dt(
-            c_w, t_gel_c=t_gel, c_r=c_r, params=mass, h_m=h_m,
-            phase="desorption", t_cond_c=t_cond,
+        dc, dh, m_des = evaluate_mass_rates(
+            loading=c_w,
+            h_m=h_m,
+            t_gel_c=t_gel,
+            t_cond_c=t_cond,
+            rh=profile.relative_humidity[i],
+            phase="desorption",
+            mass=mass,
+            config=config,
+            vapor_gap_m=config.vapor_gap_m,
         )
+        dc = min(0.0, dc)
         dh = min(0.0, dh)
         if h_m <= h_min + 1e-12:
             dh = 0.0
-        m_des = m_des_kg_s_m2_from_dc_w(dc, h0_ref_m=h_min)
-        c_w = float(np.clip(c_w + dt * dc, C_W_MIN_MOL_M3, C_W_MAX_MOL_M3))
+        c_w = clip_loading(c_w + dt * dc, config=config)
         h_m = max(h_m + dt * dh, h_min)
 
         # 5) Condenser (Eq. 2) — backward-Euler in T_cond.
@@ -537,19 +557,22 @@ def _integrate_desorption_coupled_ode(
     def _mass_rates(
         c_w: float, h_m: float, t_gel: float, t_cond: float
     ) -> tuple[float, float, float]:
-        c_w = float(np.clip(c_w, C_W_MIN_MOL_M3, C_W_MAX_MOL_M3))
-        c_r = concentration_ratio_desorption(t_gel, t_cond)
-        dc = min(0.0, dc_w_dt(
-            c_w, t_gel_c=t_gel, c_r=c_r, params=mass, h_m=h_m,
-            phase="desorption", t_cond_c=t_cond,
-        ))
-        dh = min(0.0, dH_dt(
-            c_w, t_gel_c=t_gel, c_r=c_r, params=mass, h_m=h_m,
-            phase="desorption", t_cond_c=t_cond,
-        ))
+        c_w = clip_loading(c_w, config=config)
+        dc, dh, m_des = evaluate_mass_rates(
+            loading=c_w,
+            h_m=h_m,
+            t_gel_c=t_gel,
+            t_cond_c=t_cond,
+            rh=0.0,
+            phase="desorption",
+            mass=mass,
+            config=config,
+            vapor_gap_m=config.vapor_gap_m,
+        )
+        dc = min(0.0, dc)
+        dh = min(0.0, dh)
         if h_m <= h_min + 1e-12:
             dh = 0.0
-        m_des = m_des_kg_s_m2_from_dc_w(dc, h0_ref_m=h_min)
         return dc, dh, m_des
 
     def rhs(t: float, y: np.ndarray) -> np.ndarray:
@@ -624,7 +647,7 @@ def _integrate_desorption_coupled_ode(
     t_abs_hist = sol.y[1]
     t_glass_hist = sol.y[2]
     t_cond_hist = sol.y[3]
-    c_w_hist = np.clip(sol.y[4], C_W_MIN_MOL_M3, C_W_MAX_MOL_M3)
+    c_w_hist = np.array([clip_loading(float(v), config=config) for v in sol.y[4]])
     h_hist = np.maximum(sol.y[5], h_min)
 
     m_des_hist = np.empty(len(sol.t))
@@ -725,12 +748,7 @@ def run_daily_cycle(
     if h_initial is None:
         h_initial = h0
     if c_w_initial is None:
-        c_w_initial = fabrication_c_w_initial(
-            salt_name=config.salt_name,
-            salt_to_polymer_ratio=config.salt_to_polymer_ratio,
-            hydrogel_thickness_m=h0,
-            hydrogel_density_kg_m3=config.hydrogel_density_kg_m3,
-        )
+        c_w_initial = initial_loading(config)
 
     abs_res = _integrate_absorption(c_w_initial, h_initial, profile.absorption, config)
     if config.desorption_solver == "coupled_bdf":
@@ -748,14 +766,11 @@ def run_daily_cycle(
             config,
         )
     else:
-        t_amb_des0 = clamp_temperature_c(profile.desorption.temperature_c[0])
-        desorption_t_guess0 = (t_amb_des0, t_amb_des0, t_amb_des0)
         des_res = _integrate_desorption(
             float(abs_res.c_w[-1]),
             float(abs_res.H[-1]),
             profile.desorption,
             config,
-            t_guess0=desorption_t_guess0,
         )
     yield_kg = max(0.0, des_res.water_collected_kg_m2)
 

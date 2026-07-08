@@ -1,4 +1,4 @@
-"""Water-in-gel inventory time series from a daily absorption–desorption cycle."""
+"""Water-in-sorbent inventory time series from a daily absorption–desorption cycle."""
 
 from __future__ import annotations
 
@@ -9,8 +9,9 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
+from solar_lumped.physics.sorbent import inventory_ylabel, water_in_sorbent_l_m2
+from solar_lumped.simulation.device_config import DeviceConfig
 from solar_lumped.simulation.ode_system import PhaseResult
-from solar_lumped.weather.fig_s1 import water_in_gel_l_m2
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,18 +40,19 @@ def water_inventory_series(
     abs_res: PhaseResult,
     des_res: PhaseResult,
     *,
-    h0_ref_m: float,
+    config: DeviceConfig,
 ) -> WaterInventorySeries:
-    """Concatenate absorption and desorption phases into one water-in-gel trajectory."""
+    """Concatenate absorption and desorption phases into one sorbent water trajectory."""
+    h0_ref = config.hydrogel_thickness_m
     w_abs = np.array(
         [
-            water_in_gel_l_m2(float(c), float(h), h0_ref_m=h0_ref_m)
+            water_in_sorbent_l_m2(float(c), float(h), config=config)
             for c, h in zip(abs_res.c_w, abs_res.H)
         ]
     )
     w_des = np.array(
         [
-            water_in_gel_l_m2(float(c), float(h), h0_ref_m=h0_ref_m)
+            water_in_sorbent_l_m2(float(c), float(h), config=config)
             for c, h in zip(des_res.c_w, des_res.H)
         ]
     )
@@ -61,7 +63,6 @@ def water_inventory_series(
         ["absorption"] * len(w_abs) + ["desorption"] * (len(w_des) - 1),
         dtype=object,
     )
-    # Integrate desorption flux on native desorption timeline, then embed in full series
     collected_des = cumulative_desorption_yield_l_m2(
         des_res.time_s, des_res.m_des_kg_s_m2
     )
@@ -80,7 +81,7 @@ def write_water_inventory_csv(path: Path, series: WaterInventorySeries) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as f:
         w = csv.writer(f)
-        w.writerow(["time_s", "time_h", "phase", "water_in_gel_l_m2", "collected_water_l_m2"])
+        w.writerow(["time_s", "time_h", "phase", "water_in_sorbent_l_m2", "collected_water_l_m2"])
         for t, ph, w_l, y_l in zip(
             series.time_s,
             series.phase,
@@ -102,15 +103,17 @@ def plot_water_inventory(
     path: Path,
     series: WaterInventorySeries,
     *,
+    config: DeviceConfig,
     title: str | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     time_h = series.time_s / 3600.0
     phase_mark_h = series.absorption_end_s / 3600.0
+    ylabel = inventory_ylabel(config)
     fig, (ax_inv, ax_yield) = plt.subplots(2, 1, figsize=(7, 6), sharex=True)
     ax_inv.plot(time_h, series.water_l_m2, color="#4C72B0", linewidth=2)
     ax_inv.axvline(phase_mark_h, color="k", linewidth=0.8, linestyle="--", alpha=0.45)
-    ax_inv.set_ylabel("Water in gel (L/m²)")
+    ax_inv.set_ylabel(ylabel)
     ax_inv.grid(True, alpha=0.3)
 
     ax_yield.plot(time_h, series.collected_water_l_m2, color="#C44E52", linewidth=2)

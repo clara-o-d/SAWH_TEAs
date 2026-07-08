@@ -56,7 +56,7 @@ H_AMB_W_M2_K: float = 15.0
 
 # Sorbent defaults
 DEFAULT_SORBENT: str = "hydrogel"
-DEFAULT_MOF_NAME: str = "placeholder_mof"
+DEFAULT_MOF_NAME: str = "MIL-100_Fe"
 DEFAULT_SALT_NAME: str = "LiCl"
 SALT_TO_POLYMER_RATIO: float = 4.0
 H0_M: float = 0.004
@@ -69,5 +69,5 @@ C_W_MIN_HYDROGEL: float = 100.0
 
 # MOF placeholder
 Q_MIN_KG_KG: float = 0.0
-Q_MAX_KG_KG: float = 0.40
+Q_MAX_KG_KG: float = 0.53  # MIL-100(Fe) tabulated maximum @ ~99 % RH
 Q_REGEN_KG_KG: float = 0.08

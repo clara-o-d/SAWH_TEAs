@@ -16,10 +16,13 @@ Panel D: Predicted cumulative water output vs time; single measured endpoint
          (0.62 L/m²) from paper shown as a star marker.
 
 Outputs saved to:  wilson-et-al._re-creation/outputs/figure4/
+  - figure4.png
+  - figure4_hourly_model.csv  (model estimates at each desorption hour)
 """
 
 from __future__ import annotations
 
+import csv
 import sys
 from pathlib import Path
 
@@ -85,6 +88,7 @@ def _series_r2(time_h: np.ndarray, model_y: np.ndarray, ref_csv: str) -> float |
 # Fig. 4C/D x-axis: desorption window 8 am → 4 pm (0 h = install at 8 am).
 _DESORPTION_START_HOUR = 8
 _DESORPTION_CLOCK_TICKS_H = (0.0, 2.0, 4.0, 6.0, 8.0)
+_HOURLY_MODEL_CSV = "figure4_hourly_model.csv"
 
 
 def _desorption_clock_label(hours_from_8am: float) -> str:
@@ -97,6 +101,70 @@ def _desorption_clock_label(hours_from_8am: float) -> str:
     if hour == 12:
         return "12 pm"
     return f"{hour - 12} pm"
+
+
+def _hourly_desorption_times_h(duration_h: float) -> np.ndarray:
+    """Integer hours from 8 am through the end of the desorption window."""
+    last_hour = min(8, int(np.floor(duration_h + 1e-9)))
+    return np.arange(0, last_hour + 1, dtype=float)
+
+
+def _interp_at_hours(time_h: np.ndarray, values: np.ndarray, hours: np.ndarray) -> np.ndarray:
+    """Linear interpolation of a model series onto hourly clock times."""
+    return np.interp(hours, time_h, values)
+
+
+def write_hourly_model_estimates(data: dict) -> Path:
+    """Write model temperatures and water output at each desorption hour to CSV."""
+    duration_h = float(data["time_h"][-1])
+    hours = _hourly_desorption_times_h(duration_h)
+    time_h = data["time_h"]
+
+    t_abs = _interp_at_hours(time_h, data["t_abs"], hours)
+    t_glass = _interp_at_hours(time_h, data["t_glass"], hours)
+    t_cond = _interp_at_hours(time_h, data["t_cond"], hours)
+    t_amb = _interp_at_hours(time_h, data["t_amb"], hours)
+    cum_water = _interp_at_hours(time_h, data["cum_water_l_m2"], hours)
+
+    out_path = _OUT_DIR / _HOURLY_MODEL_CSV
+    with out_path.open("w", newline="") as f:
+        w = csv.writer(f)
+        w.writerow(
+            [
+                "time_h",
+                "clock_time",
+                "t_abs_c",
+                "t_glass_c",
+                "t_cond_c",
+                "t_amb_c",
+                "cum_water_l_m2",
+            ]
+        )
+        for k, h in enumerate(hours):
+            w.writerow(
+                [
+                    f"{h:.0f}",
+                    _desorption_clock_label(h),
+                    f"{t_abs[k]:.4f}",
+                    f"{t_glass[k]:.4f}",
+                    f"{t_cond[k]:.4f}",
+                    f"{t_amb[k]:.4f}",
+                    f"{cum_water[k]:.6f}",
+                ]
+            )
+
+    print("\nHourly model estimates (desorption clock, °C unless noted):")
+    print(f"  {'hour':>4}  {'clock':>6}  {'absorber':>9}  {'glass':>9}  "
+          f"{'condenser':>9}  {'ambient':>9}  {'water L/m²':>10}")
+    for k, h in enumerate(hours):
+        print(
+            f"  {h:4.0f}  {_desorption_clock_label(h):>6}  "
+            f"{t_abs[k]:9.2f}  {t_glass[k]:9.2f}  "
+            f"{t_cond[k]:9.2f}  {t_amb[k]:9.2f}  "
+            f"{cum_water[k]:10.4f}"
+        )
+    print(f"\nSaved hourly estimates → {out_path}")
+    return out_path
 
 
 def _style_desorption_time_axis(ax: plt.Axes, *, duration_h: float) -> None:
@@ -169,12 +237,12 @@ def _post_process_desorption(
 # Simulation
 # ---------------------------------------------------------------------------
 
-def simulate_atacama(*, desorption_solver: str = "coupled_bdf") -> dict:
+def simulate_atacama(*, desorption_solver: str = "quasi_steady") -> dict:
     """Run the Atacama field cycle and return all time-series needed for Fig. 4."""
     print("  Building Atacama field config…")
     config = DeviceConfig.atacama_field(
         desorption_solver=desorption_solver,  # type: ignore[arg-type]
-        segregated_initial_temp_c=0.0,  # digitized field cold start (~0 °C at 8 a.m.)
+        coupled_initial_temps_c=_atacama_initial_temps_c(),
     )
 
     print("  Loading Atacama weather profile…")
@@ -240,6 +308,26 @@ def _panel_style(ax: plt.Axes) -> None:
     ax.grid(False)
     for spine in ax.spines.values():
         spine.set_linewidth(0.8)
+
+
+def _first_ref_temp(filename: str, default: float) -> float:
+    """First y-value from a digitized reference CSV (Wilson cold-start point)."""
+    loaded = _load_ref_csv(filename)
+    if loaded is None:
+        return default
+    _, y = loaded
+    mask = ~np.isnan(y)
+    if not mask.any():
+        return default
+    return float(y[mask][0])
+
+
+def _atacama_initial_temps_c() -> tuple[float, float, float, float]:
+    """Wilson digitized Fig. 4C first points (~8:09 a.m.): gel=abs, glass, cond."""
+    t_abs = _first_ref_temp(_REF_ABSORBER_CSV, 0.0)
+    t_glass = _first_ref_temp(_REF_GLASS_CSV, 0.0)
+    t_cond = _first_ref_temp(_REF_CONDENSER_CSV, 0.0)
+    return (t_abs, t_abs, t_glass, t_cond)
 
 
 def _load_ref_csv(filename: str) -> tuple[np.ndarray, np.ndarray] | None:
@@ -372,13 +460,14 @@ def main() -> Path:
     import argparse
 
     parser = argparse.ArgumentParser(description="Wilson Figure 4 — Atacama field test")
-    register_desorption_solver_cli(parser, default="coupled_bdf")
+    register_desorption_solver_cli(parser)
     args = parser.parse_args()
 
     print("Wilson Figure 4 (Atacama field test) — solar_lumped model")
     print("=" * 60)
     print(f"  desorption_solver = {args.desorption_solver}")
     data = simulate_atacama(desorption_solver=args.desorption_solver)
+    write_hourly_model_estimates(data)
     print("\nComposing figure…")
     out = plot_figure4(data)
     print("Done.")

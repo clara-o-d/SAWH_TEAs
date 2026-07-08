@@ -7,7 +7,7 @@ device:
   salt_to_polymer_ratio: 4.0
   hydrogel_thickness_mm: 4.0
   g_conv_m_s: 0.0085
-  mof: placeholder_mof  # when sorbent: mof
+  mof: MIL-100_Fe  # when sorbent: mof
   tau_half_min: 360.0  # max half-cycle duration; ends earlier at rh_desorber_switch
   rh_desorber_switch: 0.35
   p_cond_mbar: 30.0

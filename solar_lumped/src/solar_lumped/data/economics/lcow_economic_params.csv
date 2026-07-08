@@ -14,9 +14,9 @@ device_bom_fixtures,1.0,Fixtures
 discount_rate,0.08,Capital discount rate
 device_lifetime_years,20,Passive SAWH device lifetime (years)
 total_investment_factor,1.0,Multiplier on installed CAPEX
-maintenance_cost_fraction,0.05,Annual O&M as fraction of CAPEX
-utilization_factor,0.9,Effective annual operating fraction (LCOW denominator)
-hydrogel_lifetime_years,1.0,Hydrogel replacement interval (years)
+maintenance_cost_fraction,0.01,Annual O&M as fraction of CAPEX
+utilization_factor,0.99,Effective annual operating fraction (LCOW denominator)
+hydrogel_lifetime_years,2.0,Hydrogel replacement interval (years)
 energy_cost_usd_per_year,0.0,Fixed annual energy cost (USD/m²)
 energy_cost_usd_per_extra_half_cycle_per_day,0.0,Daily energy cost (USD/m²) per half-cycle above 1/day
 c_acrylamide_usd_per_kg,1.1,Polymer matrix acrylamide (Table S1)

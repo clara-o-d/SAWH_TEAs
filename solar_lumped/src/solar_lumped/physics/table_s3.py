@@ -36,7 +36,7 @@ CP_GEL_J_KG_K: float = 3500.0  # hydrated PAM-LiCl composite (water-dominated)
 EPS_GEL: float = 1.0
 EPS_AL: float = 0.05
 EPS_ABS: float = 0.95
-EPS_GLASS: float = 0.9  # outer glass (not tabulated; typical low-e cover)
+EPS_GLASS: float = 0.9  # not used in Wilson Eqs 3/4 (blackbody IR); reserved
 TAU_GLASS: float = 0.9
 
 # Device orientation / condenser fins

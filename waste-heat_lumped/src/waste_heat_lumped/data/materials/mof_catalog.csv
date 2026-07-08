@@ -1,2 +1,2 @@
-mof,q_max_kg_kg,q1_max_kg_kg,K1_pa_inv,q2_max_kg_kg,K2_pa_inv,h_ads_j_per_kg,h_des_j_per_kg,m_ads_kg_m2,g_conv_m_s,price_usd_per_kg
-placeholder_mof,0.35,0.25,0.002,0.10,0.0005,2700000,2700000,0.30,0.0085,150.0
+mof,isotherm_file,h_ads_j_per_kg,h_des_j_per_kg,m_ads_kg_m2,g_conv_m_s,price_usd_per_kg
+MIL-100_Fe,MIL-100_Fe__MOF_Isotherm_303K.csv,2700000,2700000,0.30,0.0085,150.0
