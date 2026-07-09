@@ -1,10 +1,16 @@
-"""Equilibrium brine isotherms for NaCl, CaCl2, and MgCl2 (ported from electrolyte_optimization)."""
+"""Equilibrium brine isotherms for NaCl, LiCl, CaCl2, and MgCl2."""
 
 from __future__ import annotations
 
 import math
 from collections.abc import Callable
 
+from solar_lumped.physics.conde2004 import (
+    equilibrium_salt_mass_fraction_cacl2,
+    equilibrium_salt_mass_fraction_licl,
+    water_activity_cacl2,
+    water_activity_licl,
+)
 from solar_lumped.physics.salt_properties import get_salt
 from solar_lumped.utils.numerics import find_root_bracketed
 
@@ -31,56 +37,18 @@ def mf_NaCl(relative_humidity: float) -> float:
     return find_root_bracketed(residual, 0.0116, 0.264)
 
 
-def _mf_LiCl_CaCl2_style(
-    relative_humidity: float,
-    temperature_c: float,
-    p0: float,
-    p1: float,
-    p2: float,
-    p3: float,
-    p4: float,
-    p5: float,
-    p6: float,
-    p7: float,
-    p8: float,
-    p9: float,
-) -> float:
-    if not (0.0 < relative_humidity < 1.0) or temperature_c > 100.0:
+def mf_LiCl(relative_humidity: float, temperature_c: float = 25.0) -> float:
+    """Equilibrium brine salt fraction for LiCl (Conde 2004)."""
+    if not (0.0 < relative_humidity < 1.0) or temperature_c > 150.0:
         return float("nan")
-    reduced_temperature = (temperature_c + 273.15) / 647.0
-
-    def residual(salt_fraction: float) -> float:
-        concentration_term = (
-            1.0
-            - (1.0 + (salt_fraction / p6) ** p7) ** p8
-            - p9 * math.exp(-((salt_fraction - 0.1) ** 2) / 0.005)
-        )
-        temperature_term = (
-            2.0
-            - (1.0 + (salt_fraction / p0) ** p1) ** p2
-            + ((1.0 + (salt_fraction / p3) ** p4) ** p5 - 1.0) * reduced_temperature
-        )
-        return relative_humidity - concentration_term * temperature_term
-
-    return find_root_bracketed(residual, _BRACKET_LO, _BRACKET_HI)
+    return equilibrium_salt_mass_fraction_licl(relative_humidity, temperature_c)
 
 
 def mf_CaCl2(relative_humidity: float, temperature_c: float = 25.0) -> float:
-    """Equilibrium brine salt fraction for CaCl2."""
-    return _mf_LiCl_CaCl2_style(
-        relative_humidity,
-        temperature_c,
-        0.31,
-        3.698,
-        0.60,
-        0.231,
-        4.584,
-        0.49,
-        0.478,
-        -5.20,
-        -0.40,
-        0.018,
-    )
+    """Equilibrium brine salt fraction for CaCl2 (Conde 2004)."""
+    if not (0.0 < relative_humidity < 1.0) or temperature_c > 100.0:
+        return float("nan")
+    return equilibrium_salt_mass_fraction_cacl2(relative_humidity, temperature_c)
 
 
 def mf_MgCl2(relative_humidity: float) -> float:
@@ -104,6 +72,7 @@ def mf_MgCl2(relative_humidity: float) -> float:
 
 _isotherm_by_salt: dict[str, Callable[[float, float], float]] = {
     "NaCl": lambda rh, t: mf_NaCl(rh),
+    "LiCl": lambda rh, t: mf_LiCl(rh, t),
     "CaCl2": lambda rh, t: mf_CaCl2(rh, t),
     "MgCl2": lambda rh, t: mf_MgCl2(rh),
 }
@@ -132,38 +101,6 @@ def _aw_polynomial(salt_fraction: float, coeffs: tuple[float, ...]) -> float:
     return float(a_w)
 
 
-def _aw_LiCl_CaCl2_style(
-    salt_fraction: float,
-    temperature_c: float,
-    p0: float,
-    p1: float,
-    p2: float,
-    p3: float,
-    p4: float,
-    p5: float,
-    p6: float,
-    p7: float,
-    p8: float,
-    p9: float,
-) -> float:
-    if not (0.0 <= salt_fraction < 1.0) or not math.isfinite(salt_fraction):
-        return float("nan")
-    if temperature_c > 100.0:
-        return float("nan")
-    reduced_temperature = (temperature_c + 273.15) / 647.0
-    concentration_term = (
-        1.0
-        - (1.0 + (salt_fraction / p6) ** p7) ** p8
-        - p9 * math.exp(-((salt_fraction - 0.1) ** 2) / 0.005)
-    )
-    temperature_term = (
-        2.0
-        - (1.0 + (salt_fraction / p0) ** p1) ** p2
-        + ((1.0 + (salt_fraction / p3) ** p4) ** p5 - 1.0) * reduced_temperature
-    )
-    return float(concentration_term * temperature_term)
-
-
 def water_activity_at_brine_fraction(
     salt_name: str,
     brine_salt_fraction: float,
@@ -181,35 +118,13 @@ def water_activity_at_brine_fraction(
             f, (1.16231287, -4.86704441, 38.21982328, -153.67496570, 186.32487108)
         )
     if rec.name == "LiCl":
-        return _aw_LiCl_CaCl2_style(
-            f,
-            temperature_c,
-            0.28,
-            4.3,
-            0.60,
-            0.21,
-            5.10,
-            0.49,
-            0.362,
-            -4.75,
-            -0.40,
-            0.03,
-        )
+        if temperature_c > 150.0:
+            return float("nan")
+        return water_activity_licl(f, min(temperature_c, 150.0))
     if rec.name == "CaCl2":
-        return _aw_LiCl_CaCl2_style(
-            f,
-            temperature_c,
-            0.31,
-            3.698,
-            0.60,
-            0.231,
-            4.584,
-            0.49,
-            0.478,
-            -5.20,
-            -0.40,
-            0.018,
-        )
+        if temperature_c > 100.0:
+            return float("nan")
+        return water_activity_cacl2(f, temperature_c)
     return float("nan")
 
 

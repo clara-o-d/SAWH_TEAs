@@ -3,7 +3,7 @@
 Recreation of Díaz-Marín et al. (2024) Nature Communications Figure 3 (panels B, C, E).
 
 Plots the thermodynamic uptake model (Eq. 5) for PAM--LiCl hydrogels using our LiCl
-brine isotherm (Campbell / Conde-style activity correlation in salt_properties.py).
+LiCl brine isotherm (Conde 2004, ``solar_lumped.physics.conde2004``).
 Digitized experimental points from the paper figure are overlaid as open markers.
 
 Panels with reference data:
@@ -41,6 +41,17 @@ from solar_lumped.physics.salt_properties import (
     get_salt,
     licl_equilibrium_brine_salt_fraction,
 )
+from solar_lumped.plotting.matlab_style import (
+    figure_size_inches,
+    panel_size_inches,
+    plot_defaults_slides,
+    print_figure,
+    ref_marker_kwargs,
+    scaled_fontsize,
+    style_axes,
+)
+
+plot_defaults_slides()
 
 _OUT_DIR = _DIAZ_DIR / "outputs" / "figure3"
 _OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -133,17 +144,7 @@ def _overlay_ref(
     mask = ~(np.isnan(x) | np.isnan(y))
     if not mask.any():
         return False
-    ax.scatter(
-        x[mask],
-        y[mask],
-        s=24,
-        marker="o",
-        facecolors="white",
-        edgecolors=color,
-        linewidths=1.1,
-        zorder=6,
-        label=label,
-    )
+    ax.scatter(x[mask], y[mask], label=label, **ref_marker_kwargs(color=color))
     return True
 
 
@@ -163,16 +164,17 @@ _COL_XL = "#9467bd"
 
 
 def _style_uptake_axes(ax: plt.Axes, *, panel_title: str) -> None:
-    ax.set_xlabel("relative humidity [%]", fontsize=10)
-    ax.set_ylabel("uptake [g/g]", fontsize=10)
+    ax.set_xlabel("relative humidity [%]")
+    ax.set_ylabel("uptake [g/g]")
     ax.set_xlim(0, 95)
     ax.set_ylim(-0.2, 10.0)
-    ax.tick_params(direction="in", which="both", top=True, right=True)
-    ax.grid(False)
-    for spine in ax.spines.values():
-        spine.set_linewidth(0.8)
-    ax.legend(fontsize=7.0, frameon=False, loc="upper left")
-    ax.set_title(panel_title, loc="left", fontweight="bold", fontsize=10)
+    style_axes(ax)
+    ax.legend(
+        fontsize=scaled_fontsize("legend.fontsize", 0.75),
+        frameon=False,
+        loc="upper left",
+    )
+    ax.set_title(panel_title, loc="left", fontweight="bold")
 
 
 def _plot_model_series(
@@ -188,7 +190,6 @@ def _plot_model_series(
         rh_pct,
         uptake,
         color=color,
-        linewidth=1.8,
         linestyle=linestyle,
         label=f"{label} (model)",
     )
@@ -237,7 +238,7 @@ def plot_panel_e(ax: plt.Axes) -> None:
 
 
 def plot_figure3() -> Path:
-    fig, axes = plt.subplots(1, 3, figsize=(13.5, 4.2))
+    fig, axes = plt.subplots(1, 3, figsize=figure_size_inches(3, 1))
     plot_panel_b(axes[0])
     plot_panel_c(axes[1])
     plot_panel_e(axes[2])
@@ -245,13 +246,13 @@ def plot_figure3() -> Path:
     fig.suptitle(
         "Díaz-Marín et al. (2024) Figure 3 — equilibrium uptake isotherms\n"
         r"(solid = Eq. 5 with LiCl brine isotherm; open circles = digitized paper data)",
-        fontsize=9,
+        fontsize=scaled_fontsize("axes.labelsize", 0.75),
         y=1.03,
     )
     fig.tight_layout()
 
     out_path = _OUT_DIR / "figure3.png"
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    print_figure(fig, out_path)
     plt.close(fig)
     print(f"Saved → {out_path}")
 
@@ -260,10 +261,10 @@ def plot_figure3() -> Path:
         ("figure3c.png", plot_panel_c),
         ("figure3e.png", plot_panel_e),
     ):
-        fig_s, ax_s = plt.subplots(figsize=(5.0, 4.2))
+        fig_s, ax_s = plt.subplots(figsize=panel_size_inches())
         plot_fn(ax_s)
         out_s = _OUT_DIR / panel_name
-        fig_s.savefig(out_s, dpi=150, bbox_inches="tight")
+        print_figure(fig_s, out_s)
         plt.close(fig_s)
         print(f"Saved → {out_s}")
 
@@ -273,7 +274,7 @@ def plot_figure3() -> Path:
 def main() -> Path:
     print("Díaz-Marín Figure 3 — uptake isotherm model (Eq. 5)")
     print("=" * 52)
-    print(f"  LiCl isotherm: licl_equilibrium_brine_salt_fraction @ {_TEMPERATURE_C} °C")
+    print(f"  LiCl isotherm: Conde (2004) via solar_lumped.physics.conde2004 @ {_TEMPERATURE_C} °C")
     print(f"  Reference data: {_REF_DIR}")
     return plot_figure3()
 

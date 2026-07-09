@@ -36,6 +36,18 @@ for _p in (_SRC, _SOLAR_ROOT):
 
 from solar_lumped.weather.profiles import PHASE_DT_S
 
+from solar_lumped.plotting.matlab_style import (
+    figure_size_inches,
+    panel_size_inches,
+    plot_defaults_slides,
+    print_figure,
+    ref_marker_kwargs,
+    scaled_fontsize,
+    style_axes,
+)
+
+plot_defaults_slides()
+
 _REF_WEATHER = _WILSON_DIR / "reference" / "weather"
 _OUT_DIR = _WILSON_DIR / "outputs" / "weather"
 _OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -79,10 +91,7 @@ def _interp_clamped(
 
 
 def _panel_style(ax: plt.Axes) -> None:
-    ax.tick_params(direction="in", which="both", top=True, right=True)
-    ax.grid(False)
-    for spine in ax.spines.values():
-        spine.set_linewidth(0.8)
+    style_axes(ax)
 
 
 def _hours_to_clock_label(h_from_6pm: float) -> str:
@@ -110,40 +119,34 @@ def plot_cambridge_weather() -> Path:
     solar_interp = _interp_clamped(solar_t, solar_v, t_grid, clip_min=0.0)
     temp_interp = _interp_clamped(temp_t, temp_v, t_grid)
 
-    fig, (ax_solar, ax_temp) = plt.subplots(2, 1, figsize=(8, 6), sharex=True)
+    fig, (ax_solar, ax_temp) = plt.subplots(2, 1, figsize=figure_size_inches(1, 2), sharex=True)
 
     # --- Solar flux ---
-    ax_solar.scatter(
-        solar_t, solar_v, s=28, marker="o", facecolors="white",
-        edgecolors="#c9a227", linewidths=1.2, zorder=5, label="digitized points",
-    )
+    ax_solar.scatter(solar_t, solar_v, label="digitized points", **ref_marker_kwargs(color="#c9a227"))
     ax_solar.plot(
-        t_grid, solar_interp, color="#c9a227", linewidth=1.5, alpha=0.85,
+        t_grid, solar_interp, color="#c9a227", alpha=0.85,
         label="interpolated (simulation grid)",
     )
     ax_solar.fill_between(t_grid, 0, solar_interp, color="#c9a227", alpha=0.12)
-    ax_solar.set_ylabel("solar flux [W/m²]", fontsize=10)
+    ax_solar.set_ylabel("solar flux [W/m²]")
     ax_solar.set_xlim(0, _CAMBRIDGE_HOURS)
     ax_solar.set_ylim(0, 1050)
     ax_solar.legend(fontsize=8, frameon=False, loc="upper right")
-    ax_solar.set_title("A  solar flux", loc="left", fontweight="bold", fontsize=10)
+    ax_solar.set_title("A  solar flux", loc="left", fontweight="bold")
     _panel_style(ax_solar)
 
     # --- Ambient temperature ---
-    ax_temp.scatter(
-        temp_t, temp_v, s=28, marker="o", facecolors="white",
-        edgecolors="#8b2000", linewidths=1.2, zorder=5, label="digitized points",
-    )
+    ax_temp.scatter(temp_t, temp_v, label="digitized points", **ref_marker_kwargs(color="#8b2000"))
     ax_temp.plot(
-        t_grid, temp_interp, color="#8b2000", linewidth=1.5, alpha=0.85,
+        t_grid, temp_interp, color="#8b2000", alpha=0.85,
         label="interpolated (simulation grid)",
     )
-    ax_temp.set_xlabel("time from desorption start [hr]", fontsize=10)
-    ax_temp.set_ylabel("ambient temperature [°C]", fontsize=10)
+    ax_temp.set_xlabel("time from desorption start [hr]")
+    ax_temp.set_ylabel("ambient temperature [°C]")
     ax_temp.set_xlim(0, _CAMBRIDGE_HOURS)
     ax_temp.set_ylim(18, 30)
     ax_temp.legend(fontsize=8, frameon=False, loc="upper right")
-    ax_temp.set_title("B  ambient temperature", loc="left", fontweight="bold", fontsize=10)
+    ax_temp.set_title("B  ambient temperature", loc="left", fontweight="bold")
     _panel_style(ax_temp)
 
     fig.suptitle(
@@ -155,29 +158,27 @@ def plot_cambridge_weather() -> Path:
     fig.tight_layout()
 
     out = _OUT_DIR / "cambridge_weather.png"
-    fig.savefig(out, dpi=150, bbox_inches="tight")
+    print_figure(fig, out)
     plt.close(fig)
 
     # Combined dual-axis panel (similar to Fig. 3C solar overlay style)
-    fig2, ax_l = plt.subplots(figsize=(8, 4))
+    fig2, ax_l = plt.subplots(figsize=panel_size_inches())
     ax_r = ax_l.twinx()
 
-    ax_l.scatter(temp_t, temp_v, s=24, marker="o", facecolors="white",
-                 edgecolors="#8b2000", linewidths=1.1, zorder=5)
-    ax_l.plot(t_grid, temp_interp, color="#8b2000", linewidth=1.6, label="ambient [°C]")
-    ax_l.set_ylabel("ambient temperature [°C]", color="#8b2000", fontsize=10)
+    ax_l.scatter(temp_t, temp_v, **ref_marker_kwargs(color="#8b2000"))
+    ax_l.plot(t_grid, temp_interp, color="#8b2000", label="ambient [°C]")
+    ax_l.set_ylabel("ambient temperature [°C]", color="#8b2000")
     ax_l.tick_params(axis="y", labelcolor="#8b2000")
     ax_l.set_ylim(18, 30)
 
-    ax_r.scatter(solar_t, solar_v, s=24, marker="o", facecolors="white",
-                 edgecolors="#c9a227", linewidths=1.1, zorder=5)
+    ax_r.scatter(solar_t, solar_v, **ref_marker_kwargs(color="#c9a227"))
     ax_r.fill_between(t_grid, 0, solar_interp, color="#c9a227", alpha=0.15)
-    ax_r.plot(t_grid, solar_interp, color="#c9a227", linewidth=1.6, label="solar [W/m²]")
-    ax_r.set_ylabel("solar flux [W/m²]", color="#c9a227", fontsize=10)
+    ax_r.plot(t_grid, solar_interp, color="#c9a227", label="solar [W/m²]")
+    ax_r.set_ylabel("solar flux [W/m²]", color="#c9a227")
     ax_r.tick_params(axis="y", labelcolor="#c9a227")
     ax_r.set_ylim(0, 1050)
 
-    ax_l.set_xlabel("time from desorption start [hr]", fontsize=10)
+    ax_l.set_xlabel("time from desorption start [hr]")
     ax_l.set_xlim(0, _CAMBRIDGE_HOURS)
     _panel_style(ax_l)
     _panel_style(ax_r)
@@ -187,7 +188,7 @@ def plot_cambridge_weather() -> Path:
     )
     fig2.tight_layout()
     out2 = _OUT_DIR / "cambridge_weather_dual_axis.png"
-    fig2.savefig(out2, dpi=150, bbox_inches="tight")
+    print_figure(fig2, out2)
     plt.close(fig2)
 
     print(f"  Cambridge solar:  {solar_v.min():.0f}–{solar_v.max():.0f} W/m²  ({len(solar_t)} pts)")
@@ -213,7 +214,7 @@ def plot_atacama_weather() -> Path:
     temp_interp = _interp_clamped(temp_t, temp_v, t_grid)
     solar_interp = np.maximum(0.0, _interp_clamped(solar_t, solar_kw, t_grid))
 
-    fig, ax_l = plt.subplots(figsize=(10, 4.5))
+    fig, ax_l = plt.subplots(figsize=panel_size_inches())
     ax_r = ax_l.twinx()
 
     # Day / night shading
@@ -223,22 +224,22 @@ def plot_atacama_weather() -> Path:
     # RH and solar on left axis (0–1, matching paper)
     ax_l.scatter(rh_t, rh_v, s=22, marker="o", facecolors="white",
                  edgecolors="#607080", linewidths=1.0, zorder=5)
-    ax_l.plot(t_grid, rh_interp, color="#607080", linewidth=1.4, label="RH [-]")
+    ax_l.plot(t_grid, rh_interp, color="#607080", label="RH [-]")
 
     ax_l.scatter(solar_t, solar_kw, s=22, marker="o", facecolors="white",
                  edgecolors="#c9a227", linewidths=1.0, zorder=5)
     ax_l.fill_between(t_grid, 0, solar_interp, color="#c9a227", alpha=0.18)
-    ax_l.plot(t_grid, solar_interp, color="#c9a227", linewidth=1.4, label="solar [kW/m²]")
+    ax_l.plot(t_grid, solar_interp, color="#c9a227", label="solar [kW/m²]")
 
-    ax_l.set_ylabel("RH [-]  /  solar [kW/m²]", fontsize=10)
+    ax_l.set_ylabel("RH [-]  /  solar [kW/m²]")
     ax_l.set_ylim(0, 1.0)
     ax_l.set_xlim(0, _ATACAMA_DURATION_H)
 
     # Ambient temperature on right axis
     ax_r.scatter(temp_t, temp_v, s=22, marker="o", facecolors="white",
                  edgecolors="#8b2000", linewidths=1.0, zorder=5)
-    ax_r.plot(t_grid, temp_interp, color="#8b2000", linewidth=1.6, label="ambient [°C]")
-    ax_r.set_ylabel("ambient temperature [°C]", color="#8b2000", fontsize=10)
+    ax_r.plot(t_grid, temp_interp, color="#8b2000", label="ambient [°C]")
+    ax_r.set_ylabel("ambient temperature [°C]", color="#8b2000")
     ax_r.tick_params(axis="y", labelcolor="#8b2000")
     ax_r.set_ylim(0, 32)
 
@@ -246,7 +247,7 @@ def plot_atacama_weather() -> Path:
     tick_hours = [0, 5, 10, 15, 20]
     ax_l.set_xticks(tick_hours)
     ax_l.set_xticklabels([_hours_to_clock_label(h) for h in tick_hours])
-    ax_l.set_xlabel("time of day (cycle starts 6 pm)", fontsize=10)
+    ax_l.set_xlabel("time of day (cycle starts 6 pm)")
 
     # Moon / sun icons (simple text markers)
     trans = mtransforms.blended_transform_factory(ax_l.transData, ax_l.transAxes)
@@ -280,11 +281,11 @@ def plot_atacama_weather() -> Path:
     fig.tight_layout()
 
     out = _OUT_DIR / "atacama_weather.png"
-    fig.savefig(out, dpi=150, bbox_inches="tight")
+    print_figure(fig, out)
     plt.close(fig)
 
     # Individual panels for easier point-by-point checking
-    fig3, axes = plt.subplots(3, 1, figsize=(10, 8), sharex=True)
+    fig3, axes = plt.subplots(3, 1, figsize=figure_size_inches(1, 3), sharex=True)
     series = [
         (rh_t, rh_v, rh_interp, "RH [-]", "#607080", (0, 0.55)),
         (temp_t, temp_v, temp_interp, "ambient temperature [°C]", "#8b2000", (0, 32)),
@@ -295,17 +296,17 @@ def plot_atacama_weather() -> Path:
         ax.axvspan(_SUNRISE_H, _ATACAMA_DURATION_H, color="#fff8dc", alpha=0.45, zorder=0)
         ax.scatter(tx, tv, s=24, marker="o", facecolors="white",
                    edgecolors=color, linewidths=1.1, zorder=5, label="digitized")
-        ax.plot(t_grid, interp, color=color, linewidth=1.5, label="interpolated")
-        ax.set_ylabel(ylabel, fontsize=9)
+        ax.plot(t_grid, interp, color=color, label="interpolated")
+        ax.set_ylabel(ylabel)
         ax.set_ylim(*ylim)
         ax.legend(fontsize=7, frameon=False, loc="upper right")
         _panel_style(ax)
-    axes[-1].set_xlabel("hours from 6 pm", fontsize=10)
+    axes[-1].set_xlabel("hours from 6 pm")
     axes[-1].set_xlim(0, _ATACAMA_DURATION_H)
-    fig3.suptitle("Atacama weather — individual series", fontsize=9)
+    fig3.suptitle("Atacama weather — individual series")
     fig3.tight_layout()
     out3 = _OUT_DIR / "atacama_weather_panels.png"
-    fig3.savefig(out3, dpi=150, bbox_inches="tight")
+    print_figure(fig3, out3)
     plt.close(fig3)
 
     print(f"  Atacama RH:    {rh_v.min():.2f}–{rh_v.max():.2f}  ({len(rh_t)} pts)")

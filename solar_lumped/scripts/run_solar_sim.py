@@ -6,7 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 import numpy as np
@@ -46,6 +46,8 @@ from solar_lumped.physics.salt_properties import (
     DRY_COMPOSITE_DENSITY_KG_M3,
     GAS_CONSTANT_J_MOL_K,
     WATER_MOLAR_MASS_KG_MOL,
+    chamber_c_s_from_synthesis,
+    chamber_c_s_with_constant_density,
     equilibrium_c_w_at_rh,
     get_salt,
     salt_molarity_from_composite,
@@ -81,7 +83,7 @@ def _initial_loading_from_water_l_m2(
 
 
 def _config_overrides(config: DeviceConfig) -> dict:
-    return {
+    out = {
         "sorbent": config.sorbent,
         "mof_name": config.mof_name,
         "salt_name": config.salt_name,
@@ -90,6 +92,30 @@ def _config_overrides(config: DeviceConfig) -> dict:
         "vapor_gap_m": config.vapor_gap_m,
         "insulation_gap_m": config.insulation_gap_m,
     }
+    if config.salt_formula_weight_g_mol is not None:
+        out["salt_formula_weight_g_mol"] = config.salt_formula_weight_g_mol
+    if config.thermal is not None:
+        out["thermal"] = config.thermal
+    return out
+
+
+def _apply_physics_overrides(
+    config: DeviceConfig,
+    *,
+    h_des_j_per_kg: float | None = None,
+    salt_formula_weight_g_mol: float | None = None,
+) -> DeviceConfig:
+    updates: dict[str, object] = {}
+    if salt_formula_weight_g_mol is not None:
+        updates["salt_formula_weight_g_mol"] = salt_formula_weight_g_mol
+    if h_des_j_per_kg is not None:
+        updates["thermal"] = replace(
+            config.thermal_params(),
+            h_des_j_per_kg=h_des_j_per_kg,
+        )
+    if not updates:
+        return config
+    return replace(config, **updates)
 
 
 def build_device_config(
@@ -169,20 +195,31 @@ def build_hydrogel_chamber_params(
     h0_mm: float,
     g_conv_m_s: float,
     dry_density_kg_m3: float = DRY_COMPOSITE_DENSITY_KG_M3,
+    use_synthesis_c_s: bool = True,
+    pour_ml: float | None = None,
 ) -> HydrogelChamberParams:
     """Hydrogel-only chamber parameters (Eq. 5 thermodynamics + Eq. 8 kinetics)."""
     salt_rec = get_salt(salt)
     h0_m = h0_mm * 1e-3
+    if salt == "LiCl" and use_synthesis_c_s:
+        c_s = chamber_c_s_with_constant_density(
+            salt_loading,
+            h0_mm,
+            formula_weight_g_mol=salt_rec.formula_weight_g_mol,
+            pour_ml=pour_ml,
+        )
+    else:
+        c_s = salt_molarity_from_composite(
+            salt_loading,
+            dry_density_kg_m3,
+            salt_rec.formula_weight_g_mol,
+        )
     return HydrogelChamberParams(
         salt_name=salt,
         salt_to_polymer_ratio=salt_loading,
         h0_m=h0_m,
         g_conv_m_s=g_conv_m_s,
-        c_s_mol_m3=salt_molarity_from_composite(
-            salt_loading,
-            dry_density_kg_m3,
-            salt_rec.formula_weight_g_mol,
-        ),
+        c_s_mol_m3=c_s,
         ions_per_formula=salt_rec.ions_per_formula,
         formula_weight_g_mol=salt_rec.formula_weight_g_mol,
     )
@@ -391,6 +428,56 @@ def _uses_cycled_initial(weather_mode: str, *, initial_water_l_m2: float | None)
     return weather_mode in ("real", "atacama-replay", "cambridge-replay")
 
 
+def register_cyclic_warmup_arguments(p: argparse.ArgumentParser) -> None:
+    """CLI flags for optional warmup cycles before the reporting day."""
+    p.add_argument(
+        "--cyclic",
+        action="store_true",
+        help="Run warmup daily cycles before the reporting day (required for baseline/fig-s1).",
+    )
+    p.add_argument(
+        "--no-cyclic",
+        action="store_true",
+        help="Skip warmup cycles; single-day ODE only (~3× faster, less accurate IC).",
+    )
+    p.add_argument(
+        "--warmup-cycles",
+        type=int,
+        default=2,
+        metavar="N",
+        help="Warmup daily cycles before the reporting day when cyclic (default: 2).",
+    )
+
+
+def _cyclic_settings(
+    args: argparse.Namespace,
+    *,
+    cyclic_initial: bool | None = None,
+    cyclic_warmup_cycles: int | None = None,
+) -> tuple[bool, int]:
+    """Resolve warmup flags from explicit kwargs or ``args`` (if registered)."""
+    n_warmup = 2 if cyclic_warmup_cycles is None else cyclic_warmup_cycles
+    if cyclic_initial is not None:
+        return cyclic_initial, n_warmup
+    if hasattr(args, "no_cyclic"):
+        n_warmup = getattr(args, "warmup_cycles", n_warmup)
+        if args.no_cyclic:
+            return False, n_warmup
+        if getattr(args, "cyclic", False):
+            return True, n_warmup
+        return (
+            _uses_cycled_initial(
+                args.weather_mode,
+                initial_water_l_m2=args.initial_water_l_m2,
+            ),
+            n_warmup,
+        )
+    return (
+        _uses_cycled_initial(args.weather_mode, initial_water_l_m2=args.initial_water_l_m2),
+        n_warmup,
+    )
+
+
 def register_solar_sim_arguments(p: argparse.ArgumentParser) -> None:
     """CLI arguments shared by ``run_solar_sim.py`` and site LCOW breakdown scripts."""
     p.add_argument(
@@ -447,6 +534,13 @@ def resolve_solar_sim_arguments(args: argparse.Namespace, parser: argparse.Argum
         )
 
 
+def default_solar_sim_args() -> argparse.Namespace:
+    """CLI defaults for ``run_solar_simulation`` (scripting / parameter sweeps)."""
+    p = argparse.ArgumentParser()
+    register_solar_sim_arguments(p)
+    return p.parse_args([])
+
+
 def output_tag(args: argparse.Namespace, config: DeviceConfig) -> str:
     tag = args.weather_mode
     if config.sorbent == "mof":
@@ -474,7 +568,16 @@ class SolarSimResult:
     inventory_des_res: object | None
 
 
-def run_solar_simulation(args: argparse.Namespace) -> SolarSimResult:
+def run_solar_simulation(
+    args: argparse.Namespace,
+    *,
+    econ: LCOEconomicParams | None = None,
+    baseline_profile_kwargs: dict[str, float] | None = None,
+    h_des_j_per_kg: float | None = None,
+    salt_formula_weight_g_mol: float | None = None,
+    cyclic_initial: bool | None = None,
+    cyclic_warmup_cycles: int | None = None,
+) -> SolarSimResult:
     """Run one SAWH daily cycle and LCOW (same logic as ``main()``)."""
     config = _build_config(args)
     overrides = _config_overrides(config)
@@ -488,7 +591,12 @@ def run_solar_simulation(args: argparse.Namespace) -> SolarSimResult:
             tilt_deg=config.tilt_deg,
             fin_area_ratio=config.fin_area_ratio,
         )
-    econ = LCOEconomicParams()
+    config = _apply_physics_overrides(
+        config,
+        h_des_j_per_kg=h_des_j_per_kg,
+        salt_formula_weight_g_mol=salt_formula_weight_g_mol,
+    )
+    econ = econ or LCOEconomicParams()
 
     c_w_initial: float | None = None
     h_initial: float | None = None
@@ -499,13 +607,17 @@ def run_solar_simulation(args: argparse.Namespace) -> SolarSimResult:
     elif config.sorbent == "hydrogel" and args.weather_mode == "baseline":
         c_w_initial = baseline_initial_c_w(h_m=config.hydrogel_thickness_m)
 
-    use_cycled = _uses_cycled_initial(
-        args.weather_mode, initial_water_l_m2=args.initial_water_l_m2
+    use_cycled, n_warmup = _cyclic_settings(
+        args,
+        cyclic_initial=cyclic_initial,
+        cyclic_warmup_cycles=cyclic_warmup_cycles,
     )
 
     inventory_abs_res = None
     inventory_des_res = None
     inventory_note = ""
+    if use_cycled:
+        inventory_note = f" ({n_warmup} warmup day(s) + 1 reporting day)"
 
     if args.weather_mode == "real":
         profile = representative_mean_day_profile(
@@ -520,15 +632,24 @@ def run_solar_simulation(args: argparse.Namespace) -> SolarSimResult:
             c_w_initial=c_w_initial,
             h_initial=h_initial,
             cyclic_initial=use_cycled,
+            cyclic_warmup_cycles=n_warmup,
         )
         if use_cycled:
-            inventory_note = " (cycled initial state; mean diurnal weather)"
+            inventory_note = (
+                f" (cycled initial state; mean diurnal weather; "
+                f"{n_warmup} warmup + 1 report)"
+            )
         else:
             inventory_note = f" (mean diurnal weather for {args.year})"
     elif args.weather_mode == "baseline":
-        profile = baseline_profile()
+        profile = baseline_profile(**(baseline_profile_kwargs or {}))
         yield_kg, eta, inventory_abs_res, inventory_des_res = run_daily_cycle(
-            profile, config, c_w_initial=c_w_initial, h_initial=h_initial
+            profile,
+            config,
+            c_w_initial=c_w_initial,
+            h_initial=h_initial,
+            cyclic_initial=use_cycled,
+            cyclic_warmup_cycles=n_warmup,
         )
     else:
         profile = replay_profile(args.weather_mode, cache_dir=args.cache_dir)
@@ -538,9 +659,12 @@ def run_solar_simulation(args: argparse.Namespace) -> SolarSimResult:
             c_w_initial=c_w_initial,
             h_initial=h_initial,
             cyclic_initial=use_cycled,
+            cyclic_warmup_cycles=n_warmup,
         )
         if use_cycled:
-            inventory_note = " (cycled initial state after warmup days)"
+            inventory_note = (
+                f" (cycled initial state after {n_warmup} warmup day(s))"
+            )
 
     lcow_kw = _lcow_kwargs(config)
     lcow = lcow_from_daily_yield(

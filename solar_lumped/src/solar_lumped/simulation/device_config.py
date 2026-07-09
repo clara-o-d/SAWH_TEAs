@@ -65,6 +65,8 @@ class DeviceConfig:
     h_fg_j_per_kg: float = table_s3.H_FG_J_PER_KG
     tilt_deg: float = table_s3.TILT_DEG
     thermal: DeviceThermalParams | None = None
+    # Override catalog salt formula weight (g/mol) for sensitivity sweeps.
+    salt_formula_weight_g_mol: float | None = None
     # Desorption integration: quasi_steady (default) solves Eqs 1/3/4 algebraically
     # each ODE step; segregated mimics COMSOL v6.2's sequential 100 s solver with
     # small surface capacitances; coupled_bdf advances all lumped states together
@@ -119,6 +121,11 @@ class DeviceConfig:
                 salt_to_polymer_ratio=1.0,
             )
         s = self.salt()
+        fw = (
+            self.salt_formula_weight_g_mol
+            if self.salt_formula_weight_g_mol is not None
+            else s.formula_weight_g_mol
+        )
         return MassTransferParams(
             g_conv_m_s=self.g_conv_m_s,
             h0_ref_m=self.hydrogel_thickness_m,
@@ -127,12 +134,12 @@ class DeviceConfig:
             c_s_mol_m3=salt_molarity_from_composite(
                 self.salt_to_polymer_ratio,
                 self.hydrogel_density_kg_m3,
-                s.formula_weight_g_mol,
+                fw,
             ),
             ions_per_formula=s.ions_per_formula,
             rho_solution_kg_m3=s.rho_solution_kg_m3,
             salt_name=s.name,
-            formula_weight_g_mol=s.formula_weight_g_mol,
+            formula_weight_g_mol=fw,
             salt_to_polymer_ratio=self.salt_to_polymer_ratio,
         )
 

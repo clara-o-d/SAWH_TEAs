@@ -38,6 +38,15 @@ for _p in (_SRC, _SOLAR_ROOT):
         sys.path.insert(0, str(_p))
 
 from solar_lumped.physics import table_s3
+from solar_lumped.plotting.matlab_style import (
+    figure_size_inches,
+    panel_size_inches,
+    plot_defaults_slides,
+    print_figure,
+    ref_marker_kwargs,
+    scaled_fontsize,
+    style_axes,
+)
 from solar_lumped.simulation.coupled_dynamics import evaluate_coupled_rates
 from solar_lumped.simulation.device_config import DeviceConfig, register_desorption_solver_cli
 from solar_lumped.simulation.ode_system import run_daily_cycle
@@ -48,6 +57,8 @@ from solar_lumped.weather.profiles import (
     PHASE_DT_S,
     STEPS_PER_PHASE,
 )
+
+plot_defaults_slides()
 
 _OUT_DIR = _WILSON_DIR / "outputs" / "figure3"
 _OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -349,29 +360,18 @@ def _overlay_ref(
     mask = ~(np.isnan(x) | np.isnan(y))
     if not mask.any():
         return False
-    ax.scatter(
-        x[mask],
-        y[mask] * y_scale,
-        s=22,
-        marker="o",
-        facecolors="white",
-        edgecolors=color,
-        linewidths=1.1,
-        zorder=6,
-        label=label,
-    )
+    ax.scatter(x[mask], y[mask] * y_scale, label=label, **ref_marker_kwargs(color=color))
     return True
 
 
-def _style_temp_axes(ax: plt.Axes, *, legend_fontsize: float = 7.5) -> None:
-    ax.set_xlabel("time [hr]", fontsize=10)
-    ax.set_ylabel("temperature [°C]", fontsize=10)
+def _style_temp_axes(ax: plt.Axes, *, legend_fontsize: float | None = None) -> None:
+    ax.set_xlabel("time [hr]")
+    ax.set_ylabel("temperature [°C]")
     ax.set_xlim(0, _DES_HOURS)
     ax.set_ylim(10, 80)
-    ax.tick_params(direction="in", which="both", top=True, right=True)
-    ax.grid(False)
-    for spine in ax.spines.values():
-        spine.set_linewidth(0.8)
+    style_axes(ax)
+    if legend_fontsize is None:
+        legend_fontsize = scaled_fontsize("legend.fontsize", 0.75)
     ax.legend(fontsize=legend_fontsize, frameon=False, loc="upper right")
 
 
@@ -384,7 +384,7 @@ def _plot_temp_panel(
     temp_grid: np.ndarray,
     *,
     panel_title: str | None = None,
-    legend_fontsize: float = 7.5,
+    legend_fontsize: float | None = None,
 ) -> None:
     t = res_mid["time_hr"]
 
@@ -394,13 +394,13 @@ def _plot_temp_panel(
     def band_hi(key):
         return np.maximum(res_lo[key], np.maximum(res_mid[key], res_hi[key]))
 
-    ax.plot(t, res_mid["t_abs"], color=_COL_ABS, linewidth=1.8, label="absorber (model)")
+    ax.plot(t, res_mid["t_abs"], color=_COL_ABS, label="absorber (model)")
     _fill(ax, t, band_lo("t_abs"), band_hi("t_abs"), _COL_ABS)
-    ax.plot(t, res_mid["t_glass"], color=_COL_GLASS, linewidth=1.8, label="glass (model)")
+    ax.plot(t, res_mid["t_glass"], color=_COL_GLASS, label="glass (model)")
     _fill(ax, t, band_lo("t_glass"), band_hi("t_glass"), _COL_GLASS)
-    ax.plot(t, res_mid["t_cond"], color=_COL_COND, linewidth=1.8, label="condenser (model)")
+    ax.plot(t, res_mid["t_cond"], color=_COL_COND, label="condenser (model)")
     _fill(ax, t, band_lo("t_cond"), band_hi("t_cond"), _COL_COND)
-    ax.plot(t_grid_hr, temp_grid, color=_COL_AMB, linewidth=1.0, linestyle="--",
+    ax.plot(t_grid_hr, temp_grid, color=_COL_AMB, linestyle="--",
             label="ambient (measured)")
 
     ref = False
@@ -413,7 +413,7 @@ def _plot_temp_panel(
 
     _style_temp_axes(ax, legend_fontsize=legend_fontsize)
     if panel_title is not None:
-        ax.set_title(panel_title, loc="left", fontweight="bold", fontsize=10)
+        ax.set_title(panel_title, loc="left", fontweight="bold")
 
 
 def plot_figure3b(
@@ -424,7 +424,7 @@ def plot_figure3b(
     solar_grid: np.ndarray,
     temp_grid: np.ndarray,
 ) -> Path:
-    fig, (ax_B, ax_C) = plt.subplots(1, 2, figsize=(12, 4.5))
+    fig, (ax_B, ax_C) = plt.subplots(1, 2, figsize=figure_size_inches(2, 1))
     t = res_mid["time_hr"]
 
     _plot_temp_panel(
@@ -433,7 +433,7 @@ def plot_figure3b(
 
     # ---- Panel C: cumulative water output ----
     ax_C.plot(
-        t, res_mid["cum_water_ml_m2"], color="#1a6b5a", linewidth=1.8,
+        t, res_mid["cum_water_ml_m2"], color="#1a6b5a",
         label="water output (model)",
     )
     # Digitized data is device-total mL; convert to mL/m² (÷ A_c) to match model.
@@ -443,34 +443,31 @@ def plot_figure3b(
     ):
         print("  Warning: Cambridge_water_output_ml.csv not found")
 
-    ax_C.set_xlabel("time [hr]", fontsize=10)
-    ax_C.set_ylabel("cumulative water output [mL/m²]", fontsize=10)
+    ax_C.set_xlabel("time [hr]")
+    ax_C.set_ylabel("cumulative water output [mL/m²]")
     ax_C.set_xlim(0, _DES_HOURS)
     ax_C.set_ylim(bottom=0)
-    ax_C.tick_params(direction="in", which="both", top=True, right=True)
-    ax_C.grid(False)
-    for spine in ax_C.spines.values():
-        spine.set_linewidth(0.8)
-    ax_C.legend(fontsize=7.5, frameon=False, loc="upper left")
-    ax_C.set_title("C", loc="left", fontweight="bold", fontsize=10)
+    style_axes(ax_C)
+    ax_C.legend(fontsize=scaled_fontsize("legend.fontsize", 0.75), frameon=False, loc="upper left")
+    ax_C.set_title("C", loc="left", fontweight="bold")
 
     fig.suptitle(
         "Wilson et al. (2025) Figure 3 — Cambridge field test\n"
         r"(model lines; open circles = digitized paper data; band = $h_{amb}=10\pm2.5$ W/m²K)",
-        fontsize=9, y=1.02,
+        fontsize=scaled_fontsize("axes.labelsize", 0.75), y=1.02,
     )
     fig.tight_layout()
 
     out_path = _OUT_DIR / "figure3.png"
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    print_figure(fig, out_path)
     plt.close(fig)
     print(f"Saved → {out_path}")
 
-    fig_b, ax_b = plt.subplots(figsize=(7, 4.5))
+    fig_b, ax_b = plt.subplots(figsize=panel_size_inches())
     _plot_temp_panel(ax_b, res_lo, res_mid, res_hi, t_grid_hr, temp_grid,
-                     legend_fontsize=8.5)
+                     legend_fontsize=scaled_fontsize("legend.fontsize", 0.85))
     out_b = _OUT_DIR / "figure3b.png"
-    fig_b.savefig(out_b, dpi=150, bbox_inches="tight")
+    print_figure(fig_b, out_b)
     plt.close(fig_b)
     print(f"Saved → {out_b}")
     return out_path

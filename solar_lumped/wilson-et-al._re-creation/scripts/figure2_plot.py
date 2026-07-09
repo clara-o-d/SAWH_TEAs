@@ -32,6 +32,17 @@ for _p in (_SRC, _SOLAR_ROOT):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
+from solar_lumped.plotting.matlab_style import (
+    figure_size_inches,
+    plot_defaults_slides,
+    print_figure,
+    ref_marker_kwargs,
+    scaled_fontsize,
+    style_axes,
+)
+
+plot_defaults_slides()
+
 _OUT_DIR = _WILSON_DIR / "outputs" / "figure2"
 _OUT_DIR.mkdir(parents=True, exist_ok=True)
 _DATA_PATH = _OUT_DIR / "figure2_data.pkl"
@@ -71,10 +82,7 @@ def _line_colour(idx: int, n: int, dark: bool = True) -> str:
 
 
 def _fig2_style(ax: plt.Axes) -> None:
-    ax.tick_params(direction="in", which="both", top=True, right=True)
-    ax.grid(False)
-    for spine in ax.spines.values():
-        spine.set_linewidth(0.8)
+    style_axes(ax)
 
 
 def _fill_band(ax, x, lo, hi, color, alpha=0.15):
@@ -109,22 +117,12 @@ def _overlay_ref(
     mask = ~(np.isnan(x) | np.isnan(y))
     if not mask.any():
         return False
-    ax.scatter(
-        x[mask],
-        y[mask],
-        s=22,
-        marker="o",
-        facecolors="white",
-        edgecolors=color,
-        linewidths=1.1,
-        zorder=6,
-        label=label,
-    )
+    ax.scatter(x[mask], y[mask], label=label, **ref_marker_kwargs(color=color))
     return True
 
 
 def plot_figure2(data_B, data_C, data_D, data_E, data_F_yield, data_F_eta):
-    fig = plt.figure(figsize=(13, 10))
+    fig = plt.figure(figsize=figure_size_inches(3, 2))
     gs = fig.add_gridspec(2, 3, hspace=0.38, wspace=0.32)
 
     ax_A = fig.add_subplot(gs[0, 0])
@@ -139,10 +137,10 @@ def plot_figure2(data_B, data_C, data_D, data_E, data_F_yield, data_F_eta):
     ax_A.text(
         0.5, 0.5,
         "Device\nschematic\n(see Fig. 2A\nin paper)",
-        ha="center", va="center", fontsize=8, color="gray",
+        ha="center", va="center", fontsize=scaled_fontsize("axes.labelsize", 0.6), color="gray",
         transform=ax_A.transAxes,
     )
-    ax_A.set_title("A", loc="left", fontweight="bold", fontsize=9)
+    ax_A.set_title("A", loc="left", fontweight="bold")
 
     # ---- Panel B ----
     eps_abs_vals = [0.2, 0.5, 0.8, 0.95, 0.99]
@@ -152,8 +150,8 @@ def plot_figure2(data_B, data_C, data_D, data_E, data_F_yield, data_F_eta):
         tau_vals, lows, mids, highs = data_B[eps]
         col = _line_colour(i, n, dark=(i % 2 == 1))
         mk = _MARKERS[i % len(_MARKERS)]
-        ax_B.plot(tau_vals, mids, color=col, marker=mk, markersize=4,
-                  linestyle="--", linewidth=1.2,
+        ax_B.plot(tau_vals, mids, color=col, marker=mk,
+                  linestyle="--",
                   label=rf"$\varepsilon_{{abs}}={eps}$ (model)")
         _fill_band(ax_B, tau_vals, lows, highs, col)
         ref_B |= _overlay_ref(
@@ -162,12 +160,12 @@ def plot_figure2(data_B, data_C, data_D, data_E, data_F_yield, data_F_eta):
             color=col,
             label=_REF_LABEL if not ref_B else None,
         )
-    ax_B.set_xlabel(r"transmission through glass, $\tau_{glass}$", fontsize=7.5)
-    ax_B.set_ylabel(r"device productivity [L/m²/day]", fontsize=7.5)
+    ax_B.set_xlabel(r"transmission through glass, $\tau_{glass}$")
+    ax_B.set_ylabel(r"device productivity [L/m²/day]")
     ax_B.set_xlim(0.2, 1.0)
     ax_B.set_ylim(bottom=0)
-    ax_B.legend(fontsize=6.5, loc="upper left", frameon=False)
-    ax_B.set_title("B", loc="left", fontweight="bold", fontsize=9)
+    ax_B.legend(fontsize=scaled_fontsize("legend.fontsize", 0.65), loc="upper left", frameon=False)
+    ax_B.set_title("B", loc="left", fontweight="bold")
     _fig2_style(ax_B)
 
     # ---- Panel C ----
@@ -179,7 +177,7 @@ def plot_figure2(data_B, data_C, data_D, data_E, data_F_yield, data_F_eta):
         h_vals, yields_g = data_C[(ar, True)]
         col_g = ar_colours_glass[i]
         ax_C.plot(h_vals, yields_g, color=col_g, marker=_MARKERS[i % len(_MARKERS)],
-                  markersize=4, linestyle="--", linewidth=1.2,
+                  linestyle="--",
                   label=rf"$A_r={ar}$ (model)")
         ref_C |= _overlay_ref(
             ax_C,
@@ -190,22 +188,22 @@ def plot_figure2(data_B, data_C, data_D, data_E, data_F_yield, data_F_eta):
         h_vals, yields_ng = data_C[(ar, False)]
         col_ng = ar_colours_noglass[i]
         ax_C.plot(h_vals, yields_ng, color=col_ng, marker=_MARKERS[i % len(_MARKERS)],
-                  markersize=4, linestyle=":", linewidth=1.2,
+                  linestyle=":", linewidth=1.5,
                   label=None)
         _overlay_ref(ax_C, f"2c_{ar}_no-glass.csv", color=col_ng)
     from matplotlib.lines import Line2D
     extra = [
-        Line2D([0], [0], color="gray", linestyle="--", linewidth=1.2, label="glass cover"),
-        Line2D([0], [0], color="gray", linestyle=":", linewidth=1.2, label="no cover"),
+        Line2D([0], [0], color="gray", linestyle="--", label="glass cover"),
+        Line2D([0], [0], color="gray", linestyle=":", label="no cover"),
     ]
     handles, labels = ax_C.get_legend_handles_labels()
     ax_C.legend(handles=handles + extra, labels=labels + ["glass cover", "no cover"],
-                fontsize=6.5, loc="upper left", frameon=False, ncol=2)
-    ax_C.set_xlabel(r"ambient heat transfer coefficient, $h_{amb}$ [W/m²K]", fontsize=7.5)
-    ax_C.set_ylabel(r"device productivity [L/m²/day]", fontsize=7.5)
+                fontsize=scaled_fontsize("legend.fontsize", 0.65), loc="upper left", frameon=False, ncol=2)
+    ax_C.set_xlabel(r"ambient heat transfer coefficient, $h_{amb}$ [W/m²K]")
+    ax_C.set_ylabel(r"device productivity [L/m²/day]")
     ax_C.set_xlim(1, 10)
     ax_C.set_ylim(bottom=0)
-    ax_C.set_title("C", loc="left", fontweight="bold", fontsize=9)
+    ax_C.set_title("C", loc="left", fontweight="bold")
     _fig2_style(ax_C)
 
     # ---- Panel D ----
@@ -216,7 +214,7 @@ def plot_figure2(data_B, data_C, data_D, data_E, data_F_yield, data_F_eta):
         rh_vals, lows, mids, highs = data_D[T_k]
         col = d_colours[i]
         ax_D.plot(rh_vals, mids, color=col, marker=_MARKERS[i % len(_MARKERS)],
-                  markersize=4, linestyle="--", linewidth=1.2,
+                  linestyle="--",
                   label=rf"$T_{{amb}}={T_k}$ K (model)")
         _fill_band(ax_D, rh_vals, lows, highs, col)
         ref_D |= _overlay_ref(
@@ -225,12 +223,12 @@ def plot_figure2(data_B, data_C, data_D, data_E, data_F_yield, data_F_eta):
             color=col,
             label=_REF_LABEL if not ref_D else None,
         )
-    ax_D.set_xlabel(r"ambient humidity RH [ ]", fontsize=7.5)
-    ax_D.set_ylabel(r"device productivity [L/m²/day]", fontsize=7.5)
+    ax_D.set_xlabel(r"ambient humidity RH [ ]")
+    ax_D.set_ylabel(r"device productivity [L/m²/day]")
     ax_D.set_xlim(0.2, 0.9)
     ax_D.set_ylim(bottom=0)
-    ax_D.legend(fontsize=6.5, loc="upper left", frameon=False)
-    ax_D.set_title("D", loc="left", fontweight="bold", fontsize=9)
+    ax_D.legend(fontsize=scaled_fontsize("legend.fontsize", 0.65), loc="upper left", frameon=False)
+    ax_D.set_title("D", loc="left", fontweight="bold")
     _fig2_style(ax_D)
 
     # ---- Panel E ----
@@ -241,7 +239,7 @@ def plot_figure2(data_B, data_C, data_D, data_E, data_F_yield, data_F_eta):
         h0_vals, lows, mids, highs = data_E[lg]
         col = e_colours[i]
         ax_E.plot(h0_vals, mids, color=col, marker=_MARKERS[i % len(_MARKERS)],
-                  markersize=4, linestyle="--", linewidth=1.2,
+                  linestyle="--",
                   label=rf"$L_g={lg}$ mm (model)")
         _fill_band(ax_E, h0_vals, lows, highs, col)
         ref_E |= _overlay_ref(
@@ -250,12 +248,12 @@ def plot_figure2(data_B, data_C, data_D, data_E, data_F_yield, data_F_eta):
             color=col,
             label=_REF_LABEL if not ref_E else None,
         )
-    ax_E.set_xlabel(r"thickness of gel, $H_0$ [mm]", fontsize=7.5)
-    ax_E.set_ylabel(r"device productivity [L/m²/day]", fontsize=7.5)
+    ax_E.set_xlabel(r"thickness of gel, $H_0$ [mm]")
+    ax_E.set_ylabel(r"device productivity [L/m²/day]")
     ax_E.set_xlim(0, 8)
     ax_E.set_ylim(bottom=0)
-    ax_E.legend(fontsize=6.5, loc="lower right", frameon=False)
-    ax_E.set_title("E", loc="left", fontweight="bold", fontsize=9)
+    ax_E.legend(fontsize=scaled_fontsize("legend.fontsize", 0.65), loc="lower right", frameon=False)
+    ax_E.set_title("E", loc="left", fontweight="bold")
     _fig2_style(ax_E)
 
     # ---- Panel F ----
@@ -269,8 +267,8 @@ def plot_figure2(data_B, data_C, data_D, data_E, data_F_yield, data_F_eta):
         _, e_lows, e_mids, e_highs = data_F_eta[h0]
         col_y = f_teal[i]
         col_e = f_orange[i]
-        ax_F.plot(q_vals_kw, y_mids, color=col_y, marker="o", markersize=4,
-                  linestyle="--", linewidth=1.2, label=rf"$H_0={h0}$ mm (model)")
+        ax_F.plot(q_vals_kw, y_mids, color=col_y, marker="o",
+                  linestyle="--", label=rf"$H_0={h0}$ mm (model)")
         _fill_band(ax_F, q_vals_kw, y_lows, y_highs, col_y)
         ref_F |= _overlay_ref(
             ax_F,
@@ -278,33 +276,33 @@ def plot_figure2(data_B, data_C, data_D, data_E, data_F_yield, data_F_eta):
             color=col_y,
             label=_REF_LABEL if not ref_F else None,
         )
-        ax_F2.plot(q_vals_kw, e_mids, color=col_e, marker="x", markersize=4,
-                   linestyle="--", linewidth=1.2)
+        ax_F2.plot(q_vals_kw, e_mids, color=col_e, marker="x",
+                   linestyle="--")
         _fill_band(ax_F2, q_vals_kw, e_lows, e_highs, col_e)
         _overlay_ref(ax_F2, f"2f_eff_{h0}.csv", color=col_e)
 
-    ax_F.set_xlabel(r"incident solar flux, $Q_{solar}$ [kW/m²]", fontsize=7.5)
-    ax_F.set_ylabel(r"device productivity [L/m²/day]", fontsize=7.5, color=f_teal[0])
-    ax_F2.set_ylabel(r"thermal efficiency [%]", fontsize=7.5, color=f_orange[1])
+    ax_F.set_xlabel(r"incident solar flux, $Q_{solar}$ [kW/m²]")
+    ax_F.set_ylabel(r"device productivity [L/m²/day]", color=f_teal[0])
+    ax_F2.set_ylabel(r"thermal efficiency [%]", color=f_orange[1])
     ax_F.set_xlim(0.5, 1.5)
     ax_F.set_ylim(bottom=0)
     ax_F2.set_ylim(bottom=0)
     ax_F.tick_params(axis="y", colors=f_teal[0])
     ax_F2.tick_params(axis="y", colors=f_orange[1])
-    ax_F.legend(fontsize=6.5, loc="upper left", frameon=False)
-    ax_F.set_title("F", loc="left", fontweight="bold", fontsize=9)
+    ax_F.legend(fontsize=scaled_fontsize("legend.fontsize", 0.65), loc="upper left", frameon=False)
+    ax_F.set_title("F", loc="left", fontweight="bold")
     _fig2_style(ax_F)
     _fig2_style(ax_F2)
 
     fig.suptitle(
         "Wilson et al. (2025) Figure 2 — Thermofluidic optimisation of the hydrogel SAWH device\n"
         r"(dashed = solar\_lumped model; circles = digitized paper data; bands = $h_{amb}=10\pm2.5$ W/m²K)",
-        fontsize=8.5, y=1.01,
+        fontsize=scaled_fontsize("axes.labelsize", 0.7), y=1.01,
     )
     fig.tight_layout()
 
     out_path = _OUT_DIR / "figure2.png"
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    print_figure(fig, out_path)
     print(f"Saved → {out_path}")
     plt.close(fig)
     return out_path

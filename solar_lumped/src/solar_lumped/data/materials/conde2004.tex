@@ -1,0 +1,986 @@
+\documentclass[11pt]{article}
+
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{geometry}
+\usepackage{authblk}
+\usepackage{hyperref}
+\usepackage{caption}
+\usepackage[english]{babel}
+
+\geometry{margin=1in}
+
+\title{Properties of aqueous solutions of lithium and calcium chlorides:\\
+formulations for use in air conditioning equipment design}
+
+\author[1]{Manuel R. Conde}
+\affil[1]{M. Conde Engineering, Eugen-Huber-Str.\ 61, CH-8048 Z\"urich, Switzerland}
+
+\date{Received 4 March 2003; accepted 17 September 2003 \\[1ex]
+\textit{International Journal of Thermal Sciences} 43 (2004) 367--382 \\
+\texttt{doi:10.1016/j.ijthermalsci.2003.09.003}}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+The dehydration of air, for air conditioning purposes, either for human comfort or for
+industrial processes, is done most of the times by making it contact a surface at a
+temperature below its dew point. In this process not only is it necessary to cool that
+surface continuously, but also the air is cooled beyond the temperature necessary to the
+process, thus requiring reheating after dehumidification. Although the equipment for this
+purpose is standard and mostly low-cost, the running costs are high and high grade energy
+is dissipated at very low efficiency. Alternative sorption-based processes require only low
+grade energy for regeneration of the sorbent materials, thus incurring lower running costs.
+On the other hand, sorption technology equipment is usually more expensive than standard
+mechanical refrigeration equipment, which is essentially due to their too small market
+share. This paper reports the development of calculation models for the thermophysical
+properties of aqueous solutions of the chlorides of lithium and calcium, particularly
+suited for use as desiccants in sorption-based air conditioning equipment. This development
+has been undertaken in order to create consistent methods suitable for use in the
+industrial design of liquid desiccant-based air conditioning equipment. We have reviewed
+sources of measured data from 1850 onwards, and propose calculation models for the
+following properties of those aqueous solutions: solubility boundary, vapour pressure,
+density, surface tension, dynamic viscosity, thermal conductivity, specific thermal
+capacity and differential enthalpy of dilution.
+
+\medskip
+\noindent \copyright\ 2003 Elsevier SAS. All rights reserved.
+
+\medskip
+\noindent \textit{Keywords:} Liquid desiccants; Properties; Air conditioning; Open
+absorption; Lithium chloride; Calcium chloride; Calculation models
+\end{abstract}
+
+\section*{Nomenclature}
+\begin{tabular}{@{}ll@{\hspace{2cm}}ll@{}}
+$Cp$ & specific thermal capacity, kJ$\cdot$kg$^{-1}\cdot$K$^{-1}$ & $\rho$ & density, kg$\cdot$m$^{-3}$ \\
+$p$ & pressure, kPa & $\sigma$ & surface tension, mN$\cdot$m$^{-1}$ \\
+$T$ & temperature (absolute), K & $\vartheta$ & temperature (centigrade), $^{\circ}$C \\
+$h_d$ & enthalpy of dilution, kJ$\cdot$kg$_{\mathrm{H_2O}}^{-1}$ & $\Delta$ & difference, differential \\
+\multicolumn{2}{l}{\textit{Greek symbols}} & \multicolumn{2}{l}{\textit{Subscripts}} \\
+$\eta$ & dynamic viscosity, mPa$\cdot$s & $c$ & at the critical point \\
+$\theta$ & reduced temperature (with critical temperature of water, & H$_2$O & for water \\
+ & except when defined otherwise) & H$_2$O,0 & for water at 0$^{\circ}$C \\
+$\lambda$ & thermal conductivity, mW$\cdot$m$^{-1}\cdot$K$^{-1}$ & H$_2$O,20 & for water at 20$^{\circ}$C \\
+$\xi$ & mass fraction of solute & sol & for the solution \\
+$\pi$ & relative pressure & & \\
+\end{tabular}
+
+\section{Introduction}
+
+Aqueous solutions of alkali halides have a set of very useful characteristics for
+applications in refrigeration and air conditioning. While they were first studied and
+characterized as freezing point depressors and used as brines in refrigeration
+applications, other of their properties, such as the high water affinity, were later
+recognized as very interesting for the dehydration of gases, in particular of air.
+Dehydration (dehumidification) of air is an important operation in many processes,
+especially in air conditioning, either for human comfort or for industrial processes. The
+important point here is that the air does not have to be cooled below its dew-point, as is
+typical of surface dehumidification. It may be sufficiently dehumidified at temperatures
+well above its dew-point. This may have a significative impact in the energy requirements
+and on the size and capacity of the cooling equipment necessary.
+
+The R\&D effort in this field has increased significatively in the last twenty years, in
+particular because of the perceived need to replace the more conventional technologies that
+use mechanical refrigeration equipment. Uncertainties regarding the availability of safe
+and suitable working fluids for mechanical refrigeration systems, as well as the effort to
+reduce greenhouse gases emitted in power generation, are pressing manufacturers, designers
+and users to search for alternative solutions, naturally without any penalty in the
+perceived quality of life and in the quality of manufacturing facilities.
+
+On the other hand, systems using sorption processes to dehydrate gases require only low
+grade thermal driving energy for the regeneration of the sorbent materials, besides some
+electric power for the prime movers in the system, mostly electric motors. Low grade
+thermal energy for the regeneration process, may be obtained from effluents in many
+production processes including CHP, or from solar thermal collectors. Theoretically, at
+least, such low grade energy should be much cheaper than the electric power required to
+drive conventional mechanical refrigeration equipment. However, as in many situations in
+life, the newcomer must overdo the incumbent by a large advantage to be seriously
+considered.
+
+Basic materials used in sorption based dehydration of air and other gases, are mostly
+naturally occurring substances. However, besides having to overdo the incumbent technology,
+sorption based technologies for air conditioning seem to get much less R\&D effort than
+that invested in the development of new, completely artificial substances, suitable to
+replace those working fluids that had to be banned, due to their hazardous effects on the
+environment. It is perhaps a signal of our times that a larger effort is invested in the
+development of non-natural working fluids than on the development of the processes and
+equipment that may use natural substances to the same effect.
+
+In this communication we report on the properties of the aqueous solutions of lithium and
+calcium chlorides, particularly on empirical formulations of their thermophysical
+properties required in the industrial design of sorption based air conditioning equipment.
+To that end, we have reviewed the literature spanning the period from 1850 onwards. Special
+care has been taken in order for the formulations to reproduce the measured data sets with
+good accuracy in their range of validity, and that they remain congruent at the limits of
+concentration.
+
+Formulations for the calculation of the following properties are described herein:
+\begin{itemize}
+\item Solubility boundary;
+\item Vapour pressure;
+\item Density;
+\item Surface tension;
+\item Dynamic viscosity;
+\item Thermal conductivity;
+\item Specific thermal capacity;
+\item Differential enthalpy of dilution.
+\end{itemize}
+
+We expect that this paper will contribute to ease the efforts of the few R\&D groups and
+manufacturers active in the development of sorption based technologies for air
+conditioning applications.
+
+\section{Solubility boundary}
+
+The solubility boundaries of these two salt solutions are defined by several lines. For
+salt concentrations lower than that at the eutectic point, the solubility line defines the
+conditions at which ice crystals start to form. This is the ice line. For higher
+concentrations, the solubility boundary defines the conditions at which salt hydrates or
+anhydrous salt crystalize from the solution. This is the crystallization line.
+
+For LiCl--H$_2$O solutions, the crystallization line, A--B--C--D--E in Fig.~1, defines also
+the transition points separating the ranges of formation of the various hydrates, as
+indicated in the figure. Equations for each range were adjusted to experimental data from
+the literature [1--14] and have the general form for the crystallization line:
+\begin{equation}
+\theta = \sum_{i=0}^{2} A_i \xi^i, \qquad \theta \equiv \frac{T}{T_{c,\mathrm{H_2O}}}
+\end{equation}
+where $\xi$ is the mass fraction of the salt in the solution. For the ice line, the
+equation is slightly different:
+\begin{equation}
+\theta = A_0 + A_1 \xi + A_2 \xi^{2.5}
+\end{equation}
+The parameters $A_i$ are included in Table~1, for each range of the boundary.
+
+For CaCl$_2$--H$_2$O solutions, the crystallization line is more complex, particularly due
+to the formation of various tetrahydrates. Some of these are metastable. In the boundary
+represented in Fig.~2 we decided to show only those generally reported as stable in the
+literature, i.e., the $\alpha$ and $\beta$ tetrahydrates, with the boundaries described
+below.
+
+\begin{table}[htbp]
+\centering
+\caption{Parameters of the equations describing the solubility boundary of LiCl--H$_2$O
+solutions}
+\begin{tabular}{lrrr}
+\toprule
+Boundary & $A_0$ & $A_1$ & $A_2$ \\
+\midrule
+Ice Line & 0.422088 & $-0.090410$ & $-2.936350$ \\
+LiCl--5H$_2$O & $-0.005340$ & 2.015890 & $-3.114590$ \\
+LiCl--3H$_2$O & $-0.560360$ & 4.723080 & $-5.811050$ \\
+LiCl--2H$_2$O & $-0.315220$ & 2.882480 & $-2.624330$ \\
+LiCl--H$_2$O & $-1.312310$ & 6.177670 & $-5.034790$ \\
+LiCl & $-1.356800$ & 3.448540 & 0.0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The equations adjusted to measured data from the literature [9,15--25] have the general
+form given above, with the exception of the ice line, which is described by the equation
+\begin{equation}
+\theta = \sum_{i=0}^{2} A_i \xi^i + A_3 \xi^{7.5}
+\end{equation}
+with $\theta$ as defined before. The parameters of this equation and those for the various
+ranges of the crystallization line are given in Table~2.
+
+The transition points between the boundaries are shown in Fig.~2.
+
+\begin{table}[htbp]
+\centering
+\caption{Parameters of equations describing the solubility boundary of CaCl$_2$--H$_2$O
+solutions}
+\begin{tabular}{lrrrr}
+\toprule
+Boundary & $A_0$ & $A_1$ & $A_2$ & $A_3$ \\
+\midrule
+Ice Line & 0.422088 & $-0.066933$ & $-0.282395$ & $-355.514247$ \\
+CaCl$_2$--6H$_2$O & $-0.378950$ & 3.456900 & $-3.531310$ & 0.0 \\
+CaCl$_2$--4H$_2$O $\alpha$ & $-0.519970$ & 3.400970 & $-2.851290$ & 0.0 \\
+CaCl$_2$--4H$_2$O $\beta$ & $-1.149044$ & 5.509111 & $-4.642544$ & 0.0 \\
+CaCl$_2$--2H$_2$O & $-2.385836$ & 8.084829 & $-5.303476$ & 0.0 \\
+CaCl$_2$--H$_2$O & $-2.807560$ & 4.678250 & 0.0 & 0.0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textit{[Fig.~1. Solubility boundary of aqueous solutions of lithium chloride. Fig.~2.
+Solubility boundary of aqueous solutions of calcium chloride. Figures not reproduced.]}
+
+\section{Vapour pressure}
+
+The equilibrium pressure of saturated water vapour above aqueous solutions of the salts
+here considered is perhaps their best studied property. Despite the amount of experimental
+data, spanning almost a century of research, no consistent formulation for the accurate
+prediction of this property has yet been published. Most attempts made are limited to
+short ranges either on concentration or temperature. Formulations derived from basic
+principles have not done better than the empirical ones and are confined to very dilute
+solutions. The formulations we report in the following reproduce quite accurately the
+known experimental data and default to congruent values at the boundaries.
+
+We formulate it in terms of the relative vapour pressure, $\pi$ (relative to water at the
+same temperature, Appendix~A). In fact we established an accurate formula for a single
+temperature, for which accurate measured data are known, as function of the mass fraction,
+and derived a correction function for other temperatures in the available range of data.
+
+The general equation is
+\begin{equation}
+\pi \equiv \frac{p_{\mathrm{sol}}(\xi, T)}{p_{\mathrm{H_2O}}(T)} = \pi_{25}\, f(\xi,\theta)
+\end{equation}
+where
+\begin{equation}
+f(\xi,\theta) = A + B\theta
+\end{equation}
+\begin{equation}
+A = 2 - \left[1 + \left(\frac{\xi}{\pi_0}\right)^{\pi_1}\right]^{\pi_2}, \qquad
+B = \left[1 + \left(\frac{\xi}{\pi_3}\right)^{\pi_4}\right]^{\pi_5} - 1
+\end{equation}
+\begin{equation}
+\pi_{25} = 1 - \left[1 + \left(\frac{\xi}{\pi_6}\right)^{\pi_7}\right]^{\pi_8} -
+\pi_9\, e^{-\frac{(\xi - 0.1)^2}{0.005}}
+\end{equation}
+and the parameters are given for both salt solutions in Table~3.
+
+\begin{table}[htbp]
+\centering
+\caption{Parameters for the vapour pressure equation}
+\begin{tabular}{lrr}
+\toprule
+ & LiCl--H$_2$O & CaCl$_2$--H$_2$O \\
+\midrule
+$\pi_0$ & 0.28 & 0.31 \\
+$\pi_1$ & 4.30 & 3.698 \\
+$\pi_2$ & 0.60 & 0.60 \\
+$\pi_3$ & 0.21 & 0.231 \\
+$\pi_4$ & 5.10 & 4.584 \\
+$\pi_5$ & 0.49 & 0.49 \\
+$\pi_6$ & 0.362 & 0.478 \\
+$\pi_7$ & $-4.75$ & $-5.20$ \\
+$\pi_8$ & $-0.40$ & $-0.40$ \\
+$\pi_9$ & 0.03 & 0.018 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The parameters for $f(\xi,\theta)$ were derived from the data of Gibbard [26] for
+LiCl--H$_2$O and from the data of Baker and Waite [27] for CaCl$_2$--H$_2$O. The graphs
+depicted in Figs.~3 and 4, for LiCl--H$_2$O and CaCl$_2$--H$_2$O, respectively, show plots
+of the vapour pressure along isotherms calculated with the equations adjusted, against the
+data from the literature. The literature sources are, for LiCl--H$_2$O
+[1,2,22,28--42], and for CaCl$_2$--H$_2$O [17,18,22,28,30,43--52]. Two types of charts are
+commonly used to represent the vapour pressure of solutions, namely D\"uhring [53] and
+Othmer [54,55] charts. The D\"uhring chart represents the dew-point temperature of the
+vapour phase against the bubble point temperature of the solution, while the Othmer chart
+represents the vapour pressure against the solution temperature. These charts may be
+easily obtained using the equation above together with that for the water vapour pressure
+(Appendix~A). For the particular application of these solutions as desiccants in air
+conditioning, a new type of chart showing lines of equilibrium of solution vapour pressure
+with the partial pressure of water vapour in the air is especially useful. The chart
+depicted in Fig.~5 for aqueous solutions of lithium chloride, at an atmospheric pressure of
+101.325~kPa (sea level atmospheric pressure) as an example, is of this type. This chart
+permits the visualization of the required dilution of the solution for a given dehydration
+of the air, when the efficiency of the dehumidification system is known.
+
+\textit{[Figs.~3--5 not reproduced.]}
+
+\section{Density}
+
+The densities of aqueous solutions of lithium and calcium chlorides have been extensively
+studied and reported upon in the literature (for LiCl--H$_2$O [1,33,38,56--70] and for
+CaCl$_2$--H$_2$O [46,58,62,70--78]). As shown in Figs.~6 and 7, for LiCl--H$_2$O and
+CaCl$_2$--H$_2$O, respectively, the relative (to saturated liquid water at the same
+temperature) densities may be represented by a single cubic function of the mass fraction
+ratio solute/solvent $\xi/(1-\xi)$. This function has the form
+\begin{equation}
+\rho_{\mathrm{sol}}(\xi, T) = \rho_{\mathrm{H_2O}}(T) \sum_{i=0}^{3} \rho_i
+\left(\frac{\xi}{1-\xi}\right)^i
+\end{equation}
+where the $\rho_i$ are given in Table~4 for the solutions of both chlorides.
+$\rho_{\mathrm{H_2O}}(T)$ is the density of saturated liquid water at the temperature $T$.
+It is calculated from
+\begin{equation}
+\rho_{\mathrm{H_2O}}(\tau) = \rho_{c,\mathrm{H_2O}} \Big(1 + B_0 \tau^{1/3} + B_1
+\tau^{2/3} + B_2 \tau^{5/3} + B_3 \tau^{16/3} + B_4 \tau^{43/3} + B_5 \tau^{110/3}\Big)
+\end{equation}
+where $\tau \equiv 1 - \theta$ and the $B_i$ are given in Table~5. $\rho_{c,\mathrm{H_2O}}$
+is the density of water at the critical point (322~kg$\cdot$m$^{-3}$).
+
+For solutions of LiCl, the scatter is almost negligible. The break point defined on the
+base of the data of Applebey et al. [1] for the crystallization boundary, does not exactly
+match the corresponding transition point in Fig.~1. This is due to the scarce density data
+for concentrations higher than that at that transition point.
+
+For solutions of CaCl$_2$, the scatter is somewhat larger, although the prediction of a
+single function remains excellent. The range of application of the equation is
+$0 \le \xi \le 0.56$ and $0 \le \xi \le 0.60$ for solutions of LiCl and CaCl$_2$,
+respectively.
+
+\begin{table}[htbp]
+\centering
+\caption{Parameters of the density equation}
+\begin{tabular}{lrr}
+\toprule
+ & LiCl--H$_2$O & CaCl$_2$--H$_2$O \\
+\midrule
+$\rho_0$ & 1.0 & 1.0 \\
+$\rho_1$ & 0.540966 & 0.836014 \\
+$\rho_2$ & $-0.303792$ & $-0.436300$ \\
+$\rho_3$ & 0.100791 & 0.105642 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{Parameters for the liquid water density equation}
+\begin{tabular}{lr}
+\toprule
+$i$ & $B_i$ \\
+\midrule
+0 & 1.9937718430 \\
+1 & 1.0985211604 \\
+2 & $-0.5094492996$ \\
+3 & $-1.7619124270$ \\
+4 & $-44.9005480267$ \\
+5 & $-723692.2618632$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textit{[Figs.~6, 7 not reproduced.]}
+
+\section{Surface tension}
+
+The values of the surface tension of aqueous solutions of the lithium and calcium
+chlorides reported in the literature (for LiCl--H$_2$O [65,79--86], and for
+CaCl$_2$--H$_2$O [74,87--91]) are well reproduced by a function of the reduced temperature
+and mass fraction of the form
+\begin{equation}
+\sigma_{\mathrm{sol}}(\xi,\theta) = \sigma_{\mathrm{H_2O}}(\theta)\left(1 + \sigma_1 \xi +
+\sigma_2 \xi \theta + \sigma_3 \xi \theta^2 + \sigma_4 \xi^2 + \sigma_5 \xi^3\right)
+\end{equation}
+where $\theta$ is, as defined before, the reduced temperature of water
+$\frac{T}{T_{c,\mathrm{H_2O}}}$.
+
+The parameters $\sigma_i$ are given in Table~6 for the solutions of both chlorides.
+Figs.~8 and 9 show comparisons of values calculated with the model proposed with data from
+the literature cited above.
+\begin{equation}
+\sigma_{\mathrm{H_2O}}(\theta) = \sigma_0 \left[1 - b(1-\theta)\right](1-\theta)^{\mu}
+\end{equation}
+The surface tension of water $\sigma_{\mathrm{H_2O}}(\theta)$ is calculated with the
+equation proposed by the IAPWS (International Association for the Properties of Water and
+Steam) [92], where $\sigma_0 = 235.8$~mN$\cdot$m$^{-1}$, $b = -0.625$ and $\mu = 1.256$.
+
+\begin{table}[htbp]
+\centering
+\caption{Parameters of the equation to calculate the surface tension of aqueous solutions
+of lithium and calcium chlorides}
+\begin{tabular}{lrrrrr}
+\toprule
+ & $\sigma_1$ & $\sigma_2$ & $\sigma_3$ & $\sigma_4$ & $\sigma_5$ \\
+\midrule
+LiCl--H$_2$O & 2.757115 & $-12.011299$ & 14.751818 & 2.443204 & $-3.147739$ \\
+CaCl$_2$--H$_2$O & 2.33067 & $-10.78779$ & 13.56611 & 1.95017 & $-1.77990$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textit{[Figs.~8, 9 not reproduced.]}
+
+\section{Dynamic viscosity}
+
+The dynamic viscosity of aqueous solutions of the lithium and calcium chlorides may be
+calculated with the equation
+\begin{equation}
+\eta_{\mathrm{sol}}(\zeta,\theta) = \eta_{\mathrm{H_2O}}(\theta)\,
+e^{\eta_1 \zeta^{3.6} + \eta_2 \zeta + \eta_3 \frac{\zeta}{\theta} + \eta_4 \zeta^2}
+\end{equation}
+where $\zeta$ is defined as $\zeta \equiv \dfrac{\xi}{(1-\xi)^{1/0.6}}$.
+
+The parameters $\eta_i$ are those in Table~7 for the solutions of both chlorides.
+Figs.~10 and 11 show comparisons of calculated values with measured data from the
+literature. For aqueous LiCl solutions, the data available [67--70,93--96] agree very well
+with those calculated, while for the solutions of CaCl$_2$ [70,78,94,95,97,98] some of the
+older data, in particular the data of Stakelbeck and Plank [109] at $-20^{\circ}$C, show
+noticeable deviations.
+
+The dynamic viscosity of water $\eta_{\mathrm{H_2O}}$, considered here at liquid saturation
+conditions, is calculated from the formulation recommended by the IAPWS [99] for industrial
+use, for temperatures above 0$^{\circ}$C, Appendix~B.
+
+\begin{table}[htbp]
+\centering
+\caption{Parameters of viscosity equation for solutions of lithium and calcium chlorides}
+\begin{tabular}{lrr}
+\toprule
+ & LiCl--H$_2$O & CaCl$_2$--H$_2$O \\
+\midrule
+$\eta_1$ & 0.090481 & $-0.169310$ \\
+$\eta_2$ & 1.390262 & 0.817350 \\
+$\eta_3$ & 0.675875 & 0.574230 \\
+$\eta_4$ & $-0.583517$ & 0.398750 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+For subcooled water ($\vartheta < 0^{\circ}$C), although the IAPWS formulation would be
+satisfactory down to approximately $-20^{\circ}$C, we have fitted an equation to the few
+data available in the literature [100--102], that reproduces those data with excellent
+accuracy, as shown in Fig.~12. The equation is
+\begin{equation}
+\eta_{\mathrm{H_2O}} = \eta_{\mathrm{H_2O,0}} \times \left(A + B\theta^{0.02} +
+C\theta^{0.04} + D\theta^{0.08} + E\theta^{2.85} + F\theta^{8}\right)
+\end{equation}
+with $\theta$ for this particular case defined as
+\begin{equation}
+\theta \equiv \frac{T}{228} - 1
+\end{equation}
+$\eta_{\mathrm{H_2O,0}}$ is the viscosity of liquid water at 0$^{\circ}$C, calculated from
+the IAPWS formulation. The parameters $A \ldots F$ are given in Table~8.
+
+\begin{table}[htbp]
+\centering
+\caption{Parameters of the equation for the dynamic viscosity of subcooled water}
+\begin{tabular}{rrrrrr}
+\toprule
+$A$ & $B$ & $C$ & $D$ & $E$ & $F$ \\
+\midrule
+1.0261862 & 12481.702 & $-19510.923$ & 7065.286 & $-395.561$ & 143922.996 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textit{[Figs.~10--12 not reproduced.]}
+
+\section{Thermal conductivity}
+
+The thermal conductivity of aqueous solutions of lithium and calcium chlorides are,
+perhaps, their less well-known property. In fact, literature is sparse and the measured
+data reported seems not to be always beyond doubts regarding accuracy (see for instance,
+the discussion by Riedel [103] of the results of Meyer [104] and Rau [105] and the answer
+by Mei{\ss}ner [106]). Even new data, such as those by Assael et al. [107], for calcium
+chloride and by Takeuchi et al. [108], for lithium chloride, seem to suffer from large
+uncertainties. This may eventually be due to the very nature of the solutions to be
+measured and the methods used.
+
+We have considered the data of Riedel [109] and Uemura [96] for lithium chloride, and of
+Riedel [103,109] for calcium chloride, to obtain the parameters of a model proposed by
+Riedel [109] and described in the following.
+
+Riedel defined a characteristic value called `equivalent thermal conductivity depression'
+and understood it as a value constant for each salt in aqueous solution, at least for
+diluted solutions:
+\begin{equation}
+\alpha_R \equiv \frac{\lambda_{\mathrm{H_2O}}(T) - \lambda_{\mathrm{sol}}(T,\xi)}{\zeta_{\mathrm{eq}}}
+\end{equation}
+In this equation, $\zeta_{\mathrm{eq}}$ is the `equivalent ionic concentration' as named by
+Riedel,
+\begin{equation}
+\zeta_{\mathrm{eq}} = \frac{\xi \times \rho_{\mathrm{sol}}(T,\xi) \times I_s}{M}
+\end{equation}
+$I_s$ is the ionic strength of the species in solution (1 for LiCl, 2 for CaCl$_2$).
+
+Riedel also noted that $\alpha_R$ would tend to decrease at the higher concentrations in
+his measurements. We found that $\alpha_R$ shows a linear dependence upon concentration,
+for solutions of both lithium and calcium chlorides, decreasing with concentration.
+Equations for $\alpha_R$ were fitted to the data of Riedel at 20$^{\circ}$C.
+\begin{equation}
+\alpha_R = \alpha_0 + \alpha_1 \xi
+\end{equation}
+Their parameters are given in Table~9 for both chlorides.
+
+\begin{table}[htbp]
+\centering
+\caption{Parameters of the $\alpha_R$ equations}
+\begin{tabular}{lrr}
+\toprule
+ & LiCl & CaCl$_2$ \\
+\midrule
+$\alpha_0$ & $10.8958\times 10^{-3}$ & $5.9473\times 10^{-3}$ \\
+$\alpha_1$ & $-11.7882\times 10^{-3}$ & $-1.3988\times 10^{-3}$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+As may be seen in Fig.~13, the data of Uemura [96], for lithium chloride at temperatures
+from 10 to 90$^{\circ}$C, are predicted with good accuracy on this basis.
+
+For calcium chloride the values measured at 20$^{\circ}$C are as well predicted with good
+accuracy, Fig.~14. All other data, as already mentioned, seem to suffer from poor accuracy,
+and above all from inconsistency. This was discussed by Riedel [103] for the data of Meyer
+[104] and Rau [105]. On the other hand, Assael et al. [107] data for calcium chloride show
+an almost linear behaviour with temperature and a relation to water values that does not
+conform to Riedel's `equivalent thermal conductivity depression' model, Fig.~15. Although
+those last authors suggest that Riedel's model would not explain the dependency of the
+thermal conductivity of the solution upon temperature, we believe that the behaviour shown
+by their data has essentially to do with their method of measurement and the very nature
+of the solution to be measured.
+
+$\lambda_{\mathrm{H_2O}}(T)$ is the thermal conductivity of pure liquid water. For
+temperatures $\vartheta \ge 20^{\circ}$C, it is calculated using the IAPWS formulation for
+industrial applications as described in Appendix~C. For subcooled water we follow the
+recommendations of Riedel [103] also adopted by McLaughlin [121], which gives a linear
+variation of the thermal conductivity with temperature:
+\begin{equation}
+\lambda_{\mathrm{H_2O}}(\theta) = \lambda_{\mathrm{H_2O,20}} \times (0.208495 +
+1.747278\,\theta)
+\end{equation}
+$\lambda_{\mathrm{H_2O,20}}$ is the thermal conductivity at 20$^{\circ}$C, calculated with
+the IAPWS formulation, and $\theta$ is the water reduced temperature.
+
+\textit{[Figs.~13--15 not reproduced.]}
+
+\section{Specific thermal capacity}
+
+The specific thermal capacities of aqueous solutions of lithium and calcium chlorides were
+extensively studied due to their earlier use as a brines in refrigeration systems. The
+range of temperatures considered was that mostly suitable for this application.
+Measurements have been reported for lithium chloride by Richards and Rowe [110] Jauch
+[111] Lange and D\"urr [112] Gucker and Schminke [113] and Bennewitz and Kratz [114].
+R\"uterjans et al. [115] carried out measurements for temperatures up to 90$^{\circ}$C,
+albeit for low concentrations of the salt, Fig.~18. For calcium chloride the measurements
+reported by Dickinson et al. [24], Koch [116], Richards and Dole [117] all cover the range
+of applications as a refrigeration brine. Ruckov [75] extended the range of measurements up
+to 75$^{\circ}$C, Fig.~19. Tucker [120] reports measurements of the specific thermal
+capacity for solutions of both chlorides. As may be observed from Fig.~18 for lithium
+chloride, and Fig.~19 for calcium chloride, those measurements do not fit together with the
+measurements of other authors.
+
+The equation we propose for the calculation of the specific thermal capacity of the
+solutions of both chlorides, has the following general form:
+\begin{equation}
+Cp_{\mathrm{sol}}(T,\xi) = Cp_{\mathrm{H_2O}}(T) \times \left(1 - f_1(\xi) \times
+f_2(T)\right)
+\end{equation}
+The specific thermal capacity of liquid water is calculated with a modified Sato [118]
+equation fitted to the data of Angell et al. [119] as
+\begin{equation}
+Cp_{\mathrm{H_2O}}(\theta) = A + B\theta^{0.02} + C\theta^{0.04} + D\theta^{0.06} +
+E\theta^{1.8} + F\theta^{8}
+\end{equation}
+\begin{equation}
+\theta \equiv \frac{T}{228} - 1
+\end{equation}
+Fig.~16 depicts a graph of this equation comparing it with the data and includes its
+parameters for the two ranges of validity.
+
+The function $f_1(\xi)$
+\begin{equation}
+f_1(\xi) = A\xi + B\xi^2 + C\xi^3
+\end{equation}
+describes the effects of salt concentration upon the specific thermal capacity for the
+whole range for the solutions of calcium chloride and up to $\xi \le 0.31$ for those of
+lithium chloride. For larger concentrations, it is linear on mass fraction
+\begin{equation}
+f_1(\xi) = D + E\xi
+\end{equation}
+$f_2(T)$ is,
+\begin{equation}
+f_2(\theta) = F\theta^{0.02} + G\theta^{0.04} + H\theta^{0.06}, \qquad
+\theta \equiv \frac{T}{228} - 1
+\end{equation}
+for both chlorides, with the parameters given in Table~10.
+
+Figs.~17 and 18 show comparisons of the model with measured data at constant temperature
+and concentration, respectively, for aqueous solutions of lithium chloride. Figs.~19 and 20
+depict the same comparisons for aqueous solutions of calcium chloride.
+
+\begin{table}[htbp]
+\centering
+\caption{Parameters of the equations for the specific thermal capacity of the aqueous
+solutions of lithium and calcium chlorides}
+\begin{tabular}{lrrrrrrrr}
+\toprule
+ & $A$ & $B$ & $C$ & $D$ & $E$ & $F$ & $G$ & $H$ \\
+\midrule
+LiCl--H$_2$O & 1.43980 & $-1.24317$ & $-0.12070$ & 0.12825 & 0.62934 & 58.5225 &
+$-105.6343$ & 47.7948 \\
+CaCl$_2$--H$_2$O & 1.63799 & $-1.69002$ & 1.05124 & 0.0 & 0.0 & 58.5225 & $-105.6343$ &
+47.7948 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textit{[Figs.~16--20 not reproduced.]}
+
+\section{Differential enthalpy of dilution}
+
+In the dehydration of gases (e.g., moist air) with aqueous salt solutions, the water
+vapour is absorbed by the solution in the conditioner, to be later desorbed in the
+regenerator. For the salt solutions considered here, the absorption (dilution) is an
+exothermic process, while the desorption (regeneration) requires the supply of thermal
+energy to the solution. This thermal energy required (or liberated) is larger than that
+corresponding to the vaporization (or condensation) of pure water. This difference
+constitutes the energy of dilution, and when referred to the unit mass of water is named
+differential enthalpy of dilution.
+
+We used data from the literature to establish interpolating equations for the differential
+enthalpy of dilution of aqueous solutions of lithium chloride [40,112] and calcium chloride
+[46,124]. The equations have the general form:
+\begin{equation}
+\Delta h_d = \Delta h_{d,0} \left[1 + \left(\frac{\zeta}{H_1}\right)^{H_2}\right]^{H_3}
+\end{equation}
+where $\zeta$ is defined from the salt mass fraction as
+\begin{equation}
+\zeta = \frac{\xi}{H_4 - \xi}
+\end{equation}
+The reference $\Delta h_{d,0}$ is related to the temperature as
+\begin{equation}
+\Delta h_{d,0} = H_5 + H_6 \theta
+\end{equation}
+The parameters $H_i$ for these equations are given in Table~11.
+
+The graphs of Figs.~21 and 22 show comparisons of the literature data with calculations
+with the models described, for aqueous solutions of lithium and calcium chlorides,
+respectively.
+
+\begin{table}[htbp]
+\centering
+\caption{Parameters of the differential enthalpy of dilution equations for solutions of
+lithium and calcium chlorides}
+\begin{tabular}{lrr}
+\toprule
+ & LiCl--H$_2$O & CaCl$_2$--H$_2$O \\
+\midrule
+$H_1$ & 0.845 & 0.855 \\
+$H_2$ & $-1.965$ & $-1.965$ \\
+$H_3$ & $-2.265$ & $-2.265$ \\
+$H_4$ & 0.6 & 0.8 \\
+$H_5$ & 169.105 & $-955.690$ \\
+$H_6$ & 457.850 & 3011.974 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\textit{[Figs.~21, 22 not reproduced.]}
+
+\section{Discussion}
+
+This paper presents a complete collection of interpolating equations for the most
+important properties of aqueous solutions of the lithium and calcium chlorides, necessary
+in the design of absorption and air conditioning equipment, based on sorption processes
+with these salts. The data considered originate from a detailed research of old and new
+literature and concerns measurements by methods that evolved with time and the
+technologies available. This however, should not mean that newer measurements are more
+accurate than older ones. We have systematically given more weight to the data that
+represented best the data in the database for a given property, as is evident from the
+graphs. This means that although we have represented in the graphs all the data available
+in the literature, not all have been considered in the fitting process. The selection
+criteria is essentially based on the accuracy reported for the measurements, though this
+is not always available. In some cases, e.g., the crystallization line of aqueous
+solutions of calcium chloride, many experimental observations have been excluded. Some of
+the measurements of other properties seem to suffer from poor control of the
+concentration, given the strong hydrophilic characteristics of the solutions (e.g., some
+measurements of the surface tension). It also seems to us that the electrical conductivity
+of the solutions may have interfered with some of the most recent measurements of the
+thermal conductivity.
+
+Although we would not like to give specific confidence limits for the values predicted by
+the equations proposed, we consider them well within the boundaries accepted in
+engineering calculations. We believe the equations proposed to represent a very
+significative contribution to the process of computer-assisted design of absorption and
+liquid desiccant based air conditioning systems. The equations were programmed into
+MathCad\textregistered\ calculation sheets that may be used as a base for process design
+and the design of parts of equipment.
+
+\appendix
+
+\section{Vapour pressure of water over the liquid phase}
+
+The vapour pressure of ordinary water over the liquid phase is calculated with an equation
+due to Saul and Wagner [123] as follows. The parameters of this equation are given in
+Table~12.
+\begin{equation}
+\ln\left(\frac{p}{p_{c,\mathrm{H_2O}}}\right) = \frac{A_0 \tau + A_1 \tau^{1.5} + A_2
+\tau^3 + A_3 \tau^{3.5} + A_4 \tau^4 + A_5 \tau^{7.5}}{1 - \tau}
+\end{equation}
+\begin{equation}
+\tau = 1 - \frac{T}{T_{c,\mathrm{H_2O}}}
+\end{equation}
+
+\begin{table}[htbp]
+\centering
+\caption{Parameters of the equation for the vapour pressure of water over the liquid
+phase}
+\begin{tabular}{lr}
+\toprule
+$i$ & $A_i$ \\
+\midrule
+0 & $-7.858230$ \\
+1 & 1.839910 \\
+2 & $-11.781100$ \\
+3 & 22.670500 \\
+4 & $-15.939300$ \\
+5 & 1.775160 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{The IAPWS formulation for the dynamic viscosity of ordinary water substance for
+industrial use}
+
+The dynamic viscosity of liquid water at temperatures above 0$^{\circ}$C is calculated
+with the IAPWS formulation for industrial use [99] as follows:
+\begin{equation}
+\bar{\eta} = \bar{\eta}_0(\bar{T}) \times \bar{\eta}_1(\bar{T}, \bar{\rho}) \times
+\bar{\eta}_2(\bar{T}, \bar{\rho})
+\end{equation}
+The term
+\begin{equation}
+\bar{\eta}_0(\bar{T}) = \bar{T}^{0.5} \left(\sum_{i=0}^{3} H_i \bar{T}^{-i}\right)^{-1}
+\end{equation}
+represents the viscosity of steam in the ideal gas limit with the parameters $H_i$ given
+in Table~13.
+
+The second term is
+\begin{equation}
+\bar{\eta}_1(\bar{T}, \bar{\rho}) = \exp\left\{\bar{\rho} \sum_{i=0}^{5} \sum_{j=0}^{6}
+G_{i,j} \left(\bar{T}^{-1} - 1\right)^i (\bar{\rho} - 1)^j\right\}
+\end{equation}
+with the parameters $G_{i,j}$ as given in Table~14.
+
+The term $\bar{\eta}_2(\bar{T}, \bar{\rho})$ may be taken as unity for industrial
+applications, since it concerns only a narrow region around the critical point. The
+variables with the bar above represent reduced values. These are reduced as follows:
+$\bar{T} = T/T^*$, $\bar{\rho} = \rho/\rho^*$, $\bar{\eta} = \eta/\eta^*$, with the
+reference values: $T^* = 647.226$~K, $\rho^* = 317.763$~kg$\cdot$m$^{-3}$,
+$\eta^* = 55.071 \times 10^{-6}$~Pa$\cdot$s.
+
+\begin{table}[htbp]
+\centering
+\caption{$H_i$ parameters for the water viscosity equation}
+\begin{tabular}{lr}
+\toprule
+$i$ & $H_i$ \\
+\midrule
+0 & 1.000 \\
+1 & 0.978197 \\
+2 & 0.579829 \\
+3 & $-0.202354$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[htbp]
+\centering
+\caption{$G_{i,j}$ parameters for the water viscosity equation}
+\begin{tabular}{lrrrrrrr}
+\toprule
+$i/j$ & 0 & 1 & 2 & 3 & 4 & 5 & 6 \\
+\midrule
+0 & 0.5132047 & 0.2151778 & $-0.2818107$ & 0.1778064 & $-0.0417661$ & 0.0 & 0.0 \\
+1 & 0.3205656 & 0.7317883 & $-1.070786$ & 0.4605040 & 0.0 & $-0.01578386$ & 0.0 \\
+2 & 0.0 & 1.241044 & $-1.263184$ & 0.2340379 & 0.0 & 0.0 & 0.0 \\
+3 & 0.0 & 1.476783 & 0.0 & $-0.4924179$ & 0.1600435 & 0.0 & $-0.003629481$ \\
+4 & $-0.7782567$ & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+5 & 0.1885447 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 & 0.0 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{The IAPWS formulation for the thermal conductivity of ordinary water substance
+for industrial use}
+
+This formulation [122], as the foregoing one, is included here for the sake of
+completeness. The IAPWS formulation for industrial use consists of the following
+interpolating equation
+\begin{equation}
+\bar{\lambda} = \bar{\lambda}_0(\bar{T}) \times \bar{\lambda}_1(\bar{\rho}) \times
+\bar{\lambda}_2(\bar{T}, \bar{\rho})
+\end{equation}
+The first term, $\bar{\lambda}_0(\bar{T})$, represents the thermal conductivity of steam
+in the ideal-gas limit, and is
+\begin{equation}
+\bar{\lambda}_0(\bar{T}) = \bar{T}^{0.5} \left(\sum_{i=0}^{3} L_{0,i} \bar{T}^i\right)
+\end{equation}
+The term $\bar{\lambda}_1(\bar{\rho})$ is defined by
+\begin{equation}
+\bar{\lambda}_1(\bar{\rho}) = L_{1,0} + L_{1,1}\bar{\rho} + L_{1,2}
+\exp\left\{L_{1,3}(\bar{\rho} + L_{1,4})^2\right\}
+\end{equation}
+and $\bar{\lambda}_2(\bar{T}, \bar{\rho})$ is defined by the equation
+\begin{equation}
+\begin{aligned}
+\bar{\lambda}_2(\bar{T}, \bar{\rho}) &= \left(\frac{L_{2,0}}{\bar{T}^{10}} +
+L_{2,1}\right) \bar{\rho}^{9/5} \exp\left\{L_{3,0}\left(1 - \bar{\rho}^{14/5}\right)\right\}\\
+&\quad + L_{2,2} \Lambda_0 \bar{\rho}^{\Lambda_1} \exp\left\{\left(\frac{\Lambda_1}
+{1+\Lambda_1}\right)\left(1 - \bar{\rho}^{1+\Lambda_1}\right)\right\}\\
+&\quad + L_{2,3} \exp\left\{L_{3,1} \bar{T}^{3/2} + \frac{L_{3,2}}{\bar{\rho}^5}\right\}
+\end{aligned}
+\end{equation}
+$\Lambda_0$ and $\Lambda_1$ are functions of
+\begin{equation}
+\Delta \bar{T} = |\bar{T} - 1| + L_{3,3}
+\end{equation}
+Defined as
+\begin{equation}
+\Lambda_0 =
+\begin{cases}
+\dfrac{1}{\Delta \bar{T}} & \Longleftarrow \bar{T} \ge 1 \\[2mm]
+\dfrac{L_{3,5}}{\Delta \bar{T}^{3/5}} & \Longleftarrow \bar{T} < 1
+\end{cases}
+\end{equation}
+\begin{equation}
+\Lambda_1 = 2 + \frac{L_{3,4}}{\Delta \bar{T}^{3/5}}
+\end{equation}
+The parameters of these equations are given in Table~15. The variables with the bar above
+represent reduced values. These are reduced as follows: $\bar{T} = T/T^*$,
+$\bar{\rho} = \rho/\rho^*$, $\bar{\lambda} = \lambda/\lambda^*$, with the reference values:
+$T^* = 647.26$~K, $\rho^* = 317.7$~kg$\cdot$m$^{-3}$, $\lambda^* = 1.0$~W$\cdot$m$^{-1}
+\cdot$K$^{-1}$.
+
+\begin{table}[htbp]
+\centering
+\caption{Parameters for the thermal conductivity equation of normal water}
+\begin{tabular}{lrrrr}
+\toprule
+$L_{i,j}$ & $i=0$ & $i=1$ & $i=2$ & $i=3$ \\
+\midrule
+$j=0$ & 0.0102811 & $-0.397070$ & 0.0701309 & 0.642857 \\
+$j=1$ & 0.0299621 & 0.400302 & 0.0118520 & $-4.11717$ \\
+$j=2$ & 0.0156146 & 1.060000 & 0.00169937 & $-6.17937$ \\
+$j=3$ & $-0.00422464$ & $-0.171587$ & $-1.0200$ & 0.00308976 \\
+$j=4$ & 0.0 & 2.392190 & 0.0 & 0.0822994 \\
+$j=5$ & 0.0 & 0.0 & 0.0 & 10.0932 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section*{References}
+
+\begin{enumerate}
+\footnotesize
+\item M.P. Applebey, F.H. Crawford, K. Gordon, Vapour pressures of saturated solutions. Lithium chloride and lithium sulfate, J. Chem. Soc. (1934) 1665--1671.
+\item M.P. Applebey, R.P. Cook, The transition temperatures of lithium chloride hydrates, J. Chem. Soc. (1938) 547.
+\item H. Benrath, Die Polythermen des tern\"aren Systems: CuCl$_2$--(LiCl)$_2$--H$_2$O and NiCl$_2$--(LiCl)$_2$--H$_2$O, Z. Anorg. Chem. 205 (1932) 417--424.
+\item H. Benrath, Die Polythermen des tern\"aren Systems: MnCl$_2$--(LiCl)$_2$--H$_2$O, Z. Anorg. Chem. 220 (1934) 145--153.
+\item W. Biltz, Zur Kenntnis der L\"osungen anorganischer Salze in Wasser, Z. Phys. Chem. 40 (1902) 185--221.
+\item J.A.N. Friend, A.T.W. Colley, The solubility of lithium chloride in water, J. Chem. Soc. (1931) 3148--3149.
+\item J.N. Friend, R.W. Hale, S.E.A. Ryder, The solubility of lithium chloride in water between 70$^\circ$ and 160$^\circ$C, J. Chem. Soc. (1937) 970.
+\item G.H. H\"uttig, W. Steudemann, Studie zur Chemie des Lithiums. VI---Die thermische Analyse der Systeme Lithiumhalogenide-Wasser, Z. Phys. Chem. 126 (1927) 105--117.
+\item W.H. Rodebush, The freezing points of concentrated solutions and the free energy of solutions of salts, J. Amer. Chem. Soc. 40 (1918) 1204--1213.
+\item W. Steudemann, Die thermische Analyse der Systeme des Wassers mit den Lithiumhalogeniden, Dissertation, Universit\"at Jena, 1927.
+\item G. Scatchard, S.S. Prentiss, The freezing points of aqueous solutions. IV. Potassium, sodium and lithium chlorides and bromides, J. Amer. Chem. Soc. 55 (1933) 4355--4362.
+\item A.C.D. Rivett, Neutralsalzwirkung auf die Gefrierpunkte von Mischungen in w\"asserigen L\"osungen, Z. Phys. Chem. 80 (1912) 537--563, 82 (1913) 253--254.
+\item H. Jahn, \"Uber die Erniedrigung des Gefrierpunktes in den verd\"unnten Auflösungen stark dissociierter Elektrolyte, Z. Phys. Chem. 50 (1905) 129--168.
+\item H. Jahn, \"Uber die Erniedrigung des Gefrierpunktes in den verd\"unnten Auflösungen stark dissociierter Elektrolyte. II, Z. Phys. Chem. 59 (1907) 31--40.
+\item H. Hammerl, \"Uber die K\"altemischung aus Chlorcalcium und Schnee, Sitzungsberichte der Kaiserlichen Wiener Akademie der Wissenschaften 78 (II) (1878) 59--80.
+\item C.F. Prutton, O.F. Tower, The system calcium chloride--magnesium chloride--water at 0, $-15$ and $-30^\circ$, J. Amer. Chem. Soc. 54 (1932) 3040--3047.
+\item H.W.B. Roozeboom, \'Etude exp\'erimentale sur les conditions de l'\'equilibre entre les combinaisons solides et liquides de l'eau avec des sels, particuli\`erement avec le chloride de calcium, Recueil des Travaux Chimiques des Pays-Bas VIII (1889) 1--146.
+\item H.W.B. Roozeboom, Experimentelle und theoretische Studien \"uber die Gleichgewichtsbedingungen zwischen festen and fl\"ussigen Verbindungen von Wasser mit Salzen, besonders mit dem Chlorcalcium, Z. Phys. Chem. 4 (1889) 31--65.
+\item H. Basset, G.W. Barton, A.R. Foster, C.R.J. Pateman, The ternary systems constituted by mercuric chloride, water and alkaline-earth chloride or cupric chloride, J. Chem. Soc. (1933) 151--164.
+\item H. Basset, H.F. Gordon, J.H. Henshall, The three-compound systems composed of cobalt chloride and water with either calcium, strontium, or thorium chloride, J. Chem. Soc. (1937) 971--973.
+\item P. Kremers, Ueber die Modification der mittleren L\"oslichkeit einiger Salzatome und des mittleren Volums dieser L\"osungen, Poggendorff Annalen 103 (1858) 57--68.
+\item A. Lannung, Dampfdruckmessungen des Systems Calciumchloride--Wasser, Z. Anorg. Allgem. Chem. 228 (1936) 1--18.
+\item K. Linge, Der Dampfdruck \"uber w\"assrigen L\"osungen von Chlornatrium, Chlormagnesium und Chlorcalcium, Z. Ges. K\"alte-Industrie 36 (1929) 189--193.
+\item H.C. Dickinson, E.F. Mueller, E.B. George, Specific heat of some calcium chloride solutions between $-35^\circ$C and $+20^\circ$C, Bull. Bureau Standards 6 (1909/10) 379--408.
+\item A. Benrath, \"Uber die Systeme CoCl$_2$--MeCl oder MeCl--H$_2$O, Z. Anorg. Chem. 163 (1927) 396--404.
+\item H.F. Gibbard Jr., Study of concentrated aqueous electrolyte solutions by a static vapor pressure method, Ph.D. Thesis, Massachusetts Institute of Technology, 1966.
+\item E.M. Baker, V.H. Waite, Boiling point of salt solutions under varying pressures, Chem. Metallurg. Engrg. 25 (1921) 1137--1140.
+\item G.Th. Gerlach, Ueber Siedetemperaturen der Salzl\"osungen und Vergleiche der Erh\"ohung der Siedetemperaturen mit den \"ubrigen Eigenschaften der Salzl\"osungen, Z. Anorg. Chem. 26 (1887) 413--530.
+\item G. Tammann, Ueber die Dampftensionen von Salzl\"osungen, Wied. Ann. Phys. Chem. 24 (1885) 523--569.
+\item G. Tammann, Die Dampftensionen der L\"osungen, Z. Phys. Chem. 2 (1888) 42--47.
+\item S. Skinner, Physical properties of solutions of some metallic chlorides, J. Chem. Soc. 61 (1892) 339--344.
+\item C. Dieterici, Ueber die Dampfdrucke w\"assereiger L\"osungen bei 0$^\circ$C, Wied. Ann. Phys. Chem. 50 (1893) 47--87.
+\item O.F. Tower, The determination of vapor pressures of solutions with the Morley gauge, J. Amer. Chem. Soc. 30 (1908) 1219--1228.
+\item W.R. Bousfield, C.E. Bousfield, Vapour pressure and density of sodium chloride solutions, Proc. Roy. Soc. A 103 (1923) 429--443.
+\item B.F. Lovelace, W.H. Bahlke, J.C.W. Frazer, Vapor pressures of lithium chloride solutions at 20$^\circ$C, J. Amer. Chem. Soc. 45 (1923) 2930--2934.
+\item F.H. H\"uttig, F. Reuscher, Studien zur Chemie des Lithiums. I. \"Uber die Hydrate des Lithiumchlorids und Lithiumbromids, Z. Anorg. Chem. 137 (1924) 155--180.
+\item J.N. Pearce, A.F. Nelson, The vapor pressures of aqueous solutions of lithium nitrate and the activity coefficients of some alkali salts in solutions at high concentrations at 25$^\circ$C, J. Amer. Chem. Soc. 54 (1932) 3544--3555.
+\item R.E. Gibson, L.H. Adams, Changes of chemical potential in concentrated solutions of certain salts, J. Amer. Chem. Soc. 55 (1933) 2679--2695.
+\item N.A. Gokcen, Vapor pressure of water above saturated lithium chloride solution, J. Amer. Chem. Soc. 73 (1951) 3789--3790.
+\item E.F. Johnson, M.C. Molstad, Thermodynamic properties of aqueous lithium chloride solutions---An evaluation of the gas current method for the determination of the thermodynamic properties of aqueous salt solutions, J. Phys. Colloid Chem. 55 (1951) 257--281.
+\item D.T. Acheson, Vapor pressures of saturated aqueous salt solutions, in: A. Wexler (Ed.), Humidity and Moisture, vol. 3: Fundamentals and Standards, Reinhold, New York, 1965, pp. 521--530.
+\item C.P. Hedlin, F.N. Trofimenkoff, Relative humidities over saturated solutions of nine salts in the temperature range from 0 to 90 F, in: A. Wexler (Ed.), Humidity and Moisture, vol. 3: Fundamentals and Standards, Reinhold, New York, 1965, pp. 519--520.
+\item H. Hammerl, \"Uber die Siedepunkte der Chlorcalciuml\"osungen, Sitzungsberichte der Kaiserlichen Akademie der Wissenschaften, Mathematik-Naturwissenschaftlichen Klasse, Abt. 2 72 (II) (1875) 8--10.
+\item S.M. Johnston, On the elevation of the boiling points of aqueous solutions of electrolytes, Trans. Roy. Soc. Edinburgh I 45 (8) (1908) 193--240.
+\item N.V. Sidgwick, E.K. Ewbank, The measurement of the vapour pressures of aqueous salt solutions by the depression of the freezing point of nitrobenzene, J. Chem. Soc. 125 (1924) 2268--2273.
+\item W.R. Harrison, E.P. Perman, Vapour pressure and heat of dilution of aqueous solutions. Part II. Vapour pressure of aqueous solutions of calcium chloride, Trans. Faraday Soc. 23 (1927) 1--22.
+\item H. Ebert, Z. Instr. 50 (1930) 43--57.
+\item J.R.I. Hepburn, The vapour pressure of water over aqueous solutions of the chlorides of the alkaline-earth metals. Part I. Experimental, with a critical discussion of vapour-pressure data, J. Chem. Soc. (1932) 550--566.
+\item G.I. Vojnilovic, L.K. Achrap, L.S. Maj, J. Appl. Chem. USSR 8 (1935) 589--597.
+\item M.F. Bechtold, R.F. Newton, The vapor pressure of salt solutions, J. Amer. Chem. Soc. 62 (1940) 1390--1393.
+\item R.H. Stokes, A thermodynamic study of bivalent metal halides in aqueous solution. Part XIII. Properties of calcium chloride solutions up to high concentrations at 25$^\circ$C, Trans. Faraday Soc. 41 (1945) 637--641.
+\item R.H. Stokes, R.A. Robinson, Standard solutions for humidity control at 25$^\circ$C, Ind. Engrg. Chem. 41 (1949) 2013.
+\item E. D\"uhring, Wirkliches Gesetz der correspondierenden Siedetemperaturen an Stelle des Daltonischen Versuchs zu einem solchen, in: Neue Formelgesetze zur rationellen Physik unde Chemie, 1. Folge, 3. Kapitel, Fues's Verlag, Leipzig, 1878, pp. 70--98.
+\item D.F. Othmer, Correlating vapor pressure and latent heat data---A new chart, Ind. Engrg. Chem. 32 (1940) 841--856.
+\item D.F. Othmer, P.W. Maurer, Ch.J. Molinari, Correlating vapor pressures and other physical properties, Ind. Engrg. Chem. 49 (1957) 125--137.
+\item P. Kremers, Ueber die Modification der mittlern Volumina einiger Salzatome und deren L\"osungen, Ann. Phys. Chem. Pogg. Ann. 99 (1856) 435--445.
+\item G.Th. Gerlach, Specifische Gewichte der gebr\"auchlichsten Salzl\"osungen bei verschiedenen Concentrationsgraden, Buchhandlung J.G. Engelhardt, Freiberg, 1859.
+\item F. Kohlrausch, O. Grotrian, Das elektrische Leitungsverm\"ogen der Chloride von den Alkalien und alkalischen Erden, sowie der Salpeters\"aure in w\"assrigen L\"osungen, Ann. Phys. Chem. 154 (1875) 215--239.
+\item G. Lemoine, Recherches sur les solutions salines: Chlorure de lithium, C. R. Hebdomad. Sc\'eanc. Acad. Sci. 125 (1897) 603--605.
+\item G.P. Baxter, C.C. Wallace, Changes in volume upon solution in water of the halogen salts of alkali metals. II, J. Amer. Chem. Soc. 38 (1916) 70--105.
+\item N. Fontell, \"Uber die Molekularrefraction des Lithiumchlorids in Wasserl\"osungen, Soc. Sci. Fennica, Comment. Phys.-Math. IV (8) (1927) 1--10.
+\item G.F. H\"uttig, H. K\"ukenthal, Studien zur Chemie des Wasserstoffes. VII. Die Dichten, Brechungsexponenten und lichtabsorptionen konzentrierter w\"assriger Chlorwasserstofflösungen, Z. Elektrochem. 34 (1928) 14--18.
+\item H. Kohner, \"Uber die Konzentrationsab\"agigkeit der \"Aquivalentrefraktion von starken Elektrolyten in L\"osung, Z. Phys. Chem. B 1 (1928) 427--455.
+\item E. Schreiner, Die Refraktion und Dissoziation von Elektrolyten. I. In Wasser, Z. Phys. Chem. 133 (1928) 420--430.
+\item S. Palitzsch, Studien \"uber dir Oberfl\"achenspannung von L\"osungen. I. Der Einfluss der Salze auf die Oberfl\"achenspannung w\"asseriger Urethanl\"ozungen. Die Messungen, Z. Phys. Chem. A 138 (1928) 379--398.
+\item A.F. Scott, V.M. Obenhaus, R.W. Wilson, The compressibility coefficients of solutions of eight alkali halides, J. Phys. Chem. 38 (1934) 931--940.
+\item L. Nickels, A.J.J. Allmand, The electrical conductivities and viscosities at 25$^\circ$C of solutions of potassium, sodium and lithium chlorides, in water and in one-tenth molar hydrochloric acid, J. Phys. Chem. 41 (1937) 861--872.
+\item S. Lengyel, J. Tamas, J. Giber, J. Holderith, Study of viscosity of aqueous alkali halide solutions, Acta Chim. Acad. Sci. Hung. 40 (1964) 125--143.
+\item K. Tanaka, R. Tamamushi, A physico-chemical study of concentrated aqueous solutions of lithium chloride, Z. Naturforschung---A: Phys. Sci. 46 (1991) 141--147.
+\item J.M. Wimby, Th.S. Berntsson, Viscosity and density of aqueous solutions of LiBr, LiCl, ZnBr$_2$, CaCl$_2$ and LiNO$_3$. 1. Single Salt Solutions, J. Chem. Engrg. Data 39 (1994) 68--72.
+\item C. Ch\'eneveau, Sur les propri\'et\'es optiques des solutions---\'Etude de la r\'efraction des solutions non uniquement aqueuses, Ann. Chim. Phys. [8] 12 (1907) 320--393.
+\item W. Koch, Spezifisches Gewicht und Spezifisches W\"arme der Volumeneinheit der L\"osungen von Natrium-, Calcium- und Magnesiumchlorid bei tiefen und mittleren Temperaturen, Z. Ges. K\"alte-Indust. 31 (1924) 105--108.
+\item E.P. Perman, W.D. Urry, The compressibility of aqueous solutions, Proc. Roy. Soc. London, Ser. A 126 (1929) 44--78.
+\item W.D. Harkins, E.C. Gilbert, The structure of films of water on salt soltions. II. The surface tension of calcium chloride solutions at 25$^\circ$C, J. Amer. Chem. Soc. 48 (1926) 604--607.
+\item A.P. Ruckov, Archangel'sk. Lesotechn. Inst. Sbornik Naucno-Issled. Rabot 8 (1946) 85--94.
+\item P.A. Lyons, J.F. Riley, Diffusion coefficients for aqueous solutions of calcium chloride and cesium chloride at 25$^\circ$C, J. Amer. Chem. Soc. 76 (1954) 5216--5220.
+\item J.A. Gates, R.H. Wood, Density and apparent molar volume of aqueous CaCl$_2$ at 323--600 K, J. Chem. Engrg. Data 34 (1989) 53--56.
+\item H.-L. Zhang, G.-H. Chen, S.-J. Han, Viscosity and density of H$_2$O + NaCl + CaCl$_2$ and H$_2$O + KCl + CaCl$_2$ at 298.15 K, J. Chem. Engrg. Data 42 (1997) 526--530.
+\item C.E. Linebarger, The surface-tensions of aqueous solutions of alkaline chlorides, J. Amer. Chem. Soc. 21 (1899) 411--415.
+\item A.K. Goard, Negative adsorption. The surface tensions and activities of some aqueous salt solutions, J. Chem. Soc. 127 (1925) 2451--2458.
+\item W. Hertz, E. Knaebel, Beitr\"age zur Kenntnis der Oberfl\"achenspannung von L\"osungen, Z. Phys. Chem. 131 (1928) 389--404.
+\item G. Schwenker, \"Uber eine wesentliche Verfeinerung der Oberfl\"achenspannungsmessung nach der B\"ugelmethode und \"uber die Oberfl\"achenspannung verd\"unnter Salzl\"osungen, Ann. Phys. Chim. [5] 11 (1931) 525--557.
+\item J.A.V. Butler, A.D. Lees, Adsorption at the surface of solutions. Part II. The effect of lithium chloride on the surface of water--alcohol solutions, J. Chem. Soc. 134 (1932) 2097--2104.
+\item J.W. Belton, The effect of dilute hydrochloric acid on the surface tensions of aqueous salt solutions, Trans. Faraday Soc. 32 (1936) 1717--1721.
+\item S.A. Bogatykh, I.D. Evnovich, V.M. Sidorov, Investigation of the surface tension of LiCl, LiBr, and CaCl$_2$ aqueous solutions in relation to conditions of gas drying, J. Appl. Chem. USSR 39 (1966) 2432--2433.
+\item W. Yao, H. Bjurstr\"om, F. Setterwall, Surface tension of lithium bromide solutions with heat transfer additives, J. Chem. Engrg. Data 36 (1991) 96--98.
+\item W. Grabowsky, Dissertation, Universit\"at K\"onigsberg, 1904.
+\item J.L.R. Morgan, E. Schramm, The weight of a falling drop and the laws of Tate. XVII. The drop weights and surface tensions of molten hydrated salts, and their solutions, J. Amer. Chem. Soc. 35 (1913) 1845--1856.
+\item H. Stocker, Die Oberfl\"achenspannung schwingender Fl\"ussigkeitsstrahlen, untersucht an Wasser und w\"asserigen Salzl\"osungen, Z. Phys. Chem. 94 (1920) 149--180, also Diss., Universit\"at Freiburg i. B, 1914.
+\item H.L. Cupples, The surface tension of calcium chloride solutions at 25$^\circ$C, measured by their maximum bubble pressures, J. Amer. Chem. Soc. 67 (1945) 987--990.
+\item A. Horibe, S. Fukusako, N. Yamada, K. Fumoto, Surface tension of aqueous binary solutions at low temperatures, Internat. J. Thermophys. 18 (1997) 387--396.
+\item IAPWS, Release on Surface Tension of Ordinary Water Substance, IAPWS, London, September 1994.
+\item E.W. Washburn, D.A. McInnes, The laws of ``concentrated'' solutions. III. The ionization and hydration relations of electrolytes in aqueous solution at zero degrees: A. Cesium nitrate, potassium chloride and lithium chloride, J. Amer. Chem. Soc. 33 (1911) 1686--1713.
+\item W.E. Henderson, D.R. Kellog, The hydrolisys of ethyl acetate by neutral salt solutions, J. Amer. Chem. Soc. 35 (1913) 396--418.
+\item E. Linde, Zur Frage um die elektrolysche Dissoziation des Wassers in Salzl\"osungen, Z. Elektrochem. Angew. Phys. Chem. 29 (1923) 163--168.
+\item T. Uemura, Studies on the lithium chloride water absorption refrigerating machine, Technol. Reports Kansai Univ. 9 (1967) 71--88.
+\item W.S. Tucker, The electrical conductivity and fluidity of strong solutions, Proc. Phys. Soc. 25 (1913) 111--124.
+\item H. Stakelbeck, R. Plank, Ueber die Z\"ahigkeit von Chlornatrium-, Chlorcalzium- und Chlormagnesium-l\"osungen in Ab\"agigkeit von Temperatur and Konzentration, Z. Ges. K\"alte-Indust. 36 (1929) 105--112.
+\item IAPWS, Revised Release on the IAPWS Formulation 1985 for the Viscosity of Ordinary Water Substance, IAPWS, London, 1997.
+\item G.F. White, R.W. Twining, The viscosity of undercooled water as measured in a new viscosimeter, Amer. Chem. J. 50 (1913) 380--389.
+\item J. Hallett, The temperature dependence of the viscosity of supercooled water, Proc. Phys. Soc. 82 (1963) 1046.
+\item Yu.A. Osipov, B.V. Zheleznyi, N.F. Bondarenko, The shear viscosity of water supercooled to $-35^\circ$C, Russian J. Phys. Chem. 51 (1977) 748--749.
+\item L. Riedel, W\"armeleitf\"ahigkeitsmessungen an k\"altetechnisch wichtigen Salzl\"osungen, K\"altetechnik 2 (1950) 99--109.
+\item E. Meyer, Die W\"armeleitf\"ahigkeit k\"altetechnischer Salzl\"osungen, Z. Ges. K\"alte-Indust. 47 (1940) 129--133.
+\item W. Rau, Untersuchungen \"uber die W\"armeleitung k\"altetechnischer Salzl\"osungen, Z. Angew. Phys. 1 (1948) 211--222.
+\item W. Mei{\ss}ner, Bemerkungen zu dem Aufsatz ``W\"armeleitf\"ahigkeitsmessungen an k\"altetechnisch wichtigen Salzl\"osungen'', K\"altetechnik 2 (1950) 202--203.
+\item M.J. Assael, E. Charitidou, J.Ch. Stassis, W.A. Wakeham, Absolute measurements of the thermal conductivity of some aqueous chloride salt solutions, Ber. Bunsenges. Phys. Chem. 93 (1989) 887--892.
+\item M. Takeuchi, S. Katoh, J. Kamoshida, Y. Kurosaki, Thermal conductivity of aqueous LiCl measured by transient hot wire method, in: Proc. 8th Internat. Heat Transfer Conference, vol. 2, 1986, pp. 543--548.
+\item L. Riedel, W\"armeleitf\"ahigkeitsmessungen an Fl\"ussigkeiten, Habilitationsschrift, Technische Hochschule Karlsruhe, 1948.
+\item Th.W. Richards, A.W. Rowe, The heats of dilution and the specific heats of dilute solutions of nitric acid and of hydroxides and chlorides and nitrates of lithium, sodium, potassium, and cesium, J. Amer. Chem. Soc. 43 (1921) 770--796.
+\item K. Jauch, Die spezifische W\"arme w\"asseriger Salzl\"osungen, Z. Phys. 4 (1921) 441--447.
+\item E. Lange, F. D\"urr, L\"osungs- unde Verd\"unnungsw\"armen von Salzen von grosser Verd\"unnung bis zur S\"attigung. II. Lithiumchlorid, Z. Phys. Chem. 121 (1926) 361--384.
+\item F.T. Gucker, K.H. Schminke, A study of the heat capacity and related thermodynamic properties of aqueous solutions of lithium chloride, hydrochloric acid and potassium hydroxide at 25$^\circ$C, J. Amer. Chem. Soc. 54 (1932) 1358--1373.
+\item K. Bennewitz, L. Kratz, Die spezifische W\"arme von nichtelektrolyten in L\"osung und der Einfluss der Dielektrizit\"atskonstante des L\"osungsmittels auf den Schwingungsgrad ihrer Molek\"ule, Phys. Z. 37 (1936) 496--511.
+\item H. R\"uterjans, F. Schreiner, U. Sage, Th. Ackermann, Apparent molal heat capacities of aqueous solutions of alkali halides and alkylammonium salts, J. Phys. Chem. 73 (1969) 986--994.
+\item W. Koch, Die spezifische W\"arme der L\"osungen von Kalziumchlorid und Magnesiumchlorid f\"ur mittlere und tiefe Temperaturen, Z. Ges. K\"alte-Indust. 29 (1922) 37--43.
+\item Th.W. Richards, M. Dole, The heats of dilution and specific heat of barium and calcium chloride solutions, J. Amer. Chem. Soc. 51 (1929) 797--802.
+\item H. Sato, K. Watanabe, Current status of the thermodynamic properties of ordinary water substance, in: M. Pichal, O. \v{S}ifner (Eds.), Proceedings of the 11th International Conference on the Properties of Water and Steam, 1989, pp. 79--90.
+\item C.A. Angel, M. Oguni, W. Sichina, Heat capacity of water at extremes of supercooling and superheating, J. Phys. Chem. 86 (1982) 998--1002.
+\item W.S. Tucker, Heats of dilution of concentrated solutions, Philos. Trans. Ser. A 215 (1915) 319--351.
+\item E. McLaughlin, The thermal conductivity of liquids and dense gases, Chem. Rev. 64 (1964) 389--428.
+\item IAPWS, Revised release on the IAPS formulation 1985 for the thermal conductivity of ordinary water substance, IAPWS, London, 1998.
+\item A. Saul, W. Wagner, International equations for the saturation properties of ordinary water substance, J. Phys. Chem. Ref. Data 16 (4) (1987) 893--901.
+\item J.B. Hunter, H. Bliss, Thermodynamic properties of aqueous salt solutions---Latent heats of vaporization and other properties by the gas current method, I\&EC 36 (10) (1944) 945--953.
+\end{enumerate}
+
+\end{document}

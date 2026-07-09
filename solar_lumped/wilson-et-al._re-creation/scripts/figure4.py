@@ -43,6 +43,14 @@ for _p in (_SRC, _SOLAR_ROOT):
         sys.path.insert(0, str(_p))
 
 from solar_lumped.physics.device_balances import solve_steady_thermal
+from solar_lumped.plotting.matlab_style import (
+    figure_size_inches,
+    plot_defaults_slides,
+    print_figure,
+    ref_marker_kwargs,
+    scaled_fontsize,
+    style_axes,
+)
 from solar_lumped.simulation.device_config import DeviceConfig, register_desorption_solver_cli
 from solar_lumped.simulation.ode_system import PhaseResult, run_daily_cycle
 from solar_lumped.simulation.water_inventory import cumulative_desorption_yield_l_m2
@@ -50,6 +58,8 @@ from solar_lumped.weather.atacama_figure import (
     ATACAMA_DESORPTION_START_OFFSET_H,
     atacama_field_profile,
 )
+
+plot_defaults_slides()
 
 _OUT_DIR = _WILSON_DIR / "outputs" / "figure4"
 _OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -295,19 +305,16 @@ def simulate_atacama(*, desorption_solver: str = "quasi_steady") -> dict:
 # ---------------------------------------------------------------------------
 
 _FIG4_STYLE = {
-    "absorber":  {"color": "#c0392b", "linestyle": "-",  "linewidth": 1.8, "label": "absorber (model)"},
-    "glass":     {"color": "#e67e22", "linestyle": "--", "linewidth": 1.5, "label": "glass (model)"},
-    "condenser": {"color": "#2980b9", "linestyle": "-",  "linewidth": 1.8, "label": "condenser (model)"},
-    "ambient":   {"color": "#7f8c8d", "linestyle": ":",  "linewidth": 1.4, "label": r"$T_\mathrm{amb}$ (measured)"},
-    "water":     {"color": "#1abc9c", "linestyle": "-",  "linewidth": 2.0, "label": "water output (model)"},
+    "absorber":  {"color": "#c0392b", "linestyle": "-",  "label": "absorber (model)"},
+    "glass":     {"color": "#e67e22", "linestyle": "--", "label": "glass (model)"},
+    "condenser": {"color": "#2980b9", "linestyle": "-",  "label": "condenser (model)"},
+    "ambient":   {"color": "#7f8c8d", "linestyle": ":",  "label": r"$T_\mathrm{amb}$ (measured)"},
+    "water":     {"color": "#1abc9c", "linestyle": "-",  "label": "water output (model)"},
 }
 
 
 def _panel_style(ax: plt.Axes) -> None:
-    ax.tick_params(direction="in", which="both", top=True, right=True)
-    ax.grid(False)
-    for spine in ax.spines.values():
-        spine.set_linewidth(0.8)
+    style_axes(ax)
 
 
 def _first_ref_temp(filename: str, default: float) -> float:
@@ -356,22 +363,12 @@ def _overlay_ref(
     mask = ~(np.isnan(x) | np.isnan(y))
     if not mask.any():
         return False
-    ax.scatter(
-        x[mask],
-        y[mask],
-        s=22,
-        marker="o",
-        facecolors="white",
-        edgecolors=color,
-        linewidths=1.1,
-        zorder=6,
-        label=label,
-    )
+    ax.scatter(x[mask], y[mask], label=label, **ref_marker_kwargs(color=color))
     return True
 
 
 def plot_figure4(data: dict) -> Path:
-    fig, (ax_C, ax_D) = plt.subplots(1, 2, figsize=(10, 4.5))
+    fig, (ax_C, ax_D) = plt.subplots(1, 2, figsize=figure_size_inches(2, 1))
 
     time_h = data["time_h"]
     duration_h = float(time_h[-1])
@@ -410,11 +407,11 @@ def plot_figure4(data: dict) -> Path:
                   alpha=0.85, linewidth=0.6),
     )
 
-    ax_C.set_ylabel("Temperature (°C)", fontsize=8.5)
+    ax_C.set_ylabel("Temperature (°C)")
     _style_desorption_time_axis(ax_C, duration_h=duration_h)
     ax_C.set_ylim(bottom=0)
-    ax_C.legend(fontsize=7, loc="upper left", frameon=False)
-    ax_C.set_title("C", loc="left", fontweight="bold", fontsize=10)
+    ax_C.legend(fontsize=scaled_fontsize("legend.fontsize", 0.7), loc="upper left", frameon=False)
+    ax_C.set_title("C", loc="left", fontweight="bold")
     _panel_style(ax_C)
 
     # ---- Panel D: cumulative water output ----
@@ -427,11 +424,11 @@ def plot_figure4(data: dict) -> Path:
         linestyle="none", label=f"Measured ({_MEASURED_YIELD_L_M2:.2f} L/m²)",
     )
 
-    ax_D.set_ylabel("Cumulative water output (L/m²)", fontsize=8.5)
+    ax_D.set_ylabel("Cumulative water output (L/m²)")
     _style_desorption_time_axis(ax_D, duration_h=duration_h)
     ax_D.set_ylim(bottom=0)
-    ax_D.legend(fontsize=7, loc="upper left", frameon=False)
-    ax_D.set_title("D", loc="left", fontweight="bold", fontsize=10)
+    ax_D.legend(fontsize=scaled_fontsize("legend.fontsize", 0.7), loc="upper left", frameon=False)
+    ax_D.set_title("D", loc="left", fontweight="bold")
     _panel_style(ax_D)
 
     eta_pct = data["eta"] * 100
@@ -441,12 +438,12 @@ def plot_figure4(data: dict) -> Path:
         rf"Model yield = {yield_val:.3f} L/m² (measured 0.62 L/m²),"
         rf"  $\eta_{{\mathrm{{th}}}}$ = {eta_pct:.1f}% (measured 9.3%);"
         r"  open circles = digitized paper data",
-        fontsize=8, y=1.02,
+        fontsize=scaled_fontsize("axes.labelsize", 0.7), y=1.02,
     )
     fig.tight_layout()
 
     out_path = _OUT_DIR / "figure4.png"
-    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    print_figure(fig, out_path)
     print(f"\nSaved → {out_path}")
     plt.close(fig)
     return out_path

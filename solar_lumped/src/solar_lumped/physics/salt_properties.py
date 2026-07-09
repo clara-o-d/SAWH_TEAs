@@ -11,6 +11,11 @@ import numpy as np
 import pandas as pd
 
 from solar_lumped.physics import table_s3
+from solar_lumped.physics.conde2004 import (
+    equilibrium_salt_mass_fraction_licl,
+    water_activity_licl,
+    water_vapor_pressure_pa as conde_water_vapor_pressure_pa,
+)
 
 WATER_MOLAR_MASS_KG_MOL: float = 0.018015
 GAS_CONSTANT_J_MOL_K: float = 8.314462618
@@ -109,8 +114,11 @@ def clamp_temperature_c(temperature_c: float) -> float:
 
 
 def saturation_vapor_pressure_pa(temperature_c: float) -> float:
-    """Tetens (Magnus) formula, Pa."""
+    """Pure-water vapour pressure (Pa): Conde (2004) Saul–Wagner, Tetens fallback."""
     t = clamp_temperature_c(temperature_c)
+    p = conde_water_vapor_pressure_pa(t)
+    if math.isfinite(p):
+        return p
     return 1000.0 * 0.61078 * math.exp(17.27 * t / (t + 237.3))
 
 
@@ -123,6 +131,125 @@ def salt_molarity_from_composite(
     f_salt = salt_to_polymer_ratio / (1.0 + salt_to_polymer_ratio)
     mass_salt_kg_m3 = hydrogel_density_kg_m3 * f_salt
     return mass_salt_kg_m3 / (formula_weight_g_mol / 1000.0)
+
+
+# Díaz-Marín Methods — one-pot batch in 50 mL, poured into 60 mm petri dishes.
+_CHAMBER_DISH_DIAMETER_M: float = 0.060
+_SYNTHESIS_BATCH_ML: float = 50.0
+_PAM_LICL_STANDARD_POUR_ML: float = 8.0
+_PAM_LICL_2GG_CHAMBER_POUR_ML: float = 12.8  # thicker pour for similar H₀ at 20 % RH
+_LICL_BATCH_G_BY_SL: dict[int, float] = {
+    1: 4.18,
+    2: 8.36,
+    4: 16.72,
+    8: 33.44,
+}
+# Table S3 reference for anchoring synthesis c_s to the 4 g/g DVS dry-basis density.
+_CHAMBER_CS_CALIB_SL: float = 4.0
+_CHAMBER_CS_CALIB_H0_MM: float = 2.34
+_CHAMBER_CS_CALIB_POUR_ML: float = _PAM_LICL_STANDARD_POUR_ML
+
+
+def chamber_pour_volume_ml(
+    salt_to_polymer_ratio: float,
+    *,
+    pam_licl_chamber: bool = True,
+) -> float:
+    """Solution pour volume (mL) for environmental-chamber kinetics samples."""
+    if pam_licl_chamber and int(round(salt_to_polymer_ratio)) == 2:
+        return _PAM_LICL_2GG_CHAMBER_POUR_ML
+    return _PAM_LICL_STANDARD_POUR_ML
+
+
+def _chamber_c_s_from_pour_inventory(
+    salt_to_polymer_ratio: float,
+    h0_mm: float,
+    *,
+    pour_ml: float,
+    formula_weight_g_mol: float,
+) -> float:
+    """c_s [mol/m³ gel] from LiCl mass in pour / gel volume at measured H₀."""
+    sl_key = int(round(salt_to_polymer_ratio))
+    if sl_key not in _LICL_BATCH_G_BY_SL:
+        raise ValueError(f"unsupported PAM-LiCl salt loading for synthesis c_s: {sl_key}")
+    salt_in_pour_kg = _LICL_BATCH_G_BY_SL[sl_key] * (pour_ml / _SYNTHESIS_BATCH_ML) / 1000.0
+    moles = salt_in_pour_kg / (formula_weight_g_mol / 1000.0)
+    area_m2 = math.pi * (_CHAMBER_DISH_DIAMETER_M / 2.0) ** 2
+    vol_m3 = area_m2 * max(h0_mm * 1e-3, 1e-6)
+    return moles / vol_m3
+
+
+def chamber_c_s_from_synthesis(
+    salt_to_polymer_ratio: float,
+    h0_mm: float,
+    *,
+    formula_weight_g_mol: float = 42.394,
+    pour_ml: float | None = None,
+    calibrate_to_dvs: bool = True,
+) -> float:
+    """Fixed c_s for Díaz-Marín Eq. 8 from Methods pour inventory at Table S3 H₀.
+
+    LiCl moles in the poured solution are spread over the gel footprint area times
+    the measured initial thickness H₀ (SI Note S9). By default the 4 g/g PAM-LiCl
+    reference (8 mL pour, H₀ = 2.34 mm) is scaled to match ``DRY_COMPOSITE_DENSITY``
+    so panel 5c equilibria stay aligned with the DVS isotherm calibration.
+    """
+    pour = pour_ml if pour_ml is not None else chamber_pour_volume_ml(salt_to_polymer_ratio)
+    cs_synth = _chamber_c_s_from_pour_inventory(
+        salt_to_polymer_ratio,
+        h0_mm,
+        pour_ml=pour,
+        formula_weight_g_mol=formula_weight_g_mol,
+    )
+    if not calibrate_to_dvs:
+        return cs_synth
+
+    cs_dvs_ref = salt_molarity_from_composite(
+        _CHAMBER_CS_CALIB_SL,
+        DRY_COMPOSITE_DENSITY_KG_M3,
+        formula_weight_g_mol,
+    )
+    cs_synth_ref = _chamber_c_s_from_pour_inventory(
+        _CHAMBER_CS_CALIB_SL,
+        _CHAMBER_CS_CALIB_H0_MM,
+        pour_ml=_CHAMBER_CS_CALIB_POUR_ML,
+        formula_weight_g_mol=formula_weight_g_mol,
+    )
+    return cs_dvs_ref * (cs_synth / cs_synth_ref)
+
+
+def chamber_c_s_with_constant_density(
+    salt_to_polymer_ratio: float,
+    h0_mm: float,
+    *,
+    formula_weight_g_mol: float = 42.394,
+    pour_ml: float | None = None,
+) -> float:
+    """``c_s`` for Eq. 8 with SI Note S7 constant solution density at 20 % RH.
+
+    Salt moles come from the Methods pour inventory (``chamber_c_s_from_synthesis``).
+    For PAM--LiCl 2 g/g chamber samples the paper poured 12.8 mL (vs 8 mL) to match
+    the ~2.34 mm thickness of the 4 g/g reference at 20 % RH; measured H₀ can still
+    differ (Table S3: 2.16 mm). Holding ``c_s`` at the 4 g/g calibration thickness
+    while ``H₀`` in ``g/H₀`` uses the measured value matches the digitized model
+    curves (panel 5d) without changing equilibrium plateaus.
+    """
+    cs = chamber_c_s_from_synthesis(
+        salt_to_polymer_ratio,
+        h0_mm,
+        formula_weight_g_mol=formula_weight_g_mol,
+        pour_ml=pour_ml,
+    )
+    if int(round(salt_to_polymer_ratio)) != 2:
+        return cs
+    if abs(h0_mm - _CHAMBER_CS_CALIB_H0_MM) < 1e-6:
+        return cs
+    cs_ref = chamber_c_s_from_synthesis(
+        _CHAMBER_CS_CALIB_SL,
+        _CHAMBER_CS_CALIB_H0_MM,
+        formula_weight_g_mol=formula_weight_g_mol,
+    )
+    return cs_ref * (_CHAMBER_CS_CALIB_H0_MM / h0_mm)
 
 
 def _pam_licl_dvs_isotherm_path() -> Path:
@@ -254,51 +381,18 @@ def licl_water_activity_at_brine_fraction(
     brine_salt_fraction: float,
     temperature_c: float,
 ) -> float:
-    """Forward LiCl isotherm a_w vs brine salt mass fraction."""
-    f = float(brine_salt_fraction)
-    if not (0.0 <= f < 1.0) or not math.isfinite(f):
-        return float("nan")
-    # Campbell (1979) osmotic/activity data for LiCl span 50–150 °C. The gel
-    # surface can exceed 100 °C under high solar flux (Fig. 2F), so evaluate up
-    # to 150 °C and clamp above that rather than returning NaN (which would
-    # zero the desorption driving force and collapse yield at high Q_solar).
+    """LiCl brine water activity — Conde (2004) Table 3 vapour-pressure correlation."""
     t_corr = min(float(temperature_c), 150.0)
-    tr = (t_corr + 273.15) / 647.0
-    p0, p1, p2 = 0.28, 4.3, 0.60
-    p3, p4, p5 = 0.21, 5.10, 0.49
-    p6, p7, p8, p9 = 0.362, -4.75, -0.40, 0.03
-    concentration_term = (
-        1.0
-        - (1.0 + (f / p6) ** p7) ** p8
-        - p9 * math.exp(-((f - 0.1) ** 2) / 0.005)
-    )
-    temperature_term = (
-        2.0
-        - (1.0 + (f / p0) ** p1) ** p2
-        + ((1.0 + (f / p3) ** p4) ** p5 - 1.0) * tr
-    )
-    return max(0.0, min(1.0, float(concentration_term * temperature_term)))
+    return water_activity_licl(brine_salt_fraction, t_corr)
 
 
 def licl_equilibrium_brine_salt_fraction(
     relative_humidity: float,
     temperature_c: float = 25.0,
 ) -> float:
-    """Invert LiCl isotherm: brine salt fraction at equilibrium with RH."""
-    rh = float(relative_humidity)
-    if rh <= 0.0:
-        return 1.0
-    if rh >= 0.99:
-        return 0.01
-    lo, hi = 0.01, 0.75
-    for _ in range(60):
-        mid = 0.5 * (lo + hi)
-        aw = licl_water_activity_at_brine_fraction(mid, temperature_c)
-        if not math.isfinite(aw) or aw < rh:
-            hi = mid
-        else:
-            lo = mid
-    return 0.5 * (lo + hi)
+    """Invert Conde (2004) LiCl isotherm: brine salt fraction at equilibrium with RH."""
+    t_corr = min(float(temperature_c), 150.0)
+    return equilibrium_salt_mass_fraction_licl(relative_humidity, t_corr)
 
 
 def pam_licl_composite_salt_fraction(
