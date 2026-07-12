@@ -5,8 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal, TYPE_CHECKING
 
-from waste_heat_lumped.physics import device_defaults as dd
-from waste_heat_lumped.physics.adsorbent import (
+from waste_heat_cycle_lumped.physics import device_defaults as dd
+from waste_heat_cycle_lumped.physics.adsorbent import (
     MofProperties,
     dq_dt_adsorption,
     dq_dt_desorption,
@@ -16,7 +16,7 @@ from waste_heat_lumped.physics.adsorbent import (
     m_des_kg_s_m2 as vacuum_m_des_kg_s_m2,
     water_kg_m2 as mof_water_kg_m2,
 )
-from waste_heat_lumped.physics.mass_transfer import (
+from waste_heat_cycle_lumped.physics.mass_transfer import (
     MassTransferParams,
     concentration_ratio_absorption,
     concentration_ratio_desorption,
@@ -25,7 +25,7 @@ from waste_heat_lumped.physics.mass_transfer import (
     m_ads_kg_s_m2_from_state,
     m_des_kg_s_m2_from_state,
 )
-from waste_heat_lumped.physics.salt_properties import (
+from waste_heat_cycle_lumped.physics.salt_properties import (
     FABRICATION_EQUILIBRIUM_RH,
     WATER_MOLAR_MASS_KG_MOL,
     equilibrium_c_w_from_dvs_at_rh,
@@ -36,7 +36,7 @@ from waste_heat_lumped.physics.salt_properties import (
 )
 
 if TYPE_CHECKING:
-    from waste_heat_lumped.simulation.device_config import DeviceConfig
+    from waste_heat_cycle_lumped.simulation.device_config import DeviceConfig
 
 SorbentKind = Literal["hydrogel", "mof"]
 
@@ -201,6 +201,7 @@ def _hydrogel_desorption_rates(
         params=params,
         h_m=h_m,
         phase="desorption",
+        t_cond_c=t_cond_c,
     )
     m_wilson = m_des_kg_s_m2_from_state(c_w, h_m, dc_w, dh)
     if m_wilson > 1e-14:

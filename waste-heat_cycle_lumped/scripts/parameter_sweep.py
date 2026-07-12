@@ -14,13 +14,13 @@ _SRC = _REPO / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from waste_heat_lumped.economics.lcow import lcow_from_daily_yield
-from waste_heat_lumped.economics.params import LCOEconomicParams
-from waste_heat_lumped.physics import device_defaults as dd
-from waste_heat_lumped.physics.contactor_balances import ContactorThermalParams
-from waste_heat_lumped.simulation.annual_yield import simulate_daily
-from waste_heat_lumped.simulation.device_config import ControllerParams, DeviceConfig
-from waste_heat_lumped.weather.profiles import datacenter_baseline_profile
+from waste_heat_cycle_lumped.economics.lcow import lcow_from_daily_yield
+from waste_heat_cycle_lumped.economics.params import LCOEconomicParams
+from waste_heat_cycle_lumped.physics import device_defaults as dd
+from waste_heat_cycle_lumped.physics.contactor_balances import ContactorThermalParams
+from waste_heat_cycle_lumped.simulation.annual_yield import simulate_daily
+from waste_heat_cycle_lumped.simulation.device_config import ControllerParams, DeviceConfig
+from waste_heat_cycle_lumped.weather.profiles import datacenter_baseline_profile
 
 
 @dataclass(frozen=True, slots=True)

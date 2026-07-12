@@ -328,6 +328,10 @@ def pam_licl_gravimetric_uptake_g_g(
     *,
     h0_ref_m: float,
     dry_density_kg_m3: float = DRY_COMPOSITE_DENSITY_KG_M3,
+    c_s_mol_m3: float | None = None,
+    formula_weight_g_mol: float | None = None,
+    salt_to_polymer_ratio: float | None = None,
+    salt_weight_factor: float = 1.0,
 ) -> float:
     """Gravimetric moisture content m_w / m_dry (g/g) on a footprint basis.
 
@@ -338,9 +342,24 @@ def pam_licl_gravimetric_uptake_g_g(
     U_gel conductance (H/k_gel), never the water inventory or its activity. Using
     the swollen H here would double-count dilution and break consistency with the
     yield integral. ``h_m`` is retained for signature compatibility but unused.
+
+    When composite state is supplied, dry mass uses salt inventory with
+    ``formula_weight_g_mol * salt_weight_factor`` in the uptake denominator only
+    (``c_s`` and brine activity are unchanged). Otherwise falls back to the
+    calibrated DVS dry-basis density.
     """
     del h_m
-    m_dry = pam_licl_dry_mass_kg_m2(h0_ref_m, dry_density_kg_m3=dry_density_kg_m3)
+    if (
+        c_s_mol_m3 is not None
+        and formula_weight_g_mol is not None
+        and salt_to_polymer_ratio is not None
+    ):
+        mw_eff = formula_weight_g_mol * salt_weight_factor
+        mass_salt = max(0.0, c_s_mol_m3) * h0_ref_m * mw_eff / 1000.0
+        mass_polymer = mass_salt / max(salt_to_polymer_ratio, 1e-9)
+        m_dry = mass_salt + mass_polymer
+    else:
+        m_dry = pam_licl_dry_mass_kg_m2(h0_ref_m, dry_density_kg_m3=dry_density_kg_m3)
     if m_dry <= 0.0:
         return 0.0
     mass_water = max(0.0, c_w) * h0_ref_m * WATER_MOLAR_MASS_KG_MOL
@@ -423,11 +442,12 @@ def licl_brine_salt_fraction_from_gel(
     h_m: float,
     h0_ref_m: float,
     formula_weight_g_mol: float,
+    salt_weight_factor: float = 1.0,
 ) -> float:
     """Brine salt mass fraction m_s / (m_s + m_w) — LiCl solution a_w,s (Eq. 5)."""
     del h_m  # inventory referenced to H₀ (see pam_licl_gravimetric_uptake_g_g)
     salt_mol_m2 = c_s * h0_ref_m
-    mass_salt = salt_mol_m2 * formula_weight_g_mol / 1000.0
+    mass_salt = salt_mol_m2 * formula_weight_g_mol * salt_weight_factor / 1000.0
     mass_water = max(0.0, c_w) * h0_ref_m * WATER_MOLAR_MASS_KG_MOL
     total = mass_salt + mass_water
     if total <= 0.0:
@@ -446,6 +466,7 @@ def water_activity_from_c_w(
     salt_to_polymer_ratio: float = 4.0,
     h_m: float | None = None,
     h0_ref_m: float | None = None,
+    salt_weight_factor: float = 1.0,
 ) -> float:
     """Brine a_w,s in Eq. 5 (Wilson Device); activity of water in the salt solution."""
     del ions_per_formula, salt_to_polymer_ratio
@@ -453,6 +474,7 @@ def water_activity_from_c_w(
         return 1.0
     h_ref = h0_ref_m if h0_ref_m is not None else 0.004
     h = h_m if h_m is not None else h_ref
+    mw_eff = formula_weight_g_mol * salt_weight_factor
     if salt_name == "LiCl":
         f_b = licl_brine_salt_fraction_from_gel(
             c_w,
@@ -460,6 +482,7 @@ def water_activity_from_c_w(
             h_m=h,
             h0_ref_m=h_ref,
             formula_weight_g_mol=formula_weight_g_mol,
+            salt_weight_factor=salt_weight_factor,
         )
         aw = licl_water_activity_at_brine_fraction(f_b, temperature_c)
         if math.isfinite(aw):
@@ -471,7 +494,7 @@ def water_activity_from_c_w(
         water_activity_at_brine_fraction,
     )
 
-    f_b = brine_salt_fraction_from_c_w(c_w, c_s, formula_weight_g_mol)
+    f_b = brine_salt_fraction_from_c_w(c_w, c_s, mw_eff)
     aw = water_activity_at_brine_fraction(salt_name, f_b, temperature_c)
     if math.isfinite(aw):
         return aw

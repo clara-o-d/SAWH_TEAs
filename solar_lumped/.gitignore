@@ -10,3 +10,4 @@ outputs/
 .weather_cache/
 *.png
 !tornado_plots/.gitkeep
+*.mph

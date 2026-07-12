@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from waste_heat_lumped.physics import device_defaults as dd
-from waste_heat_lumped.physics.correlations import (
+from waste_heat_cycle_lumped.physics import device_defaults as dd
+from waste_heat_cycle_lumped.physics.correlations import (
     condenser_h_conv_w_m2_k,
     hx_effectiveness_q,
     parallel_plate_emissivity,
@@ -13,7 +13,7 @@ from waste_heat_lumped.physics.correlations import (
     rarefied_gap_h_w_m2_k,
     waste_heat_to_loop_q_w,
 )
-from waste_heat_lumped.physics.salt_properties import clamp_temperature_c
+from waste_heat_cycle_lumped.physics.salt_properties import clamp_temperature_c
 
 
 @dataclass(frozen=True, slots=True)

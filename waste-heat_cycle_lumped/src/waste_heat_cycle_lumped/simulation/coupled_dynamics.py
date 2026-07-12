@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from waste_heat_lumped.physics.contactor_balances import (
+from waste_heat_cycle_lumped.physics.contactor_balances import (
     ThermalEnvironment,
     dT_a_dt,
     dT_cond_dt,
@@ -14,16 +14,16 @@ from waste_heat_lumped.physics.contactor_balances import (
     dT_f_dt,
     loop_heat_fluxes,
 )
-from waste_heat_lumped.physics.salt_properties import clamp_temperature_c
-from waste_heat_lumped.physics.sorbent import (
+from waste_heat_cycle_lumped.physics.salt_properties import clamp_temperature_c
+from waste_heat_cycle_lumped.physics.sorbent import (
     fluxes_for_control,
     h_ads_j_per_kg,
     h_des_j_per_kg,
     is_hydrogel,
     mass_rates,
 )
-from waste_heat_lumped.simulation.control import ControlOutputs, compute_controls
-from waste_heat_lumped.simulation.device_config import DeviceConfig
+from waste_heat_cycle_lumped.simulation.control import ControlOutputs, compute_controls
+from waste_heat_cycle_lumped.simulation.device_config import DeviceConfig
 
 
 @dataclass(frozen=True, slots=True)

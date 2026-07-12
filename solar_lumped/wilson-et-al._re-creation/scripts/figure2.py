@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Convenience wrapper: generate Wilson Figure 2 data, then plot.
+Convenience wrapper: generate Wilson Figure 2 data (Table S3 / Note S1), then plot.
 
 For faster iteration, run the steps separately:
   python wilson-et-al._re-creation/scripts/figure2_generate.py

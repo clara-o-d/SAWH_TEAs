@@ -42,6 +42,7 @@ class PhaseProfile:
 class DailyWeatherProfile:
     absorption: PhaseProfile
     desorption: PhaseProfile
+    cooling: PhaseProfile | None = None
 
 
 def _wind_series(df: pd.DataFrame, n: int) -> tuple[float, ...]:
@@ -113,6 +114,44 @@ def baseline_profile(
         h_amb_w_m2_k=(h_amb_w_m2_k,) * STEPS_PER_PHASE,
     )
     return DailyWeatherProfile(absorption=abs_prof, desorption=des_prof)
+
+
+COMSOL_DESORPTION_HOURS = 8.0
+COMSOL_COOLING_HOURS = 12.0
+STEPS_COMSOL_DES = int(round(COMSOL_DESORPTION_HOURS * 3600.0 / PHASE_DT_S))
+STEPS_COMSOL_COOL = int(round(COMSOL_COOLING_HOURS * 3600.0 / PHASE_DT_S))
+
+
+def comsol_fig2_profile(
+    *,
+    tint_c: float = 23.0,
+    rh_high: float = 0.5,
+    solar_w_m2: float = 1000.0,
+    h_front_w_m2_k: float = 10.0,
+    include_cooling: bool = False,
+) -> DailyWeatherProfile:
+    """Wilson COMSOL lumped prototype: 12 h absorption, 8 h desorption, optional 12 h cool."""
+    abs_prof = PhaseProfile(
+        temperature_c=(tint_c,) * STEPS_PER_PHASE,
+        relative_humidity=(rh_high,) * STEPS_PER_PHASE,
+        solar_w_m2=(0.0,) * STEPS_PER_PHASE,
+        h_amb_w_m2_k=(h_front_w_m2_k,) * STEPS_PER_PHASE,
+    )
+    des_prof = PhaseProfile(
+        temperature_c=(tint_c,) * STEPS_COMSOL_DES,
+        relative_humidity=(rh_high,) * STEPS_COMSOL_DES,
+        solar_w_m2=(solar_w_m2,) * STEPS_COMSOL_DES,
+        h_amb_w_m2_k=(h_front_w_m2_k,) * STEPS_COMSOL_DES,
+    )
+    cooling = None
+    if include_cooling:
+        cooling = PhaseProfile(
+            temperature_c=(tint_c,) * STEPS_COMSOL_COOL,
+            relative_humidity=(rh_high,) * STEPS_COMSOL_COOL,
+            solar_w_m2=(0.0,) * STEPS_COMSOL_COOL,
+            h_amb_w_m2_k=(h_front_w_m2_k,) * STEPS_COMSOL_COOL,
+        )
+    return DailyWeatherProfile(absorption=abs_prof, desorption=des_prof, cooling=cooling)
 
 
 # Wilson Methods: hydrogel cast at DVS equilibrium with ~20% RH before cycling.

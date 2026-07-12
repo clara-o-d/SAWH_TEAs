@@ -1,5 +1,5 @@
-# Reference defaults for waste_heat_lumped (not loaded automatically by code).
-# Physics mapping: waste-heat_lumped/docs/governing_eq.tex
+# Reference defaults for waste_heat_cycle_lumped (not loaded automatically by code).
+# Physics mapping: waste-heat_cycle_lumped/docs/governing_eq.tex
 
 device:
   sorbent: hydrogel  # hydrogel | mof

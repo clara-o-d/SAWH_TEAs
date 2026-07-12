@@ -14,18 +14,18 @@ _SRC = _REPO / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from waste_heat_lumped.physics import device_defaults as dd
-from waste_heat_lumped.physics.mass_transfer import rh_outside_desorber
-from waste_heat_lumped.physics.sorbent import inventory_label, is_hydrogel
-from waste_heat_lumped.simulation.device_config import ControllerParams, DeviceConfig
-from waste_heat_lumped.simulation.ode_system import run_cycle, run_daily_operation
-from waste_heat_lumped.simulation.water_inventory import (
+from waste_heat_cycle_lumped.physics import device_defaults as dd
+from waste_heat_cycle_lumped.physics.mass_transfer import rh_outside_desorber
+from waste_heat_cycle_lumped.physics.sorbent import inventory_label, is_hydrogel
+from waste_heat_cycle_lumped.simulation.device_config import ControllerParams, DeviceConfig
+from waste_heat_cycle_lumped.simulation.ode_system import run_cycle, run_daily_operation
+from waste_heat_cycle_lumped.simulation.water_inventory import (
     plot_water_inventory,
     water_inventory_daily_series,
     water_inventory_series,
     write_water_inventory_csv,
 )
-from waste_heat_lumped.weather.profiles import (
+from waste_heat_cycle_lumped.weather.profiles import (
     datacenter_baseline_profile,
     datacenter_diurnal_profile,
 )

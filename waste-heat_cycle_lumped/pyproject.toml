@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "waste-heat-lumped-sawh"
+name = "waste-heat-cycle-lumped-sawh"
 version = "0.1.0"
 description = "AirJoule-style waste-heat lumped two-bed SAWH simulation (governing_eq.tex)"
 readme = "README.md"
@@ -35,9 +35,9 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-"waste_heat_lumped.data.economics" = ["*.csv"]
-"waste_heat_lumped.data.materials" = ["*.csv"]
-"waste_heat_lumped.weather" = ["*.csv"]
+"waste_heat_cycle_lumped.data.economics" = ["*.csv"]
+"waste_heat_cycle_lumped.data.materials" = ["*.csv"]
+"waste_heat_cycle_lumped.weather" = ["*.csv"]
 
 [tool.ruff]
 line-length = 100

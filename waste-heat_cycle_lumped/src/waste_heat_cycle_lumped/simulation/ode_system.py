@@ -7,26 +7,26 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.integrate import solve_ivp
 
-from waste_heat_lumped.physics import device_defaults as dd
-from waste_heat_lumped.physics.contactor_balances import ThermalEnvironment
-from waste_heat_lumped.physics.mass_transfer import rh_outside_desorber
-from waste_heat_lumped.physics.sorbent import (
+from waste_heat_cycle_lumped.physics import device_defaults as dd
+from waste_heat_cycle_lumped.physics.contactor_balances import ThermalEnvironment
+from waste_heat_cycle_lumped.physics.mass_transfer import rh_outside_desorber
+from waste_heat_cycle_lumped.physics.sorbent import (
     initial_bed_states,
     is_hydrogel,
     mass_state_size,
     water_kg_m2_bed,
 )
-from waste_heat_lumped.simulation.control import (
+from waste_heat_cycle_lumped.simulation.control import (
     ControllerState,
     advance_controller_integrals,
     reset_controller_state,
 )
-from waste_heat_lumped.simulation.coupled_dynamics import (
+from waste_heat_cycle_lumped.simulation.coupled_dynamics import (
     controls_for_state,
     evaluate_coupled_rates,
 )
-from waste_heat_lumped.simulation.device_config import DeviceConfig
-from waste_heat_lumped.weather.profiles import HalfCycleProfile
+from waste_heat_cycle_lumped.simulation.device_config import DeviceConfig
+from waste_heat_cycle_lumped.weather.profiles import HalfCycleProfile
 
 _ODE_RTOL = 1e-4
 _ODE_ATOL = 1e-7

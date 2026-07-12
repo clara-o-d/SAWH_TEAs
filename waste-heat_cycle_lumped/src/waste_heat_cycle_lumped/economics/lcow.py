@@ -5,19 +5,19 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from waste_heat_lumped.economics.parasitic import (
+from waste_heat_cycle_lumped.economics.parasitic import (
     default_electrical_loads,
     parasitic_electricity_breakdown,
     total_parasitic_electricity_annual_usd_per_m2,
 )
-from waste_heat_lumped.economics.params import (
+from waste_heat_cycle_lumped.economics.params import (
     C_DEVICE_USD,
     DEVICE_BOM_USD_PER_M2,
     KG_WATER_PER_M3,
     LCOEconomicParams,
     dry_composite_mass_kg,
 )
-from waste_heat_lumped.physics.salt_properties import get_salt_price_usd_per_kg
+from waste_heat_cycle_lumped.physics.salt_properties import get_salt_price_usd_per_kg
 
 FAIL_LCO: float = 1e30
 

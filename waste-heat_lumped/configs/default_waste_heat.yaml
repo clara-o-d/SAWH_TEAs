@@ -1,0 +1,26 @@
+# Reference defaults for waste_heat_lumped (not loaded automatically by code).
+# Physics mapping: waste-heat_lumped/docs/governing_eq.tex
+
+device:
+  sorbent: hydrogel
+  salt: LiCl
+  salt_to_polymer_ratio: 4.0
+  hydrogel_thickness_mm: 4.0
+  vapor_gap_mm: 40.0
+  g_conv_m_s: 0.0085
+
+  # Fixed loop-fluid setpoints (desorption phase only)
+  t_f_c: 58.0
+  m_dot_f_kg_s_m2: 0.25
+  ua_gel_w_k: 800.0
+
+profile:
+  mode: datacenter-baseline
+  t_amb_c: 32.0
+  relative_humidity: 0.45
+  h_amb_w_m2_k: 15.0
+
+cycle:
+  absorption_hours: 12.0
+  desorption_hours: 12.0
+  dt_s: 100.0

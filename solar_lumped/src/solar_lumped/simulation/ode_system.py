@@ -734,6 +734,16 @@ def run_daily_cycle(
     If ``cyclic_initial`` is True, run ``cyclic_warmup_cycles`` full days from the
     fabrication default first, then simulate one reporting day from that end state.
     """
+    if config.uses_comsol_physics():
+        from solar_lumped.simulation.comsol_integrator import run_comsol_daily_cycle
+
+        return run_comsol_daily_cycle(
+            profile,
+            config,
+            c_w_initial=c_w_initial,
+            h_initial=h_initial,
+        )
+
     if cyclic_initial:
         cw, h = warmup_to_cyclic_state(
             profile,

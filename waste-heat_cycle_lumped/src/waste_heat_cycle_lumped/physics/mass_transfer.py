@@ -6,7 +6,7 @@ import math
 from dataclasses import dataclass
 from typing import Literal
 
-from waste_heat_lumped.physics.salt_properties import (
+from waste_heat_cycle_lumped.physics.salt_properties import (
     C_W_MAX_MOL_M3,
     C_W_MIN_MOL_M3,
     GAS_CONSTANT_J_MOL_K,
@@ -215,7 +215,11 @@ def dH_dt(
     phase: MassTransferPhase = "absorption",
     t_cond_c: float | None = None,
 ) -> float:
-    del t_cond_c
+    """Eq. 6: dH/dt (m/s) — hydrogel thickness rate.
+
+    Consistent with Eq. 5 dc_w/dt:
+        dH/dt = g · (MW / ρ_sol) · (p_sat / RT) · driving
+    """
     t_k = max(t_gel_c + 273.15, 200.0)
     p_sat = saturation_vapor_pressure_pa(t_gel_c)
     driving = _mass_transfer_driving_force(
@@ -226,8 +230,16 @@ def dH_dt(
         h_m=h_m,
         phase=phase,
     )
+    g = mass_transfer_g_m_s(
+        phase=phase,
+        params=params,
+        h_m=h_m,
+        t_gel_c=t_gel_c,
+        t_cond_c=t_cond_c,
+    )
     return (
-        WATER_MOLAR_MASS_KG_MOL
+        g
+        * WATER_MOLAR_MASS_KG_MOL
         / params.rho_solution_kg_m3
         * (p_sat / (GAS_CONSTANT_J_MOL_K * t_k))
         * driving

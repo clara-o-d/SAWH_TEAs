@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build waste-heat SAWH black-box Excel TEA (mirrors waste-heat_lumped LCOW costing)."""
+"""Build waste-heat SAWH black-box Excel TEA (mirrors waste-heat_cycle_lumped LCOW costing)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 _REPO = Path(__file__).resolve().parent.parent
 _TEA_ROOT = _REPO.parent
-_LUMPED_SRC = _TEA_ROOT / "waste-heat_lumped" / "src"
+_LUMPED_SRC = _TEA_ROOT / "waste-heat_cycle_lumped" / "src"
 if str(_TEA_ROOT) not in sys.path:
     sys.path.insert(0, str(_TEA_ROOT))
 if str(_LUMPED_SRC) not in sys.path:
@@ -19,13 +19,13 @@ if str(_LUMPED_SRC) not in sys.path:
 
 from tea_workbook_lib import compute_tea_metrics  # noqa: E402
 
-from waste_heat_lumped.economics.bom import DEVICE_BOM_USD_PER_M2 as BOM  # noqa: E402
-from waste_heat_lumped.economics.parasitic import default_electrical_loads  # noqa: E402
-from waste_heat_lumped.economics.params import _load_economic_data  # noqa: E402
-from waste_heat_lumped.physics.salt_properties import get_salt_price_usd_per_kg  # noqa: E402
-from waste_heat_lumped.simulation.device_config import DeviceConfig  # noqa: E402
-from waste_heat_lumped.simulation.ode_system import run_daily_operation  # noqa: E402
-from waste_heat_lumped.weather.profiles import datacenter_baseline_profile  # noqa: E402
+from waste_heat_cycle_lumped.economics.bom import DEVICE_BOM_USD_PER_M2 as BOM  # noqa: E402
+from waste_heat_cycle_lumped.economics.parasitic import default_electrical_loads  # noqa: E402
+from waste_heat_cycle_lumped.economics.params import _load_economic_data  # noqa: E402
+from waste_heat_cycle_lumped.physics.salt_properties import get_salt_price_usd_per_kg  # noqa: E402
+from waste_heat_cycle_lumped.simulation.device_config import DeviceConfig  # noqa: E402
+from waste_heat_cycle_lumped.simulation.ode_system import run_daily_operation  # noqa: E402
+from waste_heat_cycle_lumped.weather.profiles import datacenter_baseline_profile  # noqa: E402
 
 OUT = _REPO / "waste_heat_sawh_tea.xlsx"
 DEFAULT_SALT = "LiCl"
@@ -84,7 +84,7 @@ def _defaults() -> dict[str, float | str]:
 
 
 INPUT_ROWS: tuple[tuple[str, str, str, str], ...] = (
-    ("daily_yield_kg_per_m2", "Daily water yield", "kg/m²/d", "From waste-heat_lumped run_waste_heat_sim.py --profile datacenter-baseline --daily"),
+    ("daily_yield_kg_per_m2", "Daily water yield", "kg/m²/d", "From waste-heat_cycle_lumped run_waste_heat_cycle_sim.py --profile datacenter-baseline --daily"),
     ("cycles_per_day", "Cycles per day", "1/d", "Set >1 only if daily yield is per cycle, not per day"),
     ("salt_name", "Salt", "—", "Catalog label (price entered below)"),
     ("salt_to_polymer_ratio", "Salt-to-polymer ratio", "—", "Mass ratio salt : polymer"),
@@ -159,7 +159,7 @@ def build() -> Path:
     ws_in["A2"] = (
         "Edit yellow cells, then re-run scripts/build_tea_workbook.py to refresh outputs. "
         "Hardware BOM from patent cost estimates; hydrogel OPEX and LCOW factors mirror "
-        "electrolyte_optimization / waste-heat_lumped/economics/lcow.py"
+        "electrolyte_optimization / waste-heat_cycle_lumped/economics/lcow.py"
     )
     ws_in.merge_cells("A2:D2")
 

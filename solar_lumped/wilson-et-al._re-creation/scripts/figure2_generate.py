@@ -2,9 +2,15 @@
 """
 Generate Wilson et al. (2025) Figure 2 sweep data (panels B–F).
 
-Baseline conditions (from paper Methods):
-  T_amb = 25 °C, Q_solar = 600 W/m², RH = 0.5, h_amb = 10 W/m²K,
-  H₀ = 4 mm, L_g = 40 mm, ε_abs = 0.95, τ_glass = 0.9, A_r = 7.1
+Figure 2 in the paper uses the **Table S3 / Note S1** device model (Methods), not
+the authors' internal COMSOL prototype defaults (H₀=2 mm, Q=1000 W/m², 8 h
+desorption, copper condenser, custom Nu).  Digitized-curve agreement is best with:
+
+  Physics:   Note S1 (Hollands gap, h_des, U_gel, Al condenser, A_r·h_amb)
+  Schedule:  12 h absorption + 12 h desorption @ 100 s steps
+  Solver:    segregated (COMSOL-style BDF on gel/condenser; algebraic glass/abs)
+  Baseline:  T_amb=25 °C, Q_solar=600 W/m², RH=0.5, h_amb=10 W/m²K,
+             H₀=4 mm, L_g=40 mm, ε_abs=0.95, τ_glass=0.9, A_r=7.1
 
 Error bands: h_amb = 10 ± 2.5 W/m²K (±25%) per Wilson Methods section.
 
@@ -44,7 +50,7 @@ _OUT_DIR.mkdir(parents=True, exist_ok=True)
 _DATA_PATH = _OUT_DIR / "figure2_data.pkl"
 
 # ---------------------------------------------------------------------------
-# Default baseline values (Wilson Methods)
+# Wilson Fig. 2 / Methods + Table S3 baseline
 # ---------------------------------------------------------------------------
 _T_AMB_C = 25.0
 _RH = 0.5
@@ -53,16 +59,13 @@ _H_AMB = 10.0
 _H_AMB_LO = 7.5
 _H_AMB_HI = 12.5
 
-_DESORPTION_SOLVER = "quasi_steady"
-_H0_MM = 4.0
-_LG_MM = 40.0
-_A_R = 7.1
-_EPS_ABS = 0.95
-_TAU_GLASS = 0.9
+_DESORPTION_SOLVER = "segregated"
+_H0_MM = table_s3.H0_M * 1000.0
+_LG_MM = table_s3.L_G_M * 1000.0
+_A_R = table_s3.FIN_AREA_RATIO
+_EPS_ABS = table_s3.EPS_ABS
+_TAU_GLASS = table_s3.TAU_GLASS
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
 
 def _make_thermal(
     *,
@@ -77,6 +80,7 @@ def _make_thermal(
         has_glass=has_glass,
         vapor_gap_m=vapor_gap_m,
         h_des_j_per_kg=table_s3.H_DES_J_PER_KG,
+        physics_model="note_s1",
     )
 
 
@@ -95,26 +99,32 @@ def make_config(
         has_glass=has_glass,
         vapor_gap_m=Lg_mm / 1000.0,
     )
-    return DeviceConfig(
+    return DeviceConfig.baseline(
         hydrogel_thickness_m=H0_mm / 1000.0,
         vapor_gap_m=Lg_mm / 1000.0,
         fin_area_ratio=A_r,
-        tilt_deg=30.0,
+        tilt_deg=table_s3.TILT_DEG,
         thermal=thermal,
         desorption_solver=_DESORPTION_SOLVER,  # type: ignore[arg-type]
     )
 
 
-def _run_single(config: DeviceConfig, profile) -> tuple[float, float]:
-    """Return (yield_L_m2_day, thermal_efficiency_fraction).
+def _make_profile(
+    *,
+    temperature_c: float = _T_AMB_C,
+    relative_humidity: float = _RH,
+    solar_w_m2: float = _Q_SOLAR_W_M2,
+    h_amb_w_m2_k: float = _H_AMB,
+):
+    return baseline_profile(
+        temperature_c=temperature_c,
+        relative_humidity=relative_humidity,
+        solar_w_m2=solar_w_m2,
+        h_amb_w_m2_k=h_amb_w_m2_k,
+    )
 
-    Single day from the fabrication initial condition (gel equilibrated at
-    20% RH), matching Wilson's COMSOL approach: "all time-dependent energy
-    balances ... solved ... for all times throughout a single day" with a
-    12-h absorption phase followed by a 12-h desorption phase. The Cambridge
-    and Atacama field tests were likewise single-day runs from a freshly
-    fabricated gel, so cyclic steady state is *not* what the paper reports.
-    """
+
+def _run_single(config: DeviceConfig, profile) -> tuple[float, float]:
     try:
         yield_kg, eta, _abs, _des = run_daily_cycle(profile, config)
     except (RuntimeError, ValueError):
@@ -134,7 +144,6 @@ def _worker(job: _Job) -> tuple[tuple, float, float]:
 
 
 def _parallel_sweep(jobs: list[_Job]) -> dict[tuple, tuple[float, float]]:
-    """Run all jobs in parallel; return {key: (yield_L_m2, eta)}."""
     results: dict[tuple, tuple[float, float]] = {}
     try:
         with ProcessPoolExecutor() as ex:
@@ -159,7 +168,6 @@ def _parallel_sweep(jobs: list[_Job]) -> dict[tuple, tuple[float, float]]:
 
 def _band(results: dict, key_lo: tuple, key_mid: tuple, key_hi: tuple
           ) -> tuple[float, float, float]:
-    """Return (lo, mid, hi) yield values from three h_amb variants."""
     y_lo = results.get(key_lo, (float("nan"), 0.0))[0]
     y_mid = results.get(key_mid, (float("nan"), 0.0))[0]
     y_hi = results.get(key_hi, (float("nan"), 0.0))[0]
@@ -182,7 +190,7 @@ def sweep_B():
         for tau in tau_vals:
             for h in h_amb_vals:
                 cfg = make_config(eps_abs=eps, tau_glass=tau)
-                prof = baseline_profile(h_amb_w_m2_k=h)
+                prof = _make_profile(h_amb_w_m2_k=h)
                 jobs.append(_Job(key=(eps, tau, h), config=cfg, profile=prof))
 
     print(f"  Panel B: {len(jobs)} runs")
@@ -215,7 +223,7 @@ def sweep_C():
         for has_glass in cover_states:
             for h in h_amb_vals:
                 cfg = make_config(A_r=ar, has_glass=has_glass)
-                prof = baseline_profile(h_amb_w_m2_k=h)
+                prof = _make_profile(h_amb_w_m2_k=h)
                 jobs.append(_Job(key=(ar, has_glass, h), config=cfg, profile=prof))
 
     print(f"  Panel C: {len(jobs)} runs")
@@ -243,7 +251,7 @@ def sweep_D():
         for rh in rh_vals:
             for h in h_amb_vals:
                 cfg = make_config()
-                prof = baseline_profile(temperature_c=t_c, relative_humidity=rh, h_amb_w_m2_k=h)
+                prof = _make_profile(temperature_c=t_c, relative_humidity=rh, h_amb_w_m2_k=h)
                 jobs.append(_Job(key=(T_k, rh, h), config=cfg, profile=prof))
 
     print(f"  Panel D: {len(jobs)} runs")
@@ -276,7 +284,7 @@ def sweep_E():
         for h0 in h0_vals:
             for h in h_amb_vals:
                 cfg = make_config(H0_mm=h0, Lg_mm=lg)
-                prof = baseline_profile(h_amb_w_m2_k=h)
+                prof = _make_profile(h_amb_w_m2_k=h)
                 jobs.append(_Job(key=(lg, h0, h), config=cfg, profile=prof))
 
     print(f"  Panel E: {len(jobs)} runs")
@@ -309,7 +317,7 @@ def sweep_F():
         for q in q_vals:
             for h in h_amb_vals:
                 cfg = make_config(H0_mm=h0)
-                prof = baseline_profile(solar_w_m2=q, h_amb_w_m2_k=h)
+                prof = _make_profile(solar_w_m2=q, h_amb_w_m2_k=h)
                 jobs.append(_Job(key=(h0, q, h), config=cfg, profile=prof))
 
     print(f"  Panel F: {len(jobs)} runs")
@@ -367,14 +375,17 @@ def main() -> Path:
     import argparse
     global _DESORPTION_SOLVER
 
-    parser = argparse.ArgumentParser(description="Wilson Figure 2 — parametric sweep data")
-    register_desorption_solver_cli(parser)
+    parser = argparse.ArgumentParser(
+        description="Wilson Figure 2 — Table S3 / Note S1 parametric sweep data"
+    )
+    register_desorption_solver_cli(parser, default="segregated")
     args = parser.parse_args()
     _DESORPTION_SOLVER = args.desorption_solver
 
-    print("Wilson Figure 2 data generation — solar_lumped model")
+    print("Wilson Figure 2 data generation — Table S3 / Note S1 model")
     print("=" * 60)
     print(f"  desorption_solver = {_DESORPTION_SOLVER}")
+    print(f"  H0={_H0_MM} mm, L_g={_LG_MM} mm, Q_solar={_Q_SOLAR_W_M2} W/m², T_amb={_T_AMB_C} °C")
 
     print("\nRunning panel B (optical properties)…")
     data_B = sweep_B()

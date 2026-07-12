@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 import numpy as np
 from scipy.optimize import root
@@ -38,12 +39,50 @@ class DeviceThermalParams:
     tilt_deg: float = table_s3.TILT_DEG
     h_des_j_per_kg: float = table_s3.H_DES_J_PER_KG
     has_glass: bool = True
+    physics_model: Literal["note_s1", "comsol_lumped"] = "note_s1"
+    # COMSOL lumped optics (None → file defaults in comsol_lumped.py).
+    comsol_solar_ads_frac: float | None = None
+    comsol_solar_glass_frac: float | None = None
+    comsol_eps_ads: float | None = None
+    comsol_eps_glass_ir: float | None = None
+    comsol_reflect_glass: float | None = None
     # Depression (K) of the effective radiant sink temperature below air temperature
     # for the outermost surface. Wilson's typeset Eq. 3 radiates to T_amb (0 K here,
     # used for Fig. 2 / Cambridge). Their COMSOL Atacama field model radiates the glass
     # to a surroundings/sky temperature below air temperature (Surface-to-Ambient
     # Radiation); reproducing the digitized field-test curves requires this term.
     sky_temp_depression_c: float = 0.0
+
+
+def comsol_optics(params: DeviceThermalParams) -> dict[str, float | bool]:
+    from solar_lumped.physics import comsol_lumped as cl
+
+    return {
+        "solar_ads_frac": (
+            params.comsol_solar_ads_frac
+            if params.comsol_solar_ads_frac is not None
+            else cl.SOLAR_ADS_FRAC
+        ),
+        "solar_glass_frac": (
+            params.comsol_solar_glass_frac
+            if params.comsol_solar_glass_frac is not None
+            else cl.SOLAR_GLASS_FRAC
+        ),
+        "eps_ads": (
+            params.comsol_eps_ads if params.comsol_eps_ads is not None else cl.EPS_ADS
+        ),
+        "eps_glass_ir": (
+            params.comsol_eps_glass_ir
+            if params.comsol_eps_glass_ir is not None
+            else cl.EPS_GLASS_IR
+        ),
+        "reflect_glass": (
+            params.comsol_reflect_glass
+            if params.comsol_reflect_glass is not None
+            else cl.REFLECT_GLASS
+        ),
+        "has_glass": params.has_glass,
+    }
 
 
 def _residuals(

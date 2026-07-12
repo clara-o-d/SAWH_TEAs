@@ -33,7 +33,7 @@ from solar_lumped.physics.salt_properties import get_salt  # noqa: E402
 
 DEFAULT_SWEEP_KEYS: tuple[str, ...] = (
     "h_des_j_per_kg",
-    "salt_formula_weight_g_mol",
+    "salt_weight_factor",
     "hydrogel_lifetime_years",
 )
 
@@ -93,6 +93,7 @@ def _apply_combo(
     econ = base_econ
     h_des_j_per_kg: float | None = None
     salt_formula_weight_g_mol: float | None = None
+    salt_weight_factor: float | None = None
 
     for key, value in combo.items():
         if key == "hydrogel_thickness_mm":
@@ -117,6 +118,8 @@ def _apply_combo(
             h_des_j_per_kg = value
         elif key == "salt_formula_weight_g_mol":
             salt_formula_weight_g_mol = value
+        elif key == "salt_weight_factor":
+            salt_weight_factor = value
         else:
             raise ValueError(f"Unknown sweep parameter: {key}")
 
@@ -132,6 +135,7 @@ def _apply_combo(
         baseline_profile_kwargs=baseline_profile_kwargs or None,
         h_des_j_per_kg=h_des_j_per_kg,
         salt_formula_weight_g_mol=salt_formula_weight_g_mol,
+        salt_weight_factor=salt_weight_factor,
     )
 
 
@@ -149,11 +153,11 @@ def make_sweep_params(
             table_s3.H_DES_J_PER_KG,
         ),
         SweepParam(
-            "salt_formula_weight_g_mol",
-            "Salt MW (g/mol)",
-            35.0,
-            50.0,
-            salt.formula_weight_g_mol,
+            "salt_weight_factor",
+            "Salt weight factor",
+            35.0 / salt.formula_weight_g_mol,
+            50.0 / salt.formula_weight_g_mol,
+            1.0,
         ),
         SweepParam(
             "hydrogel_lifetime_years",
@@ -222,7 +226,7 @@ def main() -> None:
     ap.add_argument(
         "--output",
         type=Path,
-        default=_REPO / "parameter_sweeps" / "parameter_sweep.csv",
+        default=_REPO / "outputs" / "parameter_sweeps" / "parameter_sweep.csv",
     )
     ap.add_argument(
         "--params",

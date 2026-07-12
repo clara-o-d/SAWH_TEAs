@@ -4,9 +4,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from waste_heat_lumped.simulation.device_config import DeviceConfig
-from waste_heat_lumped.simulation.ode_system import run_daily_operation
-from waste_heat_lumped.weather.profiles import HalfCycleProfile
+from waste_heat_cycle_lumped.simulation.device_config import DeviceConfig
+from waste_heat_cycle_lumped.simulation.ode_system import run_daily_operation
+from waste_heat_cycle_lumped.weather.profiles import HalfCycleProfile
 
 
 @dataclass(frozen=True, slots=True)

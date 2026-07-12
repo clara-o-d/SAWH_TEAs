@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from waste_heat_lumped.physics import device_defaults as dd
+from waste_heat_cycle_lumped.physics import device_defaults as dd
 
 _GRAVITY_M_S2 = 9.80665
 

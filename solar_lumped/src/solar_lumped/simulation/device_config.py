@@ -67,6 +67,8 @@ class DeviceConfig:
     thermal: DeviceThermalParams | None = None
     # Override catalog salt formula weight (g/mol) for sensitivity sweeps.
     salt_formula_weight_g_mol: float | None = None
+    # Scales MW_salt in gravimetric uptake only (DVS cap during absorption).
+    salt_weight_factor: float = 1.0
     # Desorption integration: quasi_steady (default) solves Eqs 1/3/4 algebraically
     # each ODE step; segregated mimics COMSOL v6.2's sequential 100 s solver with
     # small surface capacitances; coupled_bdf advances all lumped states together
@@ -79,6 +81,37 @@ class DeviceConfig:
     # °C. Takes precedence over ``segregated_initial_temp_c`` when set — e.g. to
     # match the first digitized Wilson data point (all solvers, including quasi_steady).
     coupled_initial_temps_c: tuple[float, float, float, float] | None = None
+    # Wilson COMSOL lumped prototype (Model_Lumped_hydrogel_*.mph).
+    physics_model: Literal["note_s1", "comsol_lumped"] = "note_s1"
+    tint_c_override: float | None = None
+    h_cond_override: float | None = None
+    rh_high_override: float | None = None
+
+    def uses_comsol_physics(self) -> bool:
+        if self.thermal is not None and self.thermal.physics_model == "comsol_lumped":
+            return True
+        return self.physics_model == "comsol_lumped"
+
+    def comsol_tint_c(self) -> float:
+        from solar_lumped.physics import comsol_lumped as cl
+
+        if self.tint_c_override is not None:
+            return self.tint_c_override
+        return cl.T_INT_C
+
+    def comsol_h_cond_w_m2_k(self) -> float:
+        from solar_lumped.physics import comsol_lumped as cl
+
+        if self.h_cond_override is not None:
+            return self.h_cond_override
+        return cl.H_COND_W_M2_K
+
+    def comsol_rh_high(self) -> float:
+        from solar_lumped.physics import comsol_lumped as cl
+
+        if self.rh_high_override is not None:
+            return self.rh_high_override
+        return cl.RH_HIGH
 
     def desorption_surface_ic_c(self) -> tuple[float, float, float, float] | None:
         """Configured (T_gel, T_abs, T_glass, T_cond) at desorption start, if any."""
@@ -141,6 +174,7 @@ class DeviceConfig:
             salt_name=s.name,
             formula_weight_g_mol=fw,
             salt_to_polymer_ratio=self.salt_to_polymer_ratio,
+            salt_weight_factor=self.salt_weight_factor,
         )
 
     def thermal_params(self) -> DeviceThermalParams:
@@ -167,11 +201,39 @@ class DeviceConfig:
         )
 
     def condenser_thermal_mass_j_m2_k(self) -> float:
+        if self.uses_comsol_physics():
+            from solar_lumped.physics import comsol_lumped as cl
+
+            return cl.condenser_thermal_mass_j_m2_k()
         return (
             self.condenser_rho_kg_m3
             * self.condenser_cp_j_kg_k
             * self.condenser_thickness_m
         )
+
+    @classmethod
+    def comsol_fig2(cls, **overrides: object) -> DeviceConfig:
+        """Wilson COMSOL lumped prototype (Model_Lumped_hydrogel_*.mph) for Fig. 2."""
+        from solar_lumped.physics import comsol_lumped as cl
+        from solar_lumped.physics.device_balances import DeviceThermalParams
+
+        base: dict[str, object] = {
+            "physics_model": "comsol_lumped",
+            "hydrogel_thickness_m": cl.H0_M,
+            "vapor_gap_m": cl.L_G_M,
+            "h_fg_j_per_kg": cl.H_FG_J_PER_KG,
+            "condenser_thickness_m": cl.L_COND_M,
+            "condenser_rho_kg_m3": cl.RHO_COPPER_KG_M3,
+            "condenser_cp_j_kg_k": cl.CP_COPPER_J_KG_K,
+            "hydrogel_density_kg_m3": cl.RHO_SOL_0_KG_M3,
+            "thermal": DeviceThermalParams(
+                vapor_gap_m=cl.L_G_M,
+                physics_model="comsol_lumped",
+                has_glass=True,
+            ),
+        }
+        base.update(overrides)
+        return cls(**base)  # type: ignore[arg-type]
 
     @classmethod
     def comsol_table_s3(cls, **overrides: object) -> DeviceConfig:

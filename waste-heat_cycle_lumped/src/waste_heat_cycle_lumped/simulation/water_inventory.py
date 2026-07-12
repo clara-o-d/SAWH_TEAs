@@ -10,10 +10,10 @@ from typing import Literal
 import matplotlib.pyplot as plt
 import numpy as np
 
-from waste_heat_lumped.physics import device_defaults as dd
-from waste_heat_lumped.physics.contactor_balances import ThermalEnvironment
-from waste_heat_lumped.physics.mass_transfer import rh_outside_desorber
-from waste_heat_lumped.physics.sorbent import (
+from waste_heat_cycle_lumped.physics import device_defaults as dd
+from waste_heat_cycle_lumped.physics.contactor_balances import ThermalEnvironment
+from waste_heat_cycle_lumped.physics.mass_transfer import rh_outside_desorber
+from waste_heat_cycle_lumped.physics.sorbent import (
     fluxes_for_control,
     inventory_column,
     inventory_ylabel,
@@ -22,10 +22,10 @@ from waste_heat_lumped.physics.sorbent import (
     water_in_gel_l_m2,
     water_kg_m2_bed,
 )
-from waste_heat_lumped.simulation.control import compute_controls
-from waste_heat_lumped.simulation.device_config import DeviceConfig
-from waste_heat_lumped.simulation.ode_system import CycleResult, HalfCycleResult
-from waste_heat_lumped.weather.profiles import HalfCycleProfile
+from waste_heat_cycle_lumped.simulation.control import compute_controls
+from waste_heat_cycle_lumped.simulation.device_config import DeviceConfig
+from waste_heat_cycle_lumped.simulation.ode_system import CycleResult, HalfCycleResult
+from waste_heat_cycle_lumped.weather.profiles import HalfCycleProfile
 
 MassTransferLimit = Literal["absorption", "desorption", "balanced"]
 TrackedPhase = Literal["absorption", "desorption"]

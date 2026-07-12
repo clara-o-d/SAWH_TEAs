@@ -5,9 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from waste_heat_lumped.physics import device_defaults as dd
-from waste_heat_lumped.physics.adsorbent import MofProperties, get_mof
-from waste_heat_lumped.physics.contactor_balances import ContactorThermalParams
+from waste_heat_cycle_lumped.physics import device_defaults as dd
+from waste_heat_cycle_lumped.physics.adsorbent import MofProperties, get_mof
+from waste_heat_cycle_lumped.physics.contactor_balances import ContactorThermalParams
 
 SorbentKind = Literal["hydrogel", "mof"]
 

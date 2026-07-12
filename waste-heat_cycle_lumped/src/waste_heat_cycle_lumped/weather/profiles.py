@@ -5,8 +5,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
-from waste_heat_lumped.physics import device_defaults as dd
-from waste_heat_lumped.physics.sorbent import initial_bed_states
+from waste_heat_cycle_lumped.physics import device_defaults as dd
+from waste_heat_cycle_lumped.physics.sorbent import initial_bed_states
 
 PROFILE_DT_S = 60.0
 

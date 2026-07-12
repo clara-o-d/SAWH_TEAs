@@ -9,8 +9,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from waste_heat_lumped.physics import device_defaults as dd
-from waste_heat_lumped.physics.salt_properties import (
+from waste_heat_cycle_lumped.physics import device_defaults as dd
+from waste_heat_cycle_lumped.physics.salt_properties import (
     GAS_CONSTANT_J_MOL_K,
     WATER_MOLAR_MASS_KG_MOL,
     clamp_temperature_c,

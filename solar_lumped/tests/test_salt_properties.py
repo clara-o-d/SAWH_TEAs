@@ -104,3 +104,51 @@ def test_desorption_water_activity_decreases_with_gel_temp():
     aw_hot = desorption_water_activity(25.0, 55.0)
     assert math.isfinite(aw_cool) and math.isfinite(aw_hot)
     assert aw_hot < aw_cool
+
+
+def test_gravimetric_uptake_component_basis_matches_dvs_density():
+    from solar_lumped.physics.salt_properties import pam_licl_gravimetric_uptake_g_g
+
+    config = DeviceConfig.baseline()
+    mass = config.mass_params()
+    c_w = 8000.0
+    h0 = config.hydrogel_thickness_m
+    u_density = pam_licl_gravimetric_uptake_g_g(c_w, h0, h0_ref_m=h0)
+    u_components = pam_licl_gravimetric_uptake_g_g(
+        c_w,
+        h0,
+        h0_ref_m=h0,
+        c_s_mol_m3=mass.c_s_mol_m3,
+        formula_weight_g_mol=mass.formula_weight_g_mol,
+        salt_to_polymer_ratio=mass.salt_to_polymer_ratio,
+        salt_weight_factor=1.0,
+    )
+    assert u_components == pytest.approx(u_density, rel=1e-9)
+
+
+def test_salt_weight_factor_scales_gravimetric_uptake():
+    from solar_lumped.physics.salt_properties import pam_licl_gravimetric_uptake_g_g
+
+    config = DeviceConfig.baseline()
+    mass = config.mass_params()
+    c_w = 8000.0
+    h0 = config.hydrogel_thickness_m
+    u_ref = pam_licl_gravimetric_uptake_g_g(
+        c_w,
+        h0,
+        h0_ref_m=h0,
+        c_s_mol_m3=mass.c_s_mol_m3,
+        formula_weight_g_mol=mass.formula_weight_g_mol,
+        salt_to_polymer_ratio=mass.salt_to_polymer_ratio,
+        salt_weight_factor=1.0,
+    )
+    u_high = pam_licl_gravimetric_uptake_g_g(
+        c_w,
+        h0,
+        h0_ref_m=h0,
+        c_s_mol_m3=mass.c_s_mol_m3,
+        formula_weight_g_mol=mass.formula_weight_g_mol,
+        salt_to_polymer_ratio=mass.salt_to_polymer_ratio,
+        salt_weight_factor=1.2,
+    )
+    assert u_high < u_ref

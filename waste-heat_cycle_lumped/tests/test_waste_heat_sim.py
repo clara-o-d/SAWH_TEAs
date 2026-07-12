@@ -1,4 +1,4 @@
-"""Tests for waste_heat_lumped two-bed SAWH simulation."""
+"""Tests for waste_heat_cycle_lumped two-bed SAWH simulation."""
 
 from __future__ import annotations
 
@@ -7,22 +7,22 @@ import math
 import numpy as np
 import pytest
 
-from waste_heat_lumped.physics import device_defaults as dd
-from waste_heat_lumped.physics.adsorbent import (
+from waste_heat_cycle_lumped.physics import device_defaults as dd
+from waste_heat_cycle_lumped.physics.adsorbent import (
     dq_dt_adsorption,
     equilibrium_loading_at_rh,
     get_mof,
     m_des_kg_s_m2,
     water_activity_from_loading,
 )
-from waste_heat_lumped.physics.correlations import hx_effectiveness_q
-from waste_heat_lumped.physics.mass_transfer import dc_w_dt, concentration_ratio_absorption, rh_outside_desorber
-from waste_heat_lumped.physics.salt_properties import equilibrium_c_w_at_rh, water_activity_from_c_w
-from waste_heat_lumped.physics.sorbent import mass_transfer_params
-from waste_heat_lumped.simulation.device_config import DeviceConfig
-from waste_heat_lumped.simulation.ode_system import HalfCycleResult, run_cycle, swap_roles
-from waste_heat_lumped.simulation.water_inventory import water_inventory_series
-from waste_heat_lumped.weather.profiles import datacenter_baseline_profile
+from waste_heat_cycle_lumped.physics.correlations import hx_effectiveness_q
+from waste_heat_cycle_lumped.physics.mass_transfer import dc_w_dt, concentration_ratio_absorption, rh_outside_desorber
+from waste_heat_cycle_lumped.physics.salt_properties import equilibrium_c_w_at_rh, water_activity_from_c_w
+from waste_heat_cycle_lumped.physics.sorbent import mass_transfer_params
+from waste_heat_cycle_lumped.simulation.device_config import DeviceConfig
+from waste_heat_cycle_lumped.simulation.ode_system import HalfCycleResult, run_cycle, swap_roles
+from waste_heat_cycle_lumped.simulation.water_inventory import water_inventory_series
+from waste_heat_cycle_lumped.weather.profiles import datacenter_baseline_profile
 
 
 @pytest.fixture

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from waste_heat_lumped.simulation.device_config import ControllerParams
+from waste_heat_cycle_lumped.simulation.device_config import ControllerParams
 
 
 @dataclass

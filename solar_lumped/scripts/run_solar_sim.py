@@ -94,6 +94,8 @@ def _config_overrides(config: DeviceConfig) -> dict:
     }
     if config.salt_formula_weight_g_mol is not None:
         out["salt_formula_weight_g_mol"] = config.salt_formula_weight_g_mol
+    if config.salt_weight_factor != 1.0:
+        out["salt_weight_factor"] = config.salt_weight_factor
     if config.thermal is not None:
         out["thermal"] = config.thermal
     return out
@@ -104,10 +106,13 @@ def _apply_physics_overrides(
     *,
     h_des_j_per_kg: float | None = None,
     salt_formula_weight_g_mol: float | None = None,
+    salt_weight_factor: float | None = None,
 ) -> DeviceConfig:
     updates: dict[str, object] = {}
     if salt_formula_weight_g_mol is not None:
         updates["salt_formula_weight_g_mol"] = salt_formula_weight_g_mol
+    if salt_weight_factor is not None:
+        updates["salt_weight_factor"] = salt_weight_factor
     if h_des_j_per_kg is not None:
         updates["thermal"] = replace(
             config.thermal_params(),
@@ -575,6 +580,7 @@ def run_solar_simulation(
     baseline_profile_kwargs: dict[str, float] | None = None,
     h_des_j_per_kg: float | None = None,
     salt_formula_weight_g_mol: float | None = None,
+    salt_weight_factor: float | None = None,
     cyclic_initial: bool | None = None,
     cyclic_warmup_cycles: int | None = None,
 ) -> SolarSimResult:
@@ -595,6 +601,7 @@ def run_solar_simulation(
         config,
         h_des_j_per_kg=h_des_j_per_kg,
         salt_formula_weight_g_mol=salt_formula_weight_g_mol,
+        salt_weight_factor=salt_weight_factor,
     )
     econ = econ or LCOEconomicParams()
 

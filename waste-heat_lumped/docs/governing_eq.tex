@@ -1,0 +1,77 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath, amssymb}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{siunitx}
+
+\title{Governing Equations for a Fluid-Heated, Single-Bed PAM--LiCl SAWH Device}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section*{Reference and scope}
+
+This document describes the lumped model implemented in \texttt{waste\_heat\_lumped}: a single hydrogel bed that alternates between open \emph{absorption} and sealed \emph{desorption} half-cycles (12~h each). Desorption is driven by a fixed-temperature loop fluid coupled to the gel via an NTU--$\varepsilon$ heat exchanger. Mass transport follows Wilson \& D\'{i}az-Mar\'{i}n \textit{Device} (2025) Eqs.~5--6.
+
+\textbf{Subscripts:} $gel$ = hydrogel; $f$ = loop fluid (fixed BC); $cond$ = aluminum condenser; $amb$ = ambient/process air.
+
+\section{State variables}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Symbol} & \textbf{Units} & \textbf{Role} \\
+\midrule
+$c_w$ & \si{\mol\per\cubic\metre} & Brine water concentration (Eq.~5) \\
+$H$ & \si{\metre} & Hydrogel thickness (Eq.~6) \\
+$T_{gel}$ & \si{\celsius} & Gel temperature (quasi-steady during desorption) \\
+$T_{cond}$ & \si{\celsius} & Condenser temperature (transient during desorption) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Fixed parameters (not states): $T_f$, $\dot{m}_f$ --- loop fluid setpoints during desorption.
+
+\section{Loop fluid $\to$ gel heat exchanger}
+
+\[
+Q_{f \to gel} = \dot{m}_f\, c_{p,f}\, (T_f - T_{gel})
+\left(1 - \exp\!\left(-\frac{UA_{gel}}{\dot{m}_f\, c_{p,f}}\right)\right)
+\]
+
+Absorption: $\dot{m}_f = 0 \Rightarrow Q_{f \to gel} = 0$.
+
+\section{Thermal balances}
+
+\subsection{Absorption}
+$T_{gel} = T_{amb}$ (Wilson Note S1 fast thermal equilibrium).
+
+\subsection{Desorption --- gel (quasi-steady)}
+\[
+0 = Q_{f \to gel} - \dot{m}_{des}\, h_{des}
+- h_{conv,g}(T_{gel} - T_{cond}) - \varepsilon_{gc}\sigma(T_{gel}^4 - T_{cond}^4)
+\]
+
+\subsection{Desorption --- condenser (Wilson Eq.~2)}
+\[
+(\rho c_p L)_{cond}\,\frac{dT_{cond}}{dt}
+= h_{conv,g}(T_{gel} - T_{cond}) + \dot{m}_{des}\, h_{fg}
++ \varepsilon_{gc}\sigma(T_{gel}^4 - T_{cond}^4)
+- A_r\, h_{amb}(T_{cond} - T_{amb})
+\]
+
+\section{Mass transport (Wilson Eqs.~5--6)}
+
+As in \texttt{solar\_lumped}; atmospheric vapor-gap desorption (Hollands convection). No vacuum terms.
+
+\section{Thermal efficiency}
+
+\[
+\eta_{th} = \frac{Y\, h_{fg}}{\int_{des} Q_{f \to gel}\, dt}
+\]
+
+\end{document}

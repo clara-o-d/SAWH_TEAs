@@ -46,10 +46,19 @@ def _absorption_effective_water_activity(
         salt_to_polymer_ratio=params.salt_to_polymer_ratio,
         h_m=h_m,
         h0_ref_m=params.h0_ref_m,
+        salt_weight_factor=params.salt_weight_factor,
     )
     if params.salt_name != "LiCl":
         return aw_brine
-    u = pam_licl_gravimetric_uptake_g_g(c_w, h_m, h0_ref_m=params.h0_ref_m)
+    u = pam_licl_gravimetric_uptake_g_g(
+        c_w,
+        h_m,
+        h0_ref_m=params.h0_ref_m,
+        c_s_mol_m3=params.c_s_mol_m3,
+        formula_weight_g_mol=params.formula_weight_g_mol,
+        salt_to_polymer_ratio=params.salt_to_polymer_ratio,
+        salt_weight_factor=params.salt_weight_factor,
+    )
     aw_dvs = pam_licl_water_activity_from_uptake_g_g(u)
     return max(aw_brine, aw_dvs)
 
@@ -84,6 +93,7 @@ def _mass_transfer_driving_force(
         salt_to_polymer_ratio=params.salt_to_polymer_ratio,
         h_m=h_m,
         h0_ref_m=params.h0_ref_m,
+        salt_weight_factor=params.salt_weight_factor,
     )
     if not math.isfinite(aw):
         return 0.0
@@ -102,6 +112,7 @@ class MassTransferParams:
     salt_name: str = "LiCl"
     formula_weight_g_mol: float = 42.394
     salt_to_polymer_ratio: float = 4.0
+    salt_weight_factor: float = 1.0
 
 
 def mass_transfer_g_m_s(

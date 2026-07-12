@@ -1,4 +1,4 @@
-# Waste-heat lumped SAWH
+# Waste-heat cycle lumped SAWH
 
 Physics-based forward simulation of a **waste-heat-driven, two-bed** sorbent atmospheric water harvesting device (AirJoule-style latent energy and water harvesting), following [`docs/governing_eq.tex`](docs/governing_eq.tex).
 
@@ -22,11 +22,11 @@ Physics-based forward simulation of a **waste-heat-driven, two-bed** sorbent atm
 ## Run
 
 ```bash
-cd waste-heat_lumped
+cd waste-heat_cycle_lumped
 pip install -e ".[dev]"
 
 # Default LiCl hydrogel
-python scripts/run_waste_heat_sim.py --profile datacenter-baseline
+python scripts/run_waste_heat_cycle_sim.py --profile datacenter-baseline
 
 # MOF placeholder
 python scripts/run_waste_heat_sim.py --sorbent mof --profile datacenter-baseline
