@@ -78,7 +78,6 @@ def evaluate_coupled_rates(
         t_d_c=t_d,
         t_cond_c=t_cond,
         rh_amb=env.rh_amb,
-        p_cond_pa=config.p_cond_pa,
         c_vac_kg_s_pa_m2=controls.c_vac_kg_s_pa_m2,
         config=config,
     )
@@ -172,7 +171,6 @@ def controls_for_state(
         t_d_c=t_d,
         t_cond_c=t_cond_c,
         rh_amb=env.rh_amb,
-        p_cond_pa=config.p_cond_pa,
         c_vac_kg_s_pa_m2=ctrl_p.c_vac_base_kg_s_pa_m2,
         config=config,
     )

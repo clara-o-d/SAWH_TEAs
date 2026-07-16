@@ -8,7 +8,7 @@ Physics-based forward simulation of a **waste-heat-driven, two-bed** sorbent atm
 - Transient energy balances for adsorbing bed, desorbing bed, HTF loop, and condenser
 - **Default sorbent:** Wilson PAM-LiCl hydrogel (Eqs. 5–6 isotherm + swelling)
 - **Optional sorbent:** MOF placeholder isotherm (dual-site Langmuir)
-- Vacuum desorption mass transfer: `ṁ_des = C_vac(P_sat − P_cond)`
+- Vacuum desorption mass transfer: `ṁ_des = C_vac(P_sat(T_d) − P_sat(T_cond))`
 - Variable-speed HTF pump and vacuum pump feedback for cycle matching
 - Data-center baseline: 58 °C liquid-cooled waste heat (NTU–ε HX to loop fluid), 32 °C / 45% RH return air
 

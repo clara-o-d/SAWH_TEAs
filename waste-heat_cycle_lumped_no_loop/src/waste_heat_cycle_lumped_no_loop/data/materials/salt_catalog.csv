@@ -1,0 +1,5 @@
+salt,formula_weight_g_mol,ions_per_formula,price_usd_per_kg,h_des_j_per_kg,rho_solution_kg_m3,default_sl
+LiCl,42.394,2,2.5,2320000,1250.2,4.0
+NaCl,58.44,2,0.15,2500000,1200,4.0
+CaCl2,110.98,3,0.25,2500000,1200,4.0
+MgCl2,95.21,3,0.30,2500000,1200,4.0

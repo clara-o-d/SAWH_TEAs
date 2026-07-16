@@ -5,7 +5,8 @@ hydrogel_thickness_max_m,0.010,Upper bound on optimized hydrogel thickness (m)
 hydrogel_density_kg_m3,1250.2,Dry composite density (kg/m³)
 water_density_kg_per_l,1.0,Produced water density at condenser (kg/L)
 l_per_m3,1000.0,Liters per cubic meter
-device_bom_aluminum_heater,11.382,Aluminum heater
+device_bom_loop_heat_exchanger,250.0,Liquid-to-gel heat exchanger (UA_gel coupling)
+device_bom_transfer_pump,550.0,Transfer pump
 device_bom_condenser,28.455,Condenser
 device_bom_acrylic_enclosure,5.95,Acrylic enclosure
 device_bom_insulation,2.0,Insulation
@@ -21,7 +22,7 @@ energy_cost_usd_per_year,0.0,Fixed annual energy cost (USD/m²)
 energy_cost_usd_per_extra_half_cycle_per_day,0.0,Daily energy cost (USD/m²) per half-cycle above 1/day
 c_acrylamide_usd_per_kg,1.1,Polymer matrix acrylamide (Table S1)
 c_additives_usd_per_kg_composite,0.0072148,"APS, MBAA, TEMED per kg composite (Table S1)"
-electricity_price_usd_per_kwh,0.10,Grid electricity for optional Q_elec
+electricity_price_usd_per_kwh,0.10,Grid electricity for parasitic loads and optional Q_elec
 desorption_hours_per_day,12.0,Active desorption window (hours/day)
 mass_transfer_convection_coefficient_m_s,0.0085,g_chamber (m/s); Wilson Table S3 / Note S1 Fig S1
 max_electric_heat_w_per_m2,1500.0,Upper bound on optimized electric heat (W/m²)

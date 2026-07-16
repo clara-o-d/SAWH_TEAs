@@ -1,0 +1,299 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath, amssymb}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{siunitx}
+
+\title{Governing Equations for a Waste-Heat-Driven, Two-Bed SAWH System}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section*{System picture and notation}
+
+Two adsorbent-coated contactors, $A$ and $B$, alternate roles every half-cycle (duration set by desorber RH threshold, capped at $\tau_{1/2,\max}$). During a half-cycle, contactor~$A$ adsorbs from ambient process air while contactor~$B$ desorbs under partial vacuum. Heat of adsorption on~$A$ is recovered via a heat-transfer-fluid (HTF) loop and delivered to the desorbing bed~$B$, supplemented by waste heat coupled through a liquid--liquid heat exchanger (HX). This generalizes Wilson et al.'s single-bed solar model: Eqs.~1--2 and 5--6 carry over in spirit, but the solar/absorber/glass stack is replaced by the coupling loop plus waste-heat HX, and a second bed enables continuous operation.
+
+\textbf{Subscripts:} $a$ = adsorbing contactor; $d$ = desorbing contactor (identities swap each half-cycle); $f$ = HTF in the coupling loop; $wh$ = waste-heat stream; $cond$ = condenser; $amb$ = ambient process airstream.
+
+\section{State variables}
+
+Per unit footprint area (\si{\metre\squared}), unless noted.
+
+\textbf{Hydrogel sorbent (default):}
+\begin{equation}
+\mathbf{y} = \bigl[c_{w,a},\, H_a,\, c_{w,d},\, H_d,\, T_a,\, T_d,\, T_f,\, T_{cond}\bigr]
+\end{equation}
+
+\textbf{MOF sorbent (optional):}
+\begin{equation}
+\mathbf{y} = \bigl[q_a,\, q_d,\, T_a,\, T_d,\, T_f,\, T_{cond}\bigr]
+\end{equation}
+where $q$ is gravimetric loading (\si{\kilogram\water\per\kilogram\adsorbent}).
+
+\section{Contactor energy balances}
+
+\textbf{Desorbing contactor} (sealed, partial vacuum $P_{cond} \approx 20$--$60$~mbar):
+\begin{equation}
+(\rho c_p V)_{d}\,\frac{dT_d}{dt}
+= \dot{Q}_{f\to d}
+- \dot{m}_{des}\,h_{des}
+- h_{gap}\,A_d\,(T_d - T_{cond})
+- \varepsilon_d\sigma A_d\,(T_d^4 - T_{cond}^4)
+\label{eq:desorbing}
+\end{equation}
+
+\textbf{Adsorbing contactor} (open to process air, near-ambient pressure):
+\begin{equation}
+(\rho c_p V)_{a}\,\frac{dT_a}{dt}
+= \dot{m}_{ads}\,h_{ads}
+- h_{amb}\,A_a\,(T_a - T_{amb})
+- \dot{Q}_{a\to f}
+\label{eq:adsorbing}
+\end{equation}
+
+At partial vacuum, $h_{gap}$ uses a rarefied-gas conductance (Knudsen--continuum blend), not Hollands free convection.
+
+\section{Thermal-coupling loop}
+
+\begin{equation}
+(\rho c_p V)_{f}\,\frac{dT_f}{dt}
+= \dot{Q}_{a\to f} + \dot{Q}_{wh\to f} - \dot{Q}_{f\to d} - \dot{Q}_{f,loss}
+\label{eq:loop}
+\end{equation}
+
+Heat-exchanger NTU--$\varepsilon$ closures ($\dot{m}_f = \rho_f \dot{V}_f$ is the HTF control variable):
+\begin{equation}
+\dot{Q}_{a\to f} = \dot{m}_f c_{p,f}\,(T_a - T_f)\,\Bigl[1-\exp\!\Bigl(-\frac{UA_a}{\dot{m}_f c_{p,f}}\Bigr)\Bigr]
+\label{eq:Qaf}
+\end{equation}
+\begin{equation}
+\dot{Q}_{f\to d} = \dot{m}_f c_{p,f}\,(T_f - T_d)\,\Bigl[1-\exp\!\Bigl(-\frac{UA_d}{\dot{m}_f c_{p,f}}\Bigr)\Bigr]
+\label{eq:Qfd}
+\end{equation}
+\begin{equation}
+\dot{Q}_{wh\to f} = \dot{m}_{wh}\,c_{p,wh}\,(T_{wh,in} - T_{f})\,\Bigl[1-\exp\!\Bigl(-\frac{UA_{wh}}{\dot{m}_{wh}\,c_{p,wh}}\Bigr)\Bigr]
+\label{eq:Qwhf}
+\end{equation}
+
+Waste heat enters the loop only through this HX coupling: $\dot{Q}_{wh\to f} = 0$ when $T_{wh,in} \le T_f$, and otherwise $T_{wh,in}$ sets the thermodynamic ceiling on $T_f$ (the approach temperature between the waste-heat stream and the loop fluid bounds the transfer). The waste-heat outlet follows from an energy balance on the stream:
+\begin{equation}
+T_{wh,out} = T_{wh,in} - \frac{\dot{Q}_{wh\to f}}{\dot{m}_{wh}\,c_{p,wh}}
+\end{equation}
+
+Loop parasitic loss: $\dot{Q}_{f,loss} = \alpha_{loss}\bigl(|\dot{Q}_{a\to f}| + |\dot{Q}_{f\to d}|\bigr)$.
+
+\section{Condenser energy balance}
+
+\begin{equation}
+(\rho c_p L)_{cond}\,\frac{dT_{cond}}{dt}
+= h_{gap}\,A_d\,(T_d - T_{cond})
++ \dot{m}_{des}\,h_{fg}
++ \varepsilon_d\sigma\,(T_d^4 - T_{cond}^4)
+- A_r\,h_{amb}\,(T_{cond} - T_{amb})
+\label{eq:condenser}
+\end{equation}
+
+\section{Mass transport}
+
+\subsection{Hydrogel (PAM--LiCl, Wilson Eqs.~5--6)}
+
+\textbf{Adsorption (open bed):}
+\begin{equation}
+\frac{dc_{w,a}}{dt} = \frac{g_{chamber}}{H_0}\,\frac{P_{sat}(T_a)}{RT_a}\,\bigl(RH_{amb} - a_w(c_{w,a}, H_a)\bigr)
+\label{eq:massads}
+\end{equation}
+\begin{equation}
+\frac{dH_a}{dt} = \frac{MW_w}{\rho_{sol}}\,\frac{P_{sat}(T_a)}{RT_a}\,\bigl(RH_{amb} - a_w\bigr)
+\end{equation}
+\begin{equation}
+\dot{m}_{ads} = MW_w\,\bigl(\dot{c}_{w,a}\,H_a + c_{w,a}\,\dot{H}_a\bigr), \qquad \dot{m}_{ads} \ge 0
+\end{equation}
+
+\textbf{Desorption (vacuum-limited Wilson inventory):}
+
+Vacuum conductance sets the primary desorption capacity:
+\begin{equation}
+\dot{m}_{vac} = C_{vac}(t)\,\bigl[P_{sat}(T_d) - P_{cond}\bigr],
+\qquad
+\dot{m}_{vac} \le \frac{MW_w\,c_{w,d}\,H_d}{\tau_{dep,\max}}
+\label{eq:massdes}
+\end{equation}
+where $\tau_{dep,\max}$ caps depletion when gel inventory is low.
+
+Wilson heat--mass-analogy rates (same Eq.~5--6 structure as absorption, with vapor-gap $g$ from Hollands natural convection between gel and condenser):
+\begin{equation}
+c_r(T_d, T_{cond}) = \frac{P_{sat}(T_{cond})}{P_{sat}(T_d)}\,\frac{T_d}{T_{cond}}
+\label{eq:crdes}
+\end{equation}
+\begin{equation}
+\left.\frac{dc_{w,d}}{dt}\right|_{\mathrm{Wilson}}
+= \frac{g_{gap}(H_d)}{H_0}\,\frac{P_{sat}(T_d)}{RT_d}\,
+\Bigl[c_r(T_d, T_{cond}) - a_w(c_{w,d}, H_d)\Bigr]
+\label{eq:massdes_cw}
+\end{equation}
+\begin{equation}
+\left.\frac{dH_d}{dt}\right|_{\mathrm{Wilson}}
+= \frac{MW_w}{\rho_{sol}}\,\frac{P_{sat}(T_d)}{RT_d}\,
+\Bigl[c_r(T_d, T_{cond}) - a_w(c_{w,d}, H_d)\Bigr]
+\label{eq:massdes_H}
+\end{equation}
+\begin{equation}
+\dot{m}_{Wilson} = MW_w\,\Bigl(
+\left.\frac{dc_{w,d}}{dt}\right|_{\mathrm{Wilson}} H_d
++ c_{w,d}\,\left.\frac{dH_d}{dt}\right|_{\mathrm{Wilson}}\Bigr)
+\label{eq:mwilson}
+\end{equation}
+
+The gel inventory rates applied in the ODE are scaled to the vacuum limit:
+\begin{equation}
+\lambda = \min\!\Bigl(1,\; \frac{\dot{m}_{vac}}{\dot{m}_{Wilson}}\Bigr),
+\qquad
+\frac{dc_{w,d}}{dt} = \lambda\left.\frac{dc_{w,d}}{dt}\right|_{\mathrm{Wilson}},
+\qquad
+\frac{dH_d}{dt} = \lambda\left.\frac{dH_d}{dt}\right|_{\mathrm{Wilson}}
+\label{eq:massdes_scale}
+\end{equation}
+If $\dot{m}_{Wilson} \approx 0$ but $\dot{m}_{vac} > 0$, thickness is held fixed and concentration depletes directly:
+$dc_{w,d}/dt = -\dot{m}_{vac}/(MW_w H_d)$, $dH_d/dt = 0$.
+Desorption rates are enforced non-positive ($dc_{w,d}/dt \le 0$, $dH_d/dt \le 0$), and the natural vacuum flux returned to the energy balance is
+\begin{equation}
+\dot{m}_{des,nat} = \dot{m}_{Wilson}\,\lambda = \min(\dot{m}_{Wilson}, \dot{m}_{vac}).
+\label{eq:mdesnat}
+\end{equation}
+
+\subsection{MOF (dual-site Langmuir placeholder)}
+
+Equilibrium loading $q(a_w)$ from two Langmuir sites; adsorption flux uses the Wilson Eq.~5 analog with $g_{conv}$ and $RH_{amb} - a_w(q)$. Natural desorption:
+\begin{equation}
+\dot{m}_{des,nat} = C_{vac}\,\bigl[P_{sat}(T_d) - P_{cond}\bigr],
+\qquad
+\frac{dq_d}{dt}\Big|_{\mathrm{nat}} = -\frac{\dot{m}_{des,nat}}{m_{ads}}
+\end{equation}
+(with inventory cap as in Eq.~\eqref{eq:massdes}). Equal mass transfer (Eqs.~\eqref{eq:equal_mass}--\eqref{eq:equal_scale}) then sets $\dot{m}_{ads}=\dot{m}_{des}$ and scales $dq_a/dt$, $dq_d/dt$.
+
+\section{Equal mass transfer, half-cycle termination, and feedback control}
+
+\subsection{Instantaneous equal mass transfer}
+
+Each integration step first computes natural bed fluxes
+($\dot{m}_{ads,nat}$ from the adsorption block, Eqs.~\eqref{eq:massads};
+$\dot{m}_{des,nat}$ from Eqs.~\eqref{eq:massdes}--\eqref{eq:mdesnat} on the desorbing bed),
+then equalizes them:
+\begin{equation}
+\dot{m}_{eq} = \min(\dot{m}_{ads,nat},\, \dot{m}_{des,nat}),
+\qquad
+\dot{m}_{ads} = \dot{m}_{des} = \dot{m}_{eq}
+\label{eq:equal_mass}
+\end{equation}
+Loading and thickness rates on each bed are scaled by the corresponding ratio
+($s_{ads} = \dot{m}_{eq}/\dot{m}_{ads,nat}$, $s_{des} = \dot{m}_{eq}/\dot{m}_{des,nat}$):
+\begin{equation}
+\frac{dc_{w,a}}{dt} \leftarrow s_{ads}\,\frac{dc_{w,a}}{dt}\Big|_{\mathrm{nat}},
+\quad
+\frac{dH_a}{dt} \leftarrow s_{ads}\,\frac{dH_a}{dt}\Big|_{\mathrm{nat}},
+\quad
+\frac{dc_{w,d}}{dt} \leftarrow s_{des}\,\frac{dc_{w,d}}{dt}\Big|_{\mathrm{nat}},
+\quad
+\frac{dH_d}{dt} \leftarrow s_{des}\,\frac{dH_d}{dt}\Big|_{\mathrm{nat}}
+\label{eq:equal_scale}
+\end{equation}
+(and analogously $dq_a/dt$, $dq_d/dt$ for MOF).
+This enforces $\dot{m}_{ads} = \dot{m}_{des}$ at every time step; integrated over a half-cycle,
+\begin{equation}
+\int_0^{\tau_{1/2}} \dot{m}_{ads}\,dt = \int_0^{\tau_{1/2}} \dot{m}_{des}\,dt
+\label{eq:cycle}
+\end{equation}
+to within numerical tolerance.
+
+\subsection{Half-cycle termination}
+
+A half-cycle ends when the vapor-gap RH outside the desorber falls to the switch threshold,
+\begin{equation}
+c_r(T_d, T_{cond}) \le RH_{switch},
+\label{eq:rh_switch}
+\end{equation}
+or when the maximum duration $\tau_{1/2,\max}$ is reached (whichever comes first).
+Roles then swap: the bed that adsorbed desorbs in the next half-cycle.
+
+\subsection{Feedback control}
+
+Temperature matching is handled by the HTF pump; vacuum conductance tracks the adsorption-limited desorption capacity (evaluated from natural, unequalized fluxes):
+\begin{align}
+\dot{m}_f &= \mathrm{clip}\!\Bigl(\dot{m}_{f,0}\,\bigl[1 + k_T\,(T_a - T_d)\bigr],\; \dot{m}_{f,\min},\; \dot{m}_{f,\max}\Bigr)
+\label{eq:ctrl_mf}
+\\
+C_{vac} &= \mathrm{clip}\!\Bigl(
+C_{vac,0}\,\max\!\Bigl(0.1,\; \frac{\dot{m}_{ads,nat}}{\max(\dot{m}_{des,nat}, \epsilon)}\Bigr),\;
+C_{vac,\min},\; C_{vac,\max}\Bigr)
+\label{eq:ctrl_cvac}
+\end{align}
+Temperature tracking target: $T_a(t) \approx T_d(t)$ over the half-cycle.
+
+\section{Constraints}
+
+\begin{itemize}
+\item Hydrogel: $H \ge H_0$; $c_w \ge c_{w,\min}$; desorption rates non-positive ($\dot{c}_w \le 0$, $\dot{H} \le 0$); $\dot{m}_{ads} = \dot{m}_{des}$ each step (Eq.~\eqref{eq:equal_mass}).
+\item MOF: $q \in [q_{\min}, q_{\max}]$.
+\item Control outputs clipped to physical pump/HX limits.
+\item Roles swap after each half-cycle: loading, thickness, and temperature states exchange between beds.
+\item Thermal efficiency: $\eta_{th} = \dot{m}_{water}\,h_{fg} / \int \dot{Q}_{wh\to f}\,dt$ over daily operation.
+\end{itemize}
+
+\section{Default parameters (data-center baseline)}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Parameter} & \textbf{Symbol} & \textbf{Default} \\
+\midrule
+Max half-cycle duration & $\tau_{1/2,\max}$ & \SI{21600}{\second} (\SI{360}{\minute}) \\
+Desorber RH switch & $RH_{switch}$ & 0.35 \\
+Max depletion time & $\tau_{dep,\max}$ & \SI{600}{\second} \\
+Condenser pressure & $P_{cond}$ & \SI{30}{\milli\bar} \\
+Vacuum gap & --- & \SI{40}{\milli\metre} \\
+Contactor thermal mass & $(\rho c_p V)_d$ & \SI{1.5e5}{\joule\per\metre\squared\kelvin} \\
+HTF thermal mass & $(\rho c_p V)_f$ & \SI{2.0e4}{\joule\per\metre\squared\kelvin} \\
+HTF base flow & $\dot{m}_{f,0}$ & \SI{0.25}{\kilogram\per\metre\squared\per\second} \\
+Vacuum conductance base & $C_{vac,0}$ & \SI{8e-9}{\kilogram\per\second\per\pascal\per\metre\squared} \\
+Waste-heat inlet & $T_{wh,in}$ & \SI{58}{\celsius} \\
+Waste-heat flow & $\dot{m}_{wh}$ & \SI{0.15}{\kilogram\per\metre\squared\per\second} \\
+Waste-heat HX conductance & $UA_{wh}$ & \SI{1200}{\watt\per\kelvin\per\metre\squared} \\
+Process air & $T_{amb}$, RH & \SI{32}{\celsius}, 45\% \\
+External convection & $h_{amb}$ & \SI{15}{\watt\per\metre\squared\kelvin} \\
+Hydrogel $H_0$ & --- & \SI{4}{\milli\metre} \\
+Chamber $g$ (abs.) & $g_{chamber}$ & \SI{0.0085}{\metre\per\second} \\
+Condensation enthalpy & $h_{fg}$ & \SI{2.256e6}{\joule\per\kilogram} \\
+Fin area ratio & $A_r$ & 7.1 \\
+HTF temperature gain & $k_T$ & \SI{0.08}{\per\kelvin} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section*{Summary: mapping from Wilson et al.\ (solar, 1-bed)}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}p{0.30\textwidth}p{0.32\textwidth}p{0.32\textwidth}@{}}
+\toprule
+\textbf{Wilson et al.\ (solar, 1-bed)} & \textbf{This system (waste-heat, 2-bed)} & \textbf{What changes} \\
+\midrule
+Eq.\ 1 --- gel desorption balance & Desorbing-contactor balance & Absorber conduction $\to$ loop delivery $\dot{Q}_{f\to d}$ \\
+(absorption simplification) & Adsorbing-contactor balance & Heat of adsorption retained; extracted by $\dot{Q}_{a\to f}$ \\
+Eqs.\ 3--4 --- glass \& absorber & Coupling-loop balance & No solar stack; $\dot{Q}_{wh\to f}$ HX + bed-to-bed recovery \\
+Eq.\ 2 --- condenser balance & Condenser balance (same form) & Gap $h$ becomes rarefied/molecular at vacuum \\
+Eqs.\ 5--6 --- mass transport & Adsorption unchanged; desorption Wilson + vacuum scaling & Eqs.~\eqref{eq:massdes_cw}--\eqref{eq:mdesnat}; $C_{vac}(t)$ \\
+Fixed 12h/12h cycle & RH-threshold half-cycles + equal flux & $\dot{m}_{ads}=\dot{m}_{des}$; $\dot{m}_f(t)$, $C_{vac}(t)$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section*{Integration}
+
+Half-cycles are integrated with SciPy \texttt{solve\_ivp} (Radau). A full cycle runs two half-cycles with role swap; daily operation repeats cycles over a waste-heat / process-air profile.
+
+\end{document}

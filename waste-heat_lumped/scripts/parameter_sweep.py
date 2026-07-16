@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Full-factorial parameter sweep for solar lumped SAWH LCOW."""
+"""Full-factorial parameter sweep for the fluid-heated daily-cycle SAWH LCOW/NPV."""
 
 from __future__ import annotations
 
@@ -20,19 +20,21 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from run_waste_heat_sim import (  # noqa: E402
-    SolarSimResult,
+    WasteHeatSimResult,
     register_cyclic_warmup_arguments,
-    register_solar_sim_arguments,
-    resolve_solar_sim_arguments,
+    register_waste_heat_sim_arguments,
     run_waste_heat_simulation,
 )
 from waste_heat_lumped.economics.lcow import LcowCostBreakdown  # noqa: E402
+from waste_heat_lumped.economics.npv import npv_from_daily_yield  # noqa: E402
 from waste_heat_lumped.economics.params import LCOEconomicParams  # noqa: E402
-from waste_heat_lumped.physics import table_s3  # noqa: E402
+from waste_heat_lumped.physics import device_defaults as dd  # noqa: E402
 from waste_heat_lumped.physics.salt_properties import get_salt  # noqa: E402
 
+DEFAULT_WATER_PRICE_USD_PER_M3: float = 5.0
+
 DEFAULT_SWEEP_KEYS: tuple[str, ...] = (
-    "h_des_j_per_kg",
+    "hydrogel_thickness_mm",
     "salt_weight_factor",
     "hydrogel_lifetime_years",
 )
@@ -72,14 +74,39 @@ def _capex_opex_usd_per_m3(breakdown: LcowCostBreakdown | None) -> tuple[float, 
     return capex, opex
 
 
-def _metrics_from_result(result: SolarSimResult) -> dict[str, float]:
+def _metrics_from_result(
+    result: WasteHeatSimResult,
+    *,
+    water_price_usd_per_m3: float = DEFAULT_WATER_PRICE_USD_PER_M3,
+) -> dict[str, float]:
     capex, opex = _capex_opex_usd_per_m3(result.breakdown)
+
+    npv_result = npv_from_daily_yield(
+        result.daily_yield_kg_per_m2,
+        water_price_usd_per_m3,
+        salt_name=result.config.salt_name,
+        salt_to_polymer_ratio=result.config.salt_to_polymer_ratio,
+        hydrogel_thickness_m=result.config.hydrogel_thickness_m,
+        econ=result.econ,
+    )
+    if npv_result is None:
+        npv_usd_per_m2 = float("nan")
+        payback_years_simple = float("nan")
+        payback_years_discounted = float("nan")
+    else:
+        npv_usd_per_m2 = npv_result.npv_usd_per_m2
+        payback_years_simple = npv_result.payback_years_simple
+        payback_years_discounted = npv_result.payback_years_discounted
+
     return {
         "daily_yield_kg_m2": result.daily_yield_kg_per_m2,
         "thermal_efficiency": result.thermal_efficiency,
         "lcow_usd_per_m3": result.lcow_usd_per_m3,
         "capex_usd_per_m3": capex,
         "opex_usd_per_m3": opex,
+        "npv_usd_per_m2": npv_usd_per_m2,
+        "payback_years_simple": payback_years_simple,
+        "payback_years_discounted": payback_years_discounted,
     }
 
 
@@ -87,56 +114,55 @@ def _apply_combo(
     combo: dict[str, float],
     base_args: argparse.Namespace,
     base_econ: LCOEconomicParams,
-) -> SolarSimResult:
+) -> tuple[WasteHeatSimResult, float]:
+    """Run one sweep point; returns (result, water_price_usd_per_m3 for that point)."""
     args = copy.copy(base_args)
-    baseline_profile_kwargs: dict[str, float] = {}
-    econ = base_econ
-    h_des_j_per_kg: float | None = None
-    salt_formula_weight_g_mol: float | None = None
-    salt_weight_factor: float | None = None
+    config_overrides: dict[str, object] = {}
+    profile_kwargs: dict[str, float] = {}
+    econ_overrides: dict[str, object] = {}
+    water_price_usd_per_m3 = DEFAULT_WATER_PRICE_USD_PER_M3
 
     for key, value in combo.items():
         if key == "hydrogel_thickness_mm":
-            args.hydrogel_thickness_mm = value
+            config_overrides["hydrogel_thickness_m"] = value * 1e-3
         elif key == "vapor_gap_mm":
-            args.vapor_gap_mm = value
-        elif key == "humidity_high":
-            baseline_profile_kwargs["relative_humidity"] = value
-        elif key == "solar_irradiance_w_per_m2":
-            baseline_profile_kwargs["solar_w_m2"] = value
-        elif key == "h_amb_w_m2_k":
-            baseline_profile_kwargs["h_amb_w_m2_k"] = value
-        elif key == "discount_rate":
-            econ = LCOEconomicParams(discount_rate=value)
-        elif key == "device_lifetime_years":
-            econ = LCOEconomicParams(device_lifetime_years=int(value))
-        elif key == "hydrogel_lifetime_years":
-            econ = LCOEconomicParams(hydrogel_lifetime_years=value)
-        elif key == "utilization_factor":
-            econ = LCOEconomicParams(utilization_factor=value)
-        elif key == "h_des_j_per_kg":
-            h_des_j_per_kg = value
-        elif key == "salt_formula_weight_g_mol":
-            salt_formula_weight_g_mol = value
+            config_overrides["vapor_gap_m"] = value * 1e-3
         elif key == "salt_weight_factor":
-            salt_weight_factor = value
+            config_overrides["salt_weight_factor"] = value
+        elif key == "t_f_c":
+            config_overrides["t_f_c"] = value
+        elif key == "m_dot_f_kg_s_m2":
+            config_overrides["m_dot_f_kg_s_m2"] = value
+        elif key == "ua_gel_w_k":
+            config_overrides["ua_gel_w_k"] = value
+        elif key == "t_amb_c":
+            profile_kwargs["t_amb_c"] = value
+        elif key == "relative_humidity":
+            profile_kwargs["rh"] = value
+        elif key == "h_amb_w_m2_k":
+            profile_kwargs["h_amb"] = value
+        elif key == "discount_rate":
+            econ_overrides["discount_rate"] = value
+        elif key == "device_lifetime_years":
+            econ_overrides["device_lifetime_years"] = int(value)
+        elif key == "hydrogel_lifetime_years":
+            econ_overrides["hydrogel_lifetime_years"] = value
+        elif key == "utilization_factor":
+            econ_overrides["utilization_factor"] = value
+        elif key == "water_price_usd_per_m3":
+            water_price_usd_per_m3 = value
         else:
             raise ValueError(f"Unknown sweep parameter: {key}")
 
-    if baseline_profile_kwargs and args.weather_mode != "baseline":
-        raise ValueError(
-            "Weather-profile sweeps require --weather-mode baseline "
-            f"(got {args.weather_mode!r})"
-        )
+    econ = LCOEconomicParams(**econ_overrides) if econ_overrides else base_econ
 
-    return run_waste_heat_simulation(
+    result = run_waste_heat_simulation(
         args,
         econ=econ,
-        baseline_profile_kwargs=baseline_profile_kwargs or None,
-        h_des_j_per_kg=h_des_j_per_kg,
-        salt_formula_weight_g_mol=salt_formula_weight_g_mol,
-        salt_weight_factor=salt_weight_factor,
+        config_overrides=config_overrides or None,
+        profile_kwargs=profile_kwargs or None,
     )
+    return result, water_price_usd_per_m3
 
 
 def make_sweep_params(
@@ -145,12 +171,13 @@ def make_sweep_params(
 ) -> list[SweepParam]:
     salt = get_salt(base_args.salt)
     return [
+        # Material
         SweepParam(
-            "h_des_j_per_kg",
-            "h_des (J/kg)",
-            1.8e6,
-            3.2e6,
-            table_s3.H_DES_J_PER_KG,
+            "hydrogel_thickness_mm",
+            "Hydrogel thickness (mm)",
+            1.0,
+            10.0,
+            base_args.hydrogel_thickness_mm,
         ),
         SweepParam(
             "salt_weight_factor",
@@ -166,17 +193,18 @@ def make_sweep_params(
             2.0,
             base_econ.hydrogel_lifetime_years,
         ),
+        # Heat transfer
+        SweepParam("t_f_c", "Loop fluid setpoint (°C)", 40.0, 75.0, base_args.t_f_c),
         SweepParam(
-            "hydrogel_thickness_mm",
-            "Hydrogel thickness (mm)",
-            1.0,
-            10.0,
-            base_args.hydrogel_thickness_mm,
+            "m_dot_f_kg_s_m2", "Loop flow (kg/s/m²)", 0.05, 0.30, base_args.m_dot_f
         ),
-        SweepParam("vapor_gap_mm", "Vapor gap (mm)", 7.0, 60.0, base_args.vapor_gap_mm),
-        SweepParam("humidity_high", "Uptake RH", 0.15, 0.80, 0.5),
-        SweepParam("solar_irradiance_w_per_m2", "Solar GHI (W/m²)", 400.0, 800.0, 600.0),
-        SweepParam("h_amb_w_m2_k", "h_amb (W/m²K)", 1.0, 12.5, 10.0),
+        SweepParam("ua_gel_w_k", "Loop→gel UA (W/K/m²)", 400.0, 2000.0, base_args.ua_gel),
+        SweepParam("vapor_gap_mm", "Vapor gap (mm)", 7.0, 60.0, dd.VAPOR_GAP_M * 1e3),
+        # External
+        SweepParam("t_amb_c", "Ambient temperature (°C)", 25.0, 40.0, base_args.t_amb_c),
+        SweepParam("relative_humidity", "Ambient RH", 0.15, 0.80, base_args.rh),
+        SweepParam("h_amb_w_m2_k", "h_amb (W/m²K)", 5.0, 25.0, base_args.h_amb),
+        # Financial
         SweepParam("discount_rate", "Discount rate", 0.04, 0.12, base_econ.discount_rate),
         SweepParam(
             "device_lifetime_years",
@@ -192,6 +220,13 @@ def make_sweep_params(
             0.7,
             1.0,
             base_econ.utilization_factor,
+        ),
+        SweepParam(
+            "water_price_usd_per_m3",
+            "Water price (USD/m³)",
+            1.0,
+            25.0,
+            DEFAULT_WATER_PRICE_USD_PER_M3,
         ),
     ]
 
@@ -212,9 +247,8 @@ def main() -> None:
     ap = argparse.ArgumentParser(
         description="Full-factorial parameter sweep (uses run_waste_heat_simulation)",
     )
-    register_solar_sim_arguments(ap)
+    register_waste_heat_sim_arguments(ap)
     register_cyclic_warmup_arguments(ap)
-    ap.set_defaults(weather_mode="baseline")
     ap.add_argument(
         "--n-levels",
         "--n-points",
@@ -233,19 +267,15 @@ def main() -> None:
         nargs="*",
         default=None,
         help=(
-            "Parameter keys to sweep (default: h_des, salt MW, hydrogel lifetime). "
-            f"Available: {', '.join(DEFAULT_SWEEP_KEYS)} and others from make_sweep_params."
+            "Parameter keys to sweep (default: hydrogel thickness, salt weight factor, "
+            f"hydrogel lifetime). Available: {', '.join(DEFAULT_SWEEP_KEYS)} and others "
+            "from make_sweep_params."
         ),
     )
     args = ap.parse_args()
 
-    resolve_solar_sim_arguments(args, ap)
-    if args.no_cyclic and args.cyclic:
-        ap.error("Cannot use both --cyclic and --no-cyclic")
     if args.warmup_cycles < 0:
         ap.error("--warmup-cycles must be >= 0")
-    if args.no_cyclic and args.warmup_cycles != 2:
-        print("Note: --warmup-cycles ignored when --no-cyclic is set.", flush=True)
 
     base_args = copy.copy(args)
     base_econ = LCOEconomicParams()
@@ -260,26 +290,15 @@ def main() -> None:
 
     combos = _factorial_combos(params, args.n_levels)
     n_runs = len(combos)
-    use_cyclic = args.cyclic or (
-        not args.no_cyclic
-        and args.weather_mode in ("real", "atacama-replay", "cambridge-replay")
-        and args.initial_water_l_m2 is None
-    )
-    n_ode_days = 1 if not use_cyclic else args.warmup_cycles + 1
-    print(
-        f"Full factorial: {len(params)} parameters x {args.n_levels} levels "
-        f"= {n_runs} runs"
-    )
-    cyclic_desc = "off"
-    if use_cyclic:
-        cyclic_desc = f"on ({args.warmup_cycles} warmup + 1 report)"
-    print(f"  cyclic={cyclic_desc}  ODE days/run={n_ode_days}", flush=True)
+    print(f"Full factorial: {len(params)} parameters x {args.n_levels} levels = {n_runs} runs")
 
     param_keys = [p.key for p in params]
     rows: list[dict] = []
     for i, combo in enumerate(combos, start=1):
-        result = _apply_combo(combo, base_args, base_econ)
-        rows.append({**combo, **_metrics_from_result(result)})
+        result, water_price = _apply_combo(combo, base_args, base_econ)
+        rows.append(
+            {**combo, **_metrics_from_result(result, water_price_usd_per_m3=water_price)}
+        )
         if i % max(1, n_runs // 10) == 0 or i == n_runs:
             print(f"  {i}/{n_runs} complete", flush=True)
 
@@ -291,6 +310,9 @@ def main() -> None:
         "lcow_usd_per_m3",
         "capex_usd_per_m3",
         "opex_usd_per_m3",
+        "npv_usd_per_m2",
+        "payback_years_simple",
+        "payback_years_discounted",
     ]
     with args.output.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)

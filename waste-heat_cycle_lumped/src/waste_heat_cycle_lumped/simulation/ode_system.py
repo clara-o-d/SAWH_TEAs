@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TypeAlias
 
 import numpy as np
 from scipy.integrate import solve_ivp
@@ -31,6 +32,9 @@ from waste_heat_cycle_lumped.weather.profiles import HalfCycleProfile
 _ODE_RTOL = 1e-4
 _ODE_ATOL = 1e-7
 _INVENTORY_SAMPLE_DT_S = 6.0
+
+# loading_a, loading_d, h_a, h_d, t_a, t_d, t_f, t_cond
+CycleState: TypeAlias = tuple[float, float, float | None, float | None, float, float, float, float]
 
 
 @dataclass
@@ -106,6 +110,43 @@ def _initial_state(
     t_f = 0.5 * (t_a + t_d)
     t_cond = t_amb
     return loading_a, loading_d, h_a, h_d, t_a, t_d, t_f, t_cond
+
+
+def _run_one_cycle(
+    profile: HalfCycleProfile,
+    config: DeviceConfig,
+    state: CycleState,
+) -> tuple[CycleResult, CycleState]:
+    la, ld, ha, hd, ta, td, tf, tc = state
+    half_a = run_half_cycle(
+        profile,
+        config,
+        loading_a0=la,
+        loading_d0=ld,
+        h_a0=ha,
+        h_d0=hd,
+        t_a0=ta,
+        t_d0=td,
+        t_f0=tf,
+        t_cond0=tc,
+    )
+    la, ld, ha, hd, ta, td, tf, tc = swap_roles(half_a, config)
+    half_b = run_half_cycle(
+        profile,
+        config,
+        loading_a0=la,
+        loading_d0=ld,
+        h_a0=ha,
+        h_d0=hd,
+        t_a0=ta,
+        t_d0=td,
+        t_f0=tf,
+        t_cond0=tc,
+    )
+    water = half_a.water_collected_kg_m2 + half_b.water_collected_kg_m2
+    cyc = CycleResult(half_a=half_a, half_b=half_b, water_collected_kg_m2=water)
+    la, ld, ha, hd, ta, td, tf, tc = swap_roles(half_b, config)
+    return cyc, (la, ld, ha, hd, ta, td, tf, tc)
 
 
 def _clip_mass_state(y: np.ndarray, config: DeviceConfig) -> np.ndarray:
@@ -424,8 +465,9 @@ def run_cycle(
     h_d0: float | None = None,
     t_a0: float | None = None,
     t_d0: float | None = None,
+    warmup_cycles: int = 0,
 ) -> CycleResult:
-    la, ld, ha, hd, ta, td, tf, tc = _initial_state(
+    state = _initial_state(
         config,
         loading_a0=loading_a0,
         loading_d0=loading_d0,
@@ -434,33 +476,10 @@ def run_cycle(
         t_a0=t_a0,
         t_d0=t_d0,
     )
-    half_a = run_half_cycle(
-        profile,
-        config,
-        loading_a0=la,
-        loading_d0=ld,
-        h_a0=ha,
-        h_d0=hd,
-        t_a0=ta,
-        t_d0=td,
-        t_f0=tf,
-        t_cond0=tc,
-    )
-    la, ld, ha, hd, ta, td, tf, tc = swap_roles(half_a, config)
-    half_b = run_half_cycle(
-        profile,
-        config,
-        loading_a0=la,
-        loading_d0=ld,
-        h_a0=ha,
-        h_d0=hd,
-        t_a0=ta,
-        t_d0=td,
-        t_f0=tf,
-        t_cond0=tc,
-    )
-    water = half_a.water_collected_kg_m2 + half_b.water_collected_kg_m2
-    return CycleResult(half_a=half_a, half_b=half_b, water_collected_kg_m2=water)
+    for _ in range(warmup_cycles):
+        _, state = _run_one_cycle(profile, config, state)
+    cyc, _ = _run_one_cycle(profile, config, state)
+    return cyc
 
 
 def run_daily_operation(
@@ -470,8 +489,9 @@ def run_daily_operation(
     n_cycles: int | None = None,
     loading_a0: float | None = None,
     loading_d0: float | None = None,
+    warmup_cycles: int = 0,
 ) -> tuple[float, float, list[CycleResult]]:
-    la, ld, ha, hd, ta, td, tf, tc = _initial_state(
+    state = _initial_state(
         config,
         loading_a0=loading_a0,
         loading_d0=loading_d0,
@@ -480,6 +500,9 @@ def run_daily_operation(
         t_a0=None,
         t_d0=None,
     )
+    for _ in range(warmup_cycles):
+        _, state = _run_one_cycle(profile, config, state)
+
     results: list[CycleResult] = []
     total_water = 0.0
     q_wh_total = 0.0
@@ -506,42 +529,12 @@ def run_daily_operation(
         if n_cycles is None and elapsed_s >= day_s - 1e-9:
             break
 
-        half_a = run_half_cycle(
-            profile,
-            config,
-            loading_a0=la,
-            loading_d0=ld,
-            h_a0=ha,
-            h_d0=hd,
-            t_a0=ta,
-            t_d0=td,
-            t_f0=tf,
-            t_cond0=tc,
-        )
-        _integrate_wh_energy(half_a)
-        la, ld, ha, hd, ta, td, tf, tc = swap_roles(half_a, config)
-        half_b = run_half_cycle(
-            profile,
-            config,
-            loading_a0=la,
-            loading_d0=ld,
-            h_a0=ha,
-            h_d0=hd,
-            t_a0=ta,
-            t_d0=td,
-            t_f0=tf,
-            t_cond0=tc,
-        )
-        _integrate_wh_energy(half_b)
-        cyc = CycleResult(
-            half_a=half_a,
-            half_b=half_b,
-            water_collected_kg_m2=half_a.water_collected_kg_m2 + half_b.water_collected_kg_m2,
-        )
+        cyc, state = _run_one_cycle(profile, config, state)
+        _integrate_wh_energy(cyc.half_a)
+        _integrate_wh_energy(cyc.half_b)
         results.append(cyc)
         total_water += cyc.water_collected_kg_m2
-        elapsed_s += float(half_a.time_s[-1]) + float(half_b.time_s[-1])
-        la, ld, ha, hd, ta, td, tf, tc = swap_roles(half_b, config)
+        elapsed_s += float(cyc.half_a.time_s[-1]) + float(cyc.half_b.time_s[-1])
         cycle_count += 1
 
     eta = (total_water * config.thermal_params().h_fg_j_per_kg / q_wh_total) if q_wh_total > 0 else 0.0

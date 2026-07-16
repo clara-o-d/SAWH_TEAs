@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""One-at-a-time parameter sweep for waste-heat lumped SAWH LCOW."""
+"""One-at-a-time parameter sweep for waste-heat lumped SAWH LCOW and NPV."""
 
 from __future__ import annotations
 
@@ -15,12 +15,13 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from waste_heat_cycle_lumped.economics.lcow import lcow_from_daily_yield
+from waste_heat_cycle_lumped.economics.npv import npv_from_daily_yield
 from waste_heat_cycle_lumped.economics.params import LCOEconomicParams
 from waste_heat_cycle_lumped.physics import device_defaults as dd
 from waste_heat_cycle_lumped.physics.contactor_balances import ContactorThermalParams
-from waste_heat_cycle_lumped.simulation.annual_yield import simulate_daily
+from waste_heat_cycle_lumped.simulation.annual_yield import SimulationResult, simulate_daily
 from waste_heat_cycle_lumped.simulation.device_config import ControllerParams, DeviceConfig
-from waste_heat_cycle_lumped.weather.profiles import datacenter_baseline_profile
+from waste_heat_cycle_lumped.weather.profiles import HalfCycleProfile, datacenter_baseline_profile
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,8 +37,13 @@ class SweepParam:
 BASELINE_CONFIG = DeviceConfig.datacenter_baseline()
 BASELINE_ECON = LCOEconomicParams()
 
+# Baseline water price used for NPV/payback metrics when the sweep parameter
+# in question isn't "water_price_usd_per_m3" itself; matches the baseline in
+# the SweepParam registered by make_sweep_params().
+_BASELINE_WATER_PRICE_USD_PER_M3: float = 5.0
 
-def _baseline_profile():
+
+def _baseline_profile() -> HalfCycleProfile:
     return datacenter_baseline_profile(
         tau_half_s=BASELINE_CONFIG.tau_half_s,
         t_amb_c=dd.T_AMB_C,
@@ -46,10 +52,6 @@ def _baseline_profile():
         t_wh_in_c=dd.T_WH_IN_C,
         m_dot_wh_kg_s_m2=dd.M_WH_KG_S_M2,
     )
-
-
-def _baseline_yield() -> float:
-    return simulate_daily(_baseline_profile(), BASELINE_CONFIG).mean_daily_yield_kg_m2
 
 
 def _sweep_grid(sp: SweepParam, n: int) -> list[float]:
@@ -66,89 +68,133 @@ def _sweep_grid(sp: SweepParam, n: int) -> list[float]:
     return vals
 
 
+def _apply_overrides(
+    overrides: dict[str, float],
+) -> tuple[DeviceConfig, HalfCycleProfile, LCOEconomicParams]:
+    """Build (config, profile, econ) from a dict of {param_key: value}.
+
+    Generalizes the old single-parameter ``_run_point`` if/elif dispatch so
+    it can accept several simultaneous overrides (needed by the 2D heatmap
+    script in npv_heatmap.py). Config/profile/econ kwargs are accumulated
+    across all keys and applied once at the end, so combining e.g. a
+    profile-level override with a config-level override in the same call
+    behaves the same as applying either alone.
+    """
+    cfg_kwargs: dict[str, object] = {}
+    profile_kwargs: dict[str, float] = {}
+    econ_kwargs: dict[str, object] = {}
+
+    base_controller = BASELINE_CONFIG.controller_params()
+    controller_override: ControllerParams | None = None
+    thermal_override: ContactorThermalParams | None = None
+
+    for key, value in overrides.items():
+        if key == "hydrogel_thickness_mm":
+            cfg_kwargs["hydrogel_thickness_m"] = value * 1e-3
+        elif key == "vapor_gap_mm":
+            cfg_kwargs["vapor_gap_m"] = value * 1e-3
+        elif key == "t_wh_in_c":
+            profile_kwargs["t_wh_in_c"] = value
+        elif key == "relative_humidity":
+            profile_kwargs["rh"] = value
+        elif key == "h_amb_w_m2_k":
+            profile_kwargs["h_amb"] = value
+        elif key == "m_dot_wh_kg_s_m2":
+            profile_kwargs["m_dot_wh_kg_s_m2"] = value
+        elif key == "rh_desorber_switch":
+            cfg_kwargs["rh_desorber_switch"] = value
+        elif key == "tau_half_min":
+            cfg_kwargs["tau_half_s"] = value * 60.0
+        elif key == "c_vac_max":
+            controller_override = ControllerParams(
+                m_f_base_kg_s_m2=base_controller.m_f_base_kg_s_m2,
+                m_f_min_kg_s_m2=base_controller.m_f_min_kg_s_m2,
+                m_f_max_kg_s_m2=base_controller.m_f_max_kg_s_m2,
+                c_vac_base_kg_s_pa_m2=base_controller.c_vac_base_kg_s_pa_m2,
+                c_vac_min_kg_s_pa_m2=base_controller.c_vac_min_kg_s_pa_m2,
+                c_vac_max_kg_s_pa_m2=value,
+                k_t_per_k=base_controller.k_t_per_k,
+                k_m_per_kg_m2=base_controller.k_m_per_kg_m2,
+                k_p_per_kg_s_m2=base_controller.k_p_per_kg_s_m2,
+            )
+        elif key == "wh_hx_ua_w_k":
+            thermal_override = ContactorThermalParams(wh_hx_ua_w_k=value)
+        elif key == "discount_rate":
+            econ_kwargs["discount_rate"] = value
+        elif key == "device_lifetime_years":
+            econ_kwargs["device_lifetime_years"] = int(value)
+        elif key == "hydrogel_lifetime_years":
+            econ_kwargs["hydrogel_lifetime_years"] = value
+        elif key == "utilization_factor":
+            econ_kwargs["utilization_factor"] = value
+        elif key == "water_price_usd_per_m3":
+            # Pure economics input consumed directly by the caller (fed into
+            # npv_from_daily_yield); no config/profile/econ dispatch here.
+            pass
+        else:
+            raise ValueError(f"Unknown sweep parameter: {key}")
+
+    if controller_override is not None:
+        cfg_kwargs["controller"] = controller_override
+    if thermal_override is not None:
+        cfg_kwargs["thermal"] = thermal_override
+
+    cfg = DeviceConfig.datacenter_baseline(**cfg_kwargs)
+    profile = datacenter_baseline_profile(tau_half_s=cfg.tau_half_s, **profile_kwargs)
+    econ = LCOEconomicParams(**econ_kwargs)
+    return cfg, profile, econ
+
+
 def _simulate_and_lcow(
-    profile,
+    profile: HalfCycleProfile,
     cfg: DeviceConfig,
     econ: LCOEconomicParams,
+    water_price_usd_per_m3: float = _BASELINE_WATER_PRICE_USD_PER_M3,
 ) -> dict:
-    result = simulate_daily(profile, cfg)
+    result: SimulationResult = simulate_daily(profile, cfg)
+    cycles_per_day = float(result.n_cycles_per_day)
     lcow = lcow_from_daily_yield(
         result.mean_daily_yield_kg_m2,
         salt_name=cfg.salt_name,
         salt_to_polymer_ratio=cfg.salt_to_polymer_ratio,
         hydrogel_thickness_m=cfg.hydrogel_thickness_m,
         econ=econ,
+        cycles_per_day=cycles_per_day,
     )
+    npv_result = npv_from_daily_yield(
+        result.mean_daily_yield_kg_m2,
+        water_price_usd_per_m3,
+        salt_name=cfg.salt_name,
+        salt_to_polymer_ratio=cfg.salt_to_polymer_ratio,
+        hydrogel_thickness_m=cfg.hydrogel_thickness_m,
+        econ=econ,
+        cycles_per_day=cycles_per_day,
+    )
+    if npv_result is None:
+        npv_usd_per_m2 = float("nan")
+        payback_years_simple = float("nan")
+        payback_years_discounted = float("nan")
+    else:
+        npv_usd_per_m2 = npv_result.npv_usd_per_m2
+        payback_years_simple = npv_result.payback_years_simple
+        payback_years_discounted = npv_result.payback_years_discounted
     return {
         "daily_yield_kg_m2": result.mean_daily_yield_kg_m2,
         "thermal_efficiency": result.mean_thermal_efficiency,
+        **result.specific_energy.as_dict(),
         "lcow_usd_per_m3": lcow,
+        "npv_usd_per_m2": npv_usd_per_m2,
+        "payback_years_simple": payback_years_simple,
+        "payback_years_discounted": payback_years_discounted,
     }
 
 
 def _run_point(sp: SweepParam, value: float) -> dict:
-    cfg = BASELINE_CONFIG
-    profile = _baseline_profile()
-    econ = LCOEconomicParams()
-
-    if sp.key == "hydrogel_thickness_mm":
-        cfg = DeviceConfig.datacenter_baseline(hydrogel_thickness_m=value * 1e-3)
-    elif sp.key == "vapor_gap_mm":
-        cfg = DeviceConfig.datacenter_baseline(vapor_gap_m=value * 1e-3)
-    elif sp.key == "t_wh_in_c":
-        profile = datacenter_baseline_profile(
-            tau_half_s=cfg.tau_half_s,
-            t_wh_in_c=value,
-        )
-    elif sp.key == "relative_humidity":
-        profile = datacenter_baseline_profile(
-            tau_half_s=cfg.tau_half_s,
-            rh=value,
-        )
-    elif sp.key == "h_amb_w_m2_k":
-        profile = datacenter_baseline_profile(
-            tau_half_s=cfg.tau_half_s,
-            h_amb=value,
-        )
-    elif sp.key == "m_dot_wh_kg_s_m2":
-        profile = datacenter_baseline_profile(
-            tau_half_s=cfg.tau_half_s,
-            m_dot_wh_kg_s_m2=value,
-        )
-    elif sp.key == "rh_desorber_switch":
-        cfg = DeviceConfig.datacenter_baseline(rh_desorber_switch=value)
-        profile = datacenter_baseline_profile(tau_half_s=cfg.tau_half_s)
-    elif sp.key == "tau_half_min":
-        tau_s = value * 60.0
-        cfg = DeviceConfig.datacenter_baseline(tau_half_s=tau_s)
-        profile = datacenter_baseline_profile(tau_half_s=tau_s)
-    elif sp.key == "c_vac_max":
-        base = cfg.controller_params()
-        controller = ControllerParams(
-            m_f_base_kg_s_m2=base.m_f_base_kg_s_m2,
-            m_f_min_kg_s_m2=base.m_f_min_kg_s_m2,
-            m_f_max_kg_s_m2=base.m_f_max_kg_s_m2,
-            c_vac_base_kg_s_pa_m2=base.c_vac_base_kg_s_pa_m2,
-            c_vac_min_kg_s_pa_m2=base.c_vac_min_kg_s_pa_m2,
-            c_vac_max_kg_s_pa_m2=value,
-            k_t_per_k=base.k_t_per_k,
-            k_m_per_kg_m2=base.k_m_per_kg_m2,
-            k_p_per_kg_s_m2=base.k_p_per_kg_s_m2,
-        )
-        cfg = DeviceConfig.datacenter_baseline(controller=controller)
-    elif sp.key == "wh_hx_ua_w_k":
-        thermal = ContactorThermalParams(wh_hx_ua_w_k=value)
-        cfg = DeviceConfig.datacenter_baseline(thermal=thermal)
-    elif sp.key == "discount_rate":
-        econ = LCOEconomicParams(discount_rate=value)
-    elif sp.key == "device_lifetime_years":
-        econ = LCOEconomicParams(device_lifetime_years=int(value))
-    elif sp.key == "hydrogel_lifetime_years":
-        econ = LCOEconomicParams(hydrogel_lifetime_years=value)
-    elif sp.key == "utilization_factor":
-        econ = LCOEconomicParams(utilization_factor=value)
-
-    return _simulate_and_lcow(profile, cfg, econ)
+    cfg, profile, econ = _apply_overrides({sp.key: value})
+    water_price = (
+        value if sp.key == "water_price_usd_per_m3" else _BASELINE_WATER_PRICE_USD_PER_M3
+    )
+    return _simulate_and_lcow(profile, cfg, econ, water_price)
 
 
 def make_sweep_params() -> list[SweepParam]:
@@ -167,6 +213,13 @@ def make_sweep_params() -> list[SweepParam]:
         SweepParam("device_lifetime_years", "Device lifetime (yr)", 10, 30, 20, is_int=True),
         SweepParam("hydrogel_lifetime_years", "Hydrogel lifetime (yr)", 0.5, 2.0, 1.0),
         SweepParam("utilization_factor", "Utilization factor", 0.7, 1.0, 0.9),
+        SweepParam(
+            "water_price_usd_per_m3",
+            "Water price (USD/m³)",
+            1.0,
+            25.0,
+            _BASELINE_WATER_PRICE_USD_PER_M3,
+        ),
     ]
 
 
@@ -187,21 +240,15 @@ def main() -> None:
         params = [p for p in params if p.key in keys]
 
     rows: list[dict] = []
-    bl_y = _baseline_yield()
-    bl_lcow = lcow_from_daily_yield(
-        bl_y,
-        salt_name=BASELINE_CONFIG.salt_name,
-        salt_to_polymer_ratio=BASELINE_CONFIG.salt_to_polymer_ratio,
-        hydrogel_thickness_m=BASELINE_CONFIG.hydrogel_thickness_m,
-        econ=BASELINE_ECON,
+    bl_res = _simulate_and_lcow(
+        _baseline_profile(), BASELINE_CONFIG, BASELINE_ECON, _BASELINE_WATER_PRICE_USD_PER_M3
     )
     rows.append(
         {
             "sweep_param": "baseline",
             "param_value": "",
             "param_label": "baseline",
-            "daily_yield_kg_m2": bl_y,
-            "lcow_usd_per_m3": bl_lcow,
+            **bl_res,
         }
     )
 
@@ -224,7 +271,23 @@ def main() -> None:
         "param_label",
         "daily_yield_kg_m2",
         "thermal_efficiency",
+        "specific_energy_wh_kwh_per_l",
+        "specific_energy_supplemental_kwh_per_l",
+        "specific_energy_vacuum_kwh_per_l",
+        "specific_energy_htf_pump_kwh_per_l",
+        "specific_energy_fans_kwh_per_l",
+        "specific_energy_condenser_active_kwh_per_l",
+        "specific_energy_aux_kwh_per_l",
+        "specific_energy_parasitic_kwh_per_l",
+        "specific_energy_total_kwh_per_l",
+        "specific_energy_min_kwh_per_l",
+        "desorption_hours_per_day",
+        "operating_hours_per_day",
+        "n_cycles_per_day",
         "lcow_usd_per_m3",
+        "npv_usd_per_m2",
+        "payback_years_simple",
+        "payback_years_discounted",
     ]
     with args.output.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)

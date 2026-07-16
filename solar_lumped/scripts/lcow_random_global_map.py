@@ -227,6 +227,7 @@ def run_sites(
     insulation_gap_mm: float = 5.0,
     cyclic_initial: bool = True,
     cyclic_warmup_cycles: int = 1,
+    stop_at_first_feasible: bool = False,
 ) -> tuple[list[SiteResult], list[SaltAttemptResult]]:
     n = len(lats)
     print(
@@ -349,6 +350,8 @@ def run_sites(
                     f"a_w,des={sim.desorption_aw:.3f}  ({salt_dt:.1f}s){leader}",
                     flush=True,
                 )
+                if stop_at_first_feasible:
+                    break
             else:
                 reason = sim.failure_reason or "infeasible"
                 print(f"skipped — {reason}  ({salt_dt:.1f}s)", flush=True)

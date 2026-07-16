@@ -1,0 +1,34 @@
+# Reference defaults for waste_heat_cycle_lumped_no_loop (not loaded automatically by code).
+# Physics mapping: waste-heat_cycle_lumped/docs/governing_eq.tex
+
+device:
+  sorbent: hydrogel  # hydrogel | mof
+  salt: LiCl
+  salt_to_polymer_ratio: 4.0
+  hydrogel_thickness_mm: 4.0
+  g_conv_m_s: 0.0085
+  mof: MIL-100_Fe  # when sorbent: mof
+  tau_half_min: 360.0  # max half-cycle duration; ends earlier at rh_desorber_switch
+  rh_desorber_switch: 0.35
+  p_cond_mbar: 30.0
+
+  # Data-center liquid-cooled waste heat (NTU-epsilon HX to loop; see governing_eq.tex Eq. Qwhf)
+  t_wh_in_c: 58.0
+  m_dot_wh_kg_s_m2: 0.15
+  wh_hx_ua_w_k: 1200.0
+
+  # Process (return) air
+  t_amb_c: 32.0
+  relative_humidity: 0.45
+  h_amb_w_m2_k: 15.0
+
+controller:
+  m_f_base_kg_s_m2: 0.25
+  c_vac_base_kg_s_pa_m2: 8.0e-9
+  c_vac_max_kg_s_pa_m2: 5.0e-6  # was 5.0e-7; controller often pins here
+  k_t_per_k: 0.08
+  k_m_per_kg_m2: 20000.0
+  k_p_per_kg_s_m2: 5000.0
+
+profile:
+  mode: datacenter-baseline  # datacenter-baseline | datacenter-diurnal

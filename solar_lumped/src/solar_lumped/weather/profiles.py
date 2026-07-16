@@ -230,6 +230,24 @@ def representative_mean_day_profile(
     return profile_from_day_df(mean_day)
 
 
+def real_weather_days_from_df(
+    df: pd.DataFrame,
+    *,
+    stride: int = 1,
+) -> list[tuple[date, DailyWeatherProfile, pd.DataFrame]]:
+    """Build per-day profiles from a pre-fetched year of Open-Meteo data."""
+    days_out: list[tuple[date, DailyWeatherProfile, pd.DataFrame]] = []
+    for idx, (day_key, group) in enumerate(df.groupby(df.index.date)):
+        if stride > 1 and idx % stride != 0:
+            continue
+        try:
+            prof = profile_from_day_df(group)
+            days_out.append((day_key, prof, group))
+        except (ValueError, KeyError):
+            continue
+    return days_out
+
+
 def real_weather_days(
     lat: float,
     lon: float,
@@ -237,24 +255,17 @@ def real_weather_days(
     *,
     cache_dir: str | None = None,
     stride: int = 1,
+    df: pd.DataFrame | None = None,
 ) -> list[tuple[date, DailyWeatherProfile]]:
     """Build per-day profiles for a full year from minutely_15 (or hourly fallback)."""
-    client = WeatherClient(cache_dir=cache_dir)
-    start = f"{year}-01-01"
-    end = f"{year}-12-31"
-    try:
-        _, df_min15 = client.get_historical_forecast_site_weather(lat, lon, start, end)
-        df = df_min15
-    except Exception:
-        df = client.get_historical(lat, lon, start, end)
-
-    days_out: list[tuple[date, DailyWeatherProfile]] = []
-    for idx, (day_key, group) in enumerate(df.groupby(df.index.date)):
-        if stride > 1 and idx % stride != 0:
-            continue
+    if df is None:
+        client = WeatherClient(cache_dir=cache_dir)
+        start = f"{year}-01-01"
+        end = f"{year}-12-31"
         try:
-            prof = profile_from_day_df(group)
-            days_out.append((day_key, prof))
-        except (ValueError, KeyError):
-            continue
-    return days_out
+            _, df_min15 = client.get_historical_forecast_site_weather(lat, lon, start, end)
+            df = df_min15
+        except Exception:
+            df = client.get_historical(lat, lon, start, end)
+
+    return [(day_key, prof) for day_key, prof, _ in real_weather_days_from_df(df, stride=stride)]

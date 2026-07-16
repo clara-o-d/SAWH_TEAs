@@ -21,12 +21,14 @@ if str(_SRC) not in sys.path:
 
 from run_solar_sim import (  # noqa: E402
     SolarSimResult,
+    _lcow_kwargs,
     register_cyclic_warmup_arguments,
     register_solar_sim_arguments,
     resolve_solar_sim_arguments,
     run_solar_simulation,
 )
 from solar_lumped.economics.lcow import LcowCostBreakdown  # noqa: E402
+from solar_lumped.economics.npv import npv_from_daily_yield  # noqa: E402
 from solar_lumped.economics.params import LCOEconomicParams  # noqa: E402
 from solar_lumped.physics import table_s3  # noqa: E402
 from solar_lumped.physics.salt_properties import get_salt  # noqa: E402
@@ -36,6 +38,11 @@ DEFAULT_SWEEP_KEYS: tuple[str, ...] = (
     "salt_weight_factor",
     "hydrogel_lifetime_years",
 )
+
+# Baseline water price used for NPV/payback metrics when
+# "water_price_usd_per_m3" isn't part of the current sweep subset; matches
+# the baseline in the SweepParam registered by make_sweep_params().
+_BASELINE_WATER_PRICE_USD_PER_M3: float = 5.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,14 +79,39 @@ def _capex_opex_usd_per_m3(breakdown: LcowCostBreakdown | None) -> tuple[float, 
     return capex, opex
 
 
-def _metrics_from_result(result: SolarSimResult) -> dict[str, float]:
+def _metrics_from_result(
+    result: SolarSimResult,
+    water_price_usd_per_m3: float = _BASELINE_WATER_PRICE_USD_PER_M3,
+) -> dict[str, float]:
     capex, opex = _capex_opex_usd_per_m3(result.breakdown)
+    lcow_kw = _lcow_kwargs(result.config)
+    npv_result = npv_from_daily_yield(
+        result.daily_yield_kg_per_m2,
+        water_price_usd_per_m3,
+        salt_name=result.config.salt_name,
+        salt_to_polymer_ratio=result.config.salt_to_polymer_ratio,
+        hydrogel_thickness_m=result.config.hydrogel_thickness_m,
+        econ=result.econ,
+        cycles_per_day=1.0,
+        **lcow_kw,
+    )
+    if npv_result is None:
+        npv_usd_per_m2 = float("nan")
+        payback_years_simple = float("nan")
+        payback_years_discounted = float("nan")
+    else:
+        npv_usd_per_m2 = npv_result.npv_usd_per_m2
+        payback_years_simple = npv_result.payback_years_simple
+        payback_years_discounted = npv_result.payback_years_discounted
     return {
         "daily_yield_kg_m2": result.daily_yield_kg_per_m2,
         "thermal_efficiency": result.thermal_efficiency,
         "lcow_usd_per_m3": result.lcow_usd_per_m3,
         "capex_usd_per_m3": capex,
         "opex_usd_per_m3": opex,
+        "npv_usd_per_m2": npv_usd_per_m2,
+        "payback_years_simple": payback_years_simple,
+        "payback_years_discounted": payback_years_discounted,
     }
 
 
@@ -120,6 +152,30 @@ def _apply_combo(
             salt_formula_weight_g_mol = value
         elif key == "salt_weight_factor":
             salt_weight_factor = value
+        elif key == "water_price_usd_per_m3":
+            # Pure economics input consumed directly in main()'s per-combo
+            # loop (via _metrics_from_result); no physics/profile dispatch.
+            pass
+        elif key == "salt_to_polymer_ratio":
+            args.salt_loading = value
+        elif key == "insulation_gap_mm":
+            args.insulation_gap_mm = value
+        elif key == "tilt_deg":
+            args.tilt_deg = value
+        elif key == "fin_area_ratio":
+            args.fin_area_ratio = value
+        elif key == "temperature_c":
+            baseline_profile_kwargs["temperature_c"] = value
+        elif key == "total_investment_factor":
+            econ = LCOEconomicParams(total_investment_factor=value)
+        elif key == "maintenance_cost_fraction":
+            econ = LCOEconomicParams(maintenance_cost_fraction=value)
+        elif key == "electricity_price_usd_per_kwh":
+            econ = LCOEconomicParams(electricity_price_usd_per_kwh=value)
+        elif key == "c_acrylamide_usd_per_kg":
+            econ = LCOEconomicParams(c_acrylamide_usd_per_kg=value)
+        elif key == "c_additives_usd_per_kg_composite":
+            econ = LCOEconomicParams(c_additives_usd_per_kg_composite=value)
         else:
             raise ValueError(f"Unknown sweep parameter: {key}")
 
@@ -192,6 +248,57 @@ def make_sweep_params(
             0.7,
             1.0,
             base_econ.utilization_factor,
+        ),
+        SweepParam(
+            "water_price_usd_per_m3",
+            "Water price (USD/m³)",
+            1.0,
+            25.0,
+            _BASELINE_WATER_PRICE_USD_PER_M3,
+        ),
+        # --- Material ---
+        SweepParam("salt_to_polymer_ratio", "Salt:polymer ratio (S/L)", 1.0, 8.0, base_args.salt_loading),
+        SweepParam(
+            "c_acrylamide_usd_per_kg",
+            "Acrylamide price (USD/kg)",
+            0.5 * base_econ.c_acrylamide_usd_per_kg,
+            1.5 * base_econ.c_acrylamide_usd_per_kg,
+            base_econ.c_acrylamide_usd_per_kg,
+        ),
+        SweepParam(
+            "c_additives_usd_per_kg_composite",
+            "Additives price (USD/kg composite)",
+            0.5 * base_econ.c_additives_usd_per_kg_composite,
+            1.5 * base_econ.c_additives_usd_per_kg_composite,
+            base_econ.c_additives_usd_per_kg_composite,
+        ),
+        # --- Heat transfer / geometry ---
+        SweepParam("insulation_gap_mm", "Insulation gap (mm)", 1.0, 20.0, base_args.insulation_gap_mm),
+        SweepParam("fin_area_ratio", "Condenser fin area ratio", 3.0, 12.0, 7.0),
+        SweepParam("tilt_deg", "Tilt angle (deg)", 0.0, 60.0, base_args.tilt_deg),
+        # --- External / climate ---
+        SweepParam("temperature_c", "Ambient temperature (°C)", 10.0, 40.0, 25.0),
+        # --- Financial ---
+        SweepParam(
+            "total_investment_factor",
+            "Total investment factor",
+            0.7,
+            1.5,
+            base_econ.total_investment_factor,
+        ),
+        SweepParam(
+            "maintenance_cost_fraction",
+            "Maintenance cost (frac CAPEX/yr)",
+            0.02,
+            0.10,
+            base_econ.maintenance_cost_fraction,
+        ),
+        SweepParam(
+            "electricity_price_usd_per_kwh",
+            "Electricity price (USD/kWh)",
+            0.05,
+            0.30,
+            base_econ.electricity_price_usd_per_kwh,
         ),
     ]
 
@@ -279,7 +386,8 @@ def main() -> None:
     rows: list[dict] = []
     for i, combo in enumerate(combos, start=1):
         result = _apply_combo(combo, base_args, base_econ)
-        rows.append({**combo, **_metrics_from_result(result)})
+        water_price = combo.get("water_price_usd_per_m3", _BASELINE_WATER_PRICE_USD_PER_M3)
+        rows.append({**combo, **_metrics_from_result(result, water_price)})
         if i % max(1, n_runs // 10) == 0 or i == n_runs:
             print(f"  {i}/{n_runs} complete", flush=True)
 
@@ -291,6 +399,9 @@ def main() -> None:
         "lcow_usd_per_m3",
         "capex_usd_per_m3",
         "opex_usd_per_m3",
+        "npv_usd_per_m2",
+        "payback_years_simple",
+        "payback_years_discounted",
     ]
     with args.output.open("w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=fieldnames)

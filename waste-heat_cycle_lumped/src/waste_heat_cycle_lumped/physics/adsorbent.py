@@ -159,15 +159,20 @@ def m_ads_kg_s_m2(
 def m_des_kg_s_m2(
     *,
     temperature_c: float,
-    p_cond_pa: float,
+    t_cond_c: float,
     c_vac_kg_s_pa_m2: float,
     q_kg_kg: float | None = None,
     m_ads_kg_m2: float | None = None,
     max_depletion_s: float = 600.0,
 ) -> float:
-    """Vacuum desorption flux — Eq. massdes in governing_eq.tex."""
-    p_sat = saturation_vapor_pressure_pa(temperature_c)
-    delta_p = max(0.0, p_sat - p_cond_pa)
+    """Vacuum desorption flux — Eq. massdes in governing_eq.tex.
+
+    Driving potential uses saturation pressure at the condenser surface:
+    ΔP = P_sat(T_d) − P_sat(T_cond).
+    """
+    p_sat_des = saturation_vapor_pressure_pa(temperature_c)
+    p_sat_cond = saturation_vapor_pressure_pa(t_cond_c)
+    delta_p = max(0.0, p_sat_des - p_sat_cond)
     raw = max(0.0, c_vac_kg_s_pa_m2 * delta_p)
     if q_kg_kg is not None and m_ads_kg_m2 is not None and max_depletion_s > 0.0:
         avail_kg_m2 = max(0.0, q_kg_kg) * m_ads_kg_m2
@@ -197,14 +202,14 @@ def dq_dt_desorption(
     q_kg_kg: float,
     *,
     temperature_c: float,
-    p_cond_pa: float,
+    t_cond_c: float,
     c_vac_kg_s_pa_m2: float,
     props: MofProperties,
 ) -> float:
     """d q / dt (kg/kg/s) on desorbing contactor (negative when desorbing)."""
     m_des = m_des_kg_s_m2(
         temperature_c=temperature_c,
-        p_cond_pa=p_cond_pa,
+        t_cond_c=t_cond_c,
         c_vac_kg_s_pa_m2=c_vac_kg_s_pa_m2,
         q_kg_kg=q_kg_kg,
         m_ads_kg_m2=props.m_ads_kg_m2,

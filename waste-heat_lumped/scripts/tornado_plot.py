@@ -19,10 +19,9 @@ if str(_REPO) not in sys.path:
 _DEFAULT_INPUT = _REPO / "outputs" / "parameter_sweeps" / "parameter_sweep.csv"
 _DEFAULT_OUTPUT = _REPO / "outputs" / "tornado_plot" / "tornado_plot.png"
 
-_EXCLUDED_PARAMS = frozenset({"humidity_high", "relative_humidity"})
+_EXCLUDED_PARAMS: frozenset[str] = frozenset()
 _FAIL_LCO_THRESHOLD = 1e20
 _BAR_COLOR = "#20A387"
-_METRIC_LABEL = "LCOW (USD/m³)"
 
 _METRIC_COLUMNS = frozenset({
     "daily_yield_kg_m2",
@@ -30,21 +29,42 @@ _METRIC_COLUMNS = frozenset({
     "lcow_usd_per_m3",
     "capex_usd_per_m3",
     "opex_usd_per_m3",
+    "npv_usd_per_m2",
+    "payback_years_simple",
+    "payback_years_discounted",
 })
 
+_METRIC_LABELS: dict[str, str] = {
+    "lcow_usd_per_m3": "LCOW (USD/m³)",
+    "npv_usd_per_m2": "NPV (USD/m²)",
+    "payback_years_simple": "Simple payback (years)",
+    "payback_years_discounted": "Discounted payback (years)",
+    "daily_yield_kg_m2": "Daily yield (kg/m²)",
+    "thermal_efficiency": "Thermal efficiency",
+    "capex_usd_per_m3": "CAPEX (USD/m³)",
+    "opex_usd_per_m3": "OPEX (USD/m³)",
+}
+
 _PARAM_LABELS: dict[str, str] = {
-    "h_des_j_per_kg": "h_des\n(J/kg)",
+    "hydrogel_thickness_mm": "Hydrogel thickness\n(mm)",
     "salt_weight_factor": "Salt weight\nfactor",
     "hydrogel_lifetime_years": "Hydrogel lifetime\n(yr)",
-    "hydrogel_thickness_mm": "Hydrogel thickness\n(mm)",
+    "t_f_c": "Loop fluid setpoint\n(°C)",
+    "m_dot_f_kg_s_m2": "Loop flow\n(kg/s/m²)",
+    "ua_gel_w_k": "Loop→gel UA\n(W/K/m²)",
     "vapor_gap_mm": "Vapor gap\n(mm)",
-    "humidity_high": "Uptake RH",
-    "solar_irradiance_w_per_m2": "Solar GHI\n(W/m²)",
+    "t_amb_c": "Ambient temperature\n(°C)",
+    "relative_humidity": "Ambient RH",
     "h_amb_w_m2_k": "h_amb\n(W/m²K)",
     "discount_rate": "Discount rate",
     "device_lifetime_years": "Device lifetime\n(yr)",
     "utilization_factor": "Utilization\nfactor",
+    "water_price_usd_per_m3": "Water price\n(USD/m³)",
 }
+
+
+def _metric_label(metric: str) -> str:
+    return _METRIC_LABELS.get(metric, metric)
 
 
 def calculate_sensitivity(x1: float, y1: float, x2: float, y2: float) -> tuple[float, bool]:
@@ -206,10 +226,13 @@ def create_tornado_plot(
     target_col: str,
     title: str | None = None,
     param_name_mapping: dict[str, str] | None = None,
+    metric_label: str | None = None,
 ) -> tuple[plt.Figure | None, plt.Axes | None]:
     """Create tornado plot for sensitivity analysis results."""
     if title is None:
         title = "Parameter sensitivity"
+    if metric_label is None:
+        metric_label = _metric_label(target_col)
 
     if sensitivity_df.empty:
         print("No valid sensitivity data to plot")
@@ -266,7 +289,7 @@ def create_tornado_plot(
     ax.set_yticklabels(plot_df["display_name"], fontsize=16)
     ax.set_title(title, fontsize=20, fontweight="bold", pad=16)
     ax.set_xlabel(
-        f"% change in {_METRIC_LABEL}\nper % change in parameter",
+        f"% change in {metric_label}\nper % change in parameter",
         fontsize=18,
     )
     ax.axvline(x=0, color="black", linestyle="-", linewidth=0.8)
@@ -334,6 +357,7 @@ def main() -> None:
         args.metric,
         title="Parameter sensitivity",
         param_name_mapping=_PARAM_LABELS,
+        metric_label=_metric_label(args.metric),
     )
     if fig is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)

@@ -170,7 +170,6 @@ def _tracked_half_series(
             t_d_c=float(half.t_d_c[k]),
             t_cond_c=float(half.t_cond_c[k]),
             rh_amb=env.rh_amb,
-            p_cond_pa=config.p_cond_pa,
             c_vac_kg_s_pa_m2=ctrl_p.c_vac_base_kg_s_pa_m2,
             config=config,
         )
@@ -192,7 +191,6 @@ def _tracked_half_series(
             t_d_c=float(half.t_d_c[k]),
             t_cond_c=float(half.t_cond_c[k]),
             rh_amb=env.rh_amb,
-            p_cond_pa=config.p_cond_pa,
             c_vac_kg_s_pa_m2=controls.c_vac_kg_s_pa_m2,
             config=config,
             equalize=False,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import warnings
-from datetime import date, timedelta
+from datetime import date
 from pathlib import Path
 from typing import Literal
 
@@ -98,7 +98,9 @@ class WeatherClient:
                 session = requests_cache.CachedSession(
                     cache_name=str(Path(cache_dir) / "openmeteo_cache"),
                     backend="sqlite",
-                    expire_after=timedelta(hours=6),
+                    # Requests are always for a fixed, already-elapsed date range
+                    # (a past calendar year), so the archive response never changes.
+                    expire_after=requests_cache.NEVER_EXPIRE,
                 )
             except ImportError:
                 warnings.warn("requests-cache not installed; caching disabled.", stacklevel=2)

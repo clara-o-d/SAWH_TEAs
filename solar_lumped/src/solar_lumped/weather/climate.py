@@ -176,6 +176,26 @@ def mean_daily_max_irradiance_from_hourly(df: pd.DataFrame) -> float:
     return float(df[col].resample("D").max().mean())
 
 
+def day_weather_stats(day_df: pd.DataFrame) -> dict[str, float]:
+    """Mean and peak weather for one calendar day of raw Open-Meteo data."""
+    if day_df.empty:
+        raise ValueError("Cannot compute weather stats from empty day DataFrame.")
+    out: dict[str, float] = {}
+    if "relative_humidity_2m" in day_df.columns:
+        rh = day_df["relative_humidity_2m"].astype(float)
+        out["rh_avg_frac"] = float(rh.mean() / 100.0)
+        out["rh_peak_frac"] = float(rh.max() / 100.0)
+    if "temperature_2m" in day_df.columns:
+        temp = day_df["temperature_2m"].astype(float)
+        out["temp_avg_c"] = float(temp.mean())
+        out["temp_peak_c"] = float(temp.max())
+    if "shortwave_radiation" in day_df.columns:
+        solar = day_df["shortwave_radiation"].astype(float).clip(lower=0.0)
+        out["solar_avg_w_m2"] = float(solar.mean())
+        out["solar_peak_w_m2"] = float(solar.max())
+    return out
+
+
 def site_row_from_hourly(df: pd.DataFrame) -> dict[str, float]:
     """Mean daily diurnal extrema for SAWH site diagnostics."""
     rh_high, rh_low = diurnal_rh_from_hourly(df)

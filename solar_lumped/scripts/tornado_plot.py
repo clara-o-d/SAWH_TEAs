@@ -19,10 +19,16 @@ if str(_REPO) not in sys.path:
 _DEFAULT_INPUT = _REPO / "outputs" / "parameter_sweeps" / "parameter_sweep.csv"
 _DEFAULT_OUTPUT = _REPO / "outputs" / "tornado_plot" / "tornado_plot.png"
 
-_EXCLUDED_PARAMS = frozenset({"humidity_high", "relative_humidity"})
+_EXCLUDED_PARAMS = frozenset({"humidity_high", "relative_humidity", "swept_param"})
 _FAIL_LCO_THRESHOLD = 1e20
 _BAR_COLOR = "#20A387"
-_METRIC_LABEL = "LCOW (USD/m³)"
+
+_METRIC_LABELS: dict[str, str] = {
+    "lcow_usd_per_m3": "LCOW (USD/m³)",
+    "npv_usd_per_m2": "NPV (USD/m²)",
+    "payback_years_simple": "Simple payback (years)",
+    "payback_years_discounted": "Discounted payback (years)",
+}
 
 _METRIC_COLUMNS = frozenset({
     "daily_yield_kg_m2",
@@ -30,6 +36,9 @@ _METRIC_COLUMNS = frozenset({
     "lcow_usd_per_m3",
     "capex_usd_per_m3",
     "opex_usd_per_m3",
+    "npv_usd_per_m2",
+    "payback_years_simple",
+    "payback_years_discounted",
 })
 
 _PARAM_LABELS: dict[str, str] = {
@@ -44,6 +53,17 @@ _PARAM_LABELS: dict[str, str] = {
     "discount_rate": "Discount rate",
     "device_lifetime_years": "Device lifetime\n(yr)",
     "utilization_factor": "Utilization\nfactor",
+    "water_price_usd_per_m3": "Water price\n(USD/m³)",
+    "salt_to_polymer_ratio": "Salt:polymer\nratio (S/L)",
+    "c_acrylamide_usd_per_kg": "Acrylamide price\n(USD/kg)",
+    "c_additives_usd_per_kg_composite": "Additives price\n(USD/kg composite)",
+    "insulation_gap_mm": "Insulation gap\n(mm)",
+    "fin_area_ratio": "Condenser fin\narea ratio",
+    "tilt_deg": "Tilt angle\n(deg)",
+    "temperature_c": "Ambient temperature\n(°C)",
+    "total_investment_factor": "Total investment\nfactor",
+    "maintenance_cost_fraction": "Maintenance cost\n(frac CAPEX/yr)",
+    "electricity_price_usd_per_kwh": "Electricity price\n(USD/kWh)",
 }
 
 
@@ -206,6 +226,7 @@ def create_tornado_plot(
     target_col: str,
     title: str | None = None,
     param_name_mapping: dict[str, str] | None = None,
+    metric_label: str | None = None,
 ) -> tuple[plt.Figure | None, plt.Axes | None]:
     """Create tornado plot for sensitivity analysis results."""
     if title is None:
@@ -215,11 +236,19 @@ def create_tornado_plot(
         print("No valid sensitivity data to plot")
         return None, None
 
+    if metric_label is None:
+        metric_label = _METRIC_LABELS.get(target_col, target_col)
+
     plot_df = sensitivity_df.copy()
     plot_df["variable"] = plot_df["variable"].astype(str).str.lstrip("# ").str.strip()
     plot_df = plot_df.sort_values(by="max_abs_effect", ascending=True)
 
-    fig, ax = plt.subplots(figsize=(6, 6))
+    n_bars = len(plot_df)
+    # Scale figure height (and font sizes) with the number of parameters so
+    # labels don't overlap once a sweep has more than a handful of rows.
+    fig_height = max(5.0, 0.5 * n_bars + 1.5)
+    label_fontsize = 14 if n_bars <= 12 else max(8, 14 - 0.3 * (n_bars - 12))
+    fig, ax = plt.subplots(figsize=(8, fig_height))
     ax.set_frame_on(False)
 
     y_pos = np.arange(len(plot_df))
@@ -263,15 +292,16 @@ def create_tornado_plot(
     )
 
     ax.set_yticks(y_pos)
-    ax.set_yticklabels(plot_df["display_name"], fontsize=16)
-    ax.set_title(title, fontsize=20, fontweight="bold", pad=16)
+    ax.set_yticklabels(plot_df["display_name"], fontsize=label_fontsize)
+    ax.set_ylim(-0.6, n_bars - 0.4)
+    ax.set_title(title, fontsize=18, fontweight="bold", pad=14)
     ax.set_xlabel(
-        f"% change in {_METRIC_LABEL}\nper % change in parameter",
-        fontsize=18,
+        f"% change in {metric_label}\nper % change in parameter",
+        fontsize=13,
     )
     ax.axvline(x=0, color="black", linestyle="-", linewidth=0.8)
     ax.grid(True, alpha=0.3, axis="x")
-    ax.tick_params(axis="x", labelsize=16)
+    ax.tick_params(axis="x", labelsize=12)
 
     ax.legend(
         handles=[
@@ -279,7 +309,7 @@ def create_tornado_plot(
             Patch(facecolor=_BAR_COLOR, alpha=0.7, hatch="///", label="Negative"),
         ],
         loc="lower right",
-        fontsize=16,
+        fontsize=12,
     )
     plt.tight_layout()
     return fig, ax
@@ -329,11 +359,13 @@ def main() -> None:
     sensitivity_df.to_csv(table_csv, index=False)
     print(f"Sensitivity analysis results saved to {table_csv!r}")
 
+    metric_label = _METRIC_LABELS.get(args.metric, args.metric)
     fig, _ = create_tornado_plot(
         sensitivity_df,
         args.metric,
         title="Parameter sensitivity",
         param_name_mapping=_PARAM_LABELS,
+        metric_label=metric_label,
     )
     if fig is not None:
         args.output.parent.mkdir(parents=True, exist_ok=True)

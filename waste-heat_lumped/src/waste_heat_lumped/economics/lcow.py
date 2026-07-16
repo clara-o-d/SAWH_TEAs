@@ -5,6 +5,11 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from waste_heat_lumped.economics.parasitic import (
+    default_electrical_loads,
+    parasitic_electricity_breakdown,
+    total_parasitic_electricity_annual_usd_per_m2,
+)
 from waste_heat_lumped.economics.params import (
     C_DEVICE_USD,
     DEVICE_BOM_USD_PER_M2,
@@ -104,6 +109,10 @@ def lcow_from_daily_yield(
         * 365.0
         / 1000.0
     )
+    annual_parasitic_electricity = total_parasitic_electricity_annual_usd_per_m2(
+        default_electrical_loads(),
+        econ.electricity_price_usd_per_kwh,
+    )
     annual_extra_cycle_energy = econ.annual_extra_cycle_energy_cost_usd(cycles_per_day)
 
     annual_cost_usd = (
@@ -112,6 +121,7 @@ def lcow_from_daily_yield(
         + econ.maintenance_cost_fraction * econ.total_investment_factor * C_DEVICE_USD
         + econ.energy_cost_usd_per_year
         + annual_electricity_cost
+        + annual_parasitic_electricity
         + annual_extra_cycle_energy
     )
     if not math.isfinite(annual_cost_usd):
@@ -202,6 +212,11 @@ def lcow_cost_breakdown_from_daily_yield(
     annual_extra = econ.annual_extra_cycle_energy_cost_usd(cycles_per_day)
     segments.append(("Fixed energy", _lcow_seg(econ.energy_cost_usd_per_year)))
     segments.append(("Electricity (active heat)", _lcow_seg(annual_electricity_cost)))
+    for label, annual_usd in parasitic_electricity_breakdown(
+        default_electrical_loads(),
+        econ.electricity_price_usd_per_kwh,
+    ):
+        segments.append((label, _lcow_seg(annual_usd)))
     segments.append(("Extra cycling energy", _lcow_seg(annual_extra)))
 
     return LcowCostBreakdown(items=tuple(segments))

@@ -170,14 +170,13 @@ def _hydrogel_desorption_rates(
     *,
     t_c: float,
     t_cond_c: float,
-    p_cond_pa: float,
     c_vac: float,
     params: MassTransferParams,
 ) -> tuple[float, float, float]:
     avail = WATER_MOLAR_MASS_KG_MOL * max(0.0, c_w) * h_m
     m_vac = vacuum_m_des_kg_s_m2(
         temperature_c=t_c,
-        p_cond_pa=p_cond_pa,
+        t_cond_c=t_cond_c,
         c_vac_kg_s_pa_m2=c_vac,
         q_kg_kg=None,
         m_ads_kg_m2=None,
@@ -229,8 +228,8 @@ def _mof_mass_rates(
     *,
     t_a: float,
     t_d: float,
+    t_cond_c: float,
     rh: float,
-    p_cond_pa: float,
     c_vac: float,
     props: MofProperties,
 ) -> tuple[float, float, float, float]:
@@ -239,13 +238,13 @@ def _mof_mass_rates(
     dq_d = dq_dt_desorption(
         q_d,
         temperature_c=t_d,
-        p_cond_pa=p_cond_pa,
+        t_cond_c=t_cond_c,
         c_vac_kg_s_pa_m2=c_vac,
         props=props,
     )
     m_des = vacuum_m_des_kg_s_m2(
         temperature_c=t_d,
-        p_cond_pa=p_cond_pa,
+        t_cond_c=t_cond_c,
         c_vac_kg_s_pa_m2=c_vac,
         q_kg_kg=q_d,
         m_ads_kg_m2=props.m_ads_kg_m2,
@@ -263,7 +262,6 @@ def _natural_mass_rates(
     t_d_c: float,
     t_cond_c: float,
     rh_amb: float,
-    p_cond_pa: float,
     c_vac_kg_s_pa_m2: float,
     config: DeviceConfig,
 ) -> SorbentMassRates:
@@ -278,7 +276,6 @@ def _natural_mass_rates(
             max(h_d, h_min),
             t_c=t_d_c,
             t_cond_c=t_cond_c,
-            p_cond_pa=p_cond_pa,
             c_vac=c_vac_kg_s_pa_m2,
             params=params,
         )
@@ -290,8 +287,8 @@ def _natural_mass_rates(
         loading_d,
         t_a=t_a_c,
         t_d=t_d_c,
+        t_cond_c=t_cond_c,
         rh=rh_amb,
-        p_cond_pa=p_cond_pa,
         c_vac=c_vac_kg_s_pa_m2,
         props=props,
     )
@@ -335,7 +332,6 @@ def mass_rates(
     t_d_c: float,
     t_cond_c: float,
     rh_amb: float,
-    p_cond_pa: float,
     c_vac_kg_s_pa_m2: float,
     config: DeviceConfig,
     equalize: bool = True,
@@ -349,7 +345,6 @@ def mass_rates(
         t_d_c=t_d_c,
         t_cond_c=t_cond_c,
         rh_amb=rh_amb,
-        p_cond_pa=p_cond_pa,
         c_vac_kg_s_pa_m2=c_vac_kg_s_pa_m2,
         config=config,
     )
@@ -368,7 +363,6 @@ def fluxes_for_control(
     t_d_c: float,
     t_cond_c: float,
     rh_amb: float,
-    p_cond_pa: float,
     c_vac_kg_s_pa_m2: float,
     config: DeviceConfig,
 ) -> tuple[float, float]:
@@ -381,7 +375,6 @@ def fluxes_for_control(
         t_d_c=t_d_c,
         t_cond_c=t_cond_c,
         rh_amb=rh_amb,
-        p_cond_pa=p_cond_pa,
         c_vac_kg_s_pa_m2=c_vac_kg_s_pa_m2,
         config=config,
         equalize=False,
