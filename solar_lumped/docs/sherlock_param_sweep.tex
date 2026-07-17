@@ -257,20 +257,25 @@ a slice of \texttt{SLURM\_ARRAY\_TASK\_ID} (e.g. \texttt{--array=0-9999}, \textt
 \subsection{Weather prefetch}\label{sec:weather}
 Each site needs one Open-Meteo fetch (cached permanently now that \texttt{WeatherClient}'s cache
 TTL is fixed -- see repository history). 1405 concurrent Sherlock nodes must \emph{not} each
-independently hit the API: prefetch/cache all 1405 sites in one throttled pass first (locally,
-reusing what's already cached, or from a single Sherlock login/dev node), then ship the resulting
-\texttt{.weather\_cache} directory to \texttt{\$GROUP\_HOME} before submitting the array. The
-full sweep should then make zero network calls. \texttt{--combo-limit 0} runs the weather
-fetch and builds the monthly profiles but evaluates no combos (confirmed: $\sim$\SI{1}{\second}
-per site once cached), making it a free prefetch-only invocation with no extra tooling needed:
+independently hit the API: prefetch/cache all 1405 sites in one throttled pass first (locally, or
+from a single Sherlock node), then ship the resulting \texttt{.weather\_cache} directory to
+\texttt{\$GROUP\_HOME} before submitting the array. The full sweep should then make zero network
+calls.
+
+Use \texttt{scripts/prefetch\_weather.py}, not a shell loop calling
+\texttt{grid\_param\_sweep.py} once per site: building the land/country-exclusion geometry and
+importing the physics stack costs $\sim$\SI{1.4}{\second} and is identical for every site, but a
+subprocess-per-site loop pays that cost 1405 times. \texttt{prefetch\_weather.py} pays it once
+and fetches every site in the same process and connection pool -- measured $\sim$6$\times$
+faster overall (a 1405-site run drops from $\sim$30+ minutes to $\sim$5--10 minutes):
 
 \begin{verbatim}
-for i in $(seq 0 1404); do
-  python scripts/grid_param_sweep.py --site-index $i --step 3 --combo-limit 0 \
-    --output-csv /dev/null
-  sleep 0.5
-done
+python scripts/prefetch_weather.py --step 3
 \end{verbatim}
+
+If running this on Sherlock itself rather than locally, use an interactive \texttt{sh\_dev}
+session rather than the login node (it's light on CPU but runs for several minutes, which is
+what \texttt{sh\_dev} is for).
 
 \subsection{Merging outputs}\label{sec:merge}
 The array produces up to 21,075 separate CSV files (one per (site, chunk), all sharing the same
