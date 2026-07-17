@@ -34,6 +34,20 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--year", type=int, default=2024)
     p.add_argument("--cache-dir", type=str, default=str(_REPO / ".weather_cache"))
     p.add_argument("--sleep", type=float, default=0.3, help="Seconds between requests")
+    p.add_argument(
+        "--cooldown-base",
+        type=float,
+        default=15.0,
+        help="Seconds to pause after a failed fetch (doubles per consecutive failure, "
+        "capped at --cooldown-max) before retrying the same site.",
+    )
+    p.add_argument("--cooldown-max", type=float, default=180.0)
+    p.add_argument(
+        "--max-retries-per-site",
+        type=int,
+        default=3,
+        help="Retries (with cooldown between) for one site before giving up and moving on.",
+    )
     p.add_argument("--limit", type=int, default=None, help="Only the first N sites (for testing)")
     args = p.parse_args(argv)
 
@@ -46,16 +60,31 @@ def main(argv: list[str] | None = None) -> int:
 
     t0 = time.perf_counter()
     n_ok = n_fail = 0
+    consecutive_fails = 0
     for i, (lat, lon) in enumerate(points, start=1):
-        try:
+        for attempt in range(1, args.max_retries_per_site + 1):
             try:
-                client.get_historical_forecast_site_weather(lat, lon, start, end)
-            except Exception:
-                client.get_historical(lat, lon, start, end)
-            n_ok += 1
-        except Exception as exc:
-            n_fail += 1
-            print(f"  [{i}/{len(points)}] ({lat:+.4f}, {lon:+.4f}) FAILED: {exc}", flush=True)
+                try:
+                    client.get_historical_forecast_site_weather(lat, lon, start, end)
+                except Exception:
+                    client.get_historical(lat, lon, start, end)
+                n_ok += 1
+                consecutive_fails = 0
+                break
+            except Exception as exc:
+                consecutive_fails += 1
+                cooldown = min(args.cooldown_base * (2 ** (consecutive_fails - 1)), args.cooldown_max)
+                if attempt < args.max_retries_per_site:
+                    print(
+                        f"  [{i}/{len(points)}] ({lat:+.4f}, {lon:+.4f}) attempt {attempt} failed "
+                        f"({exc}); cooling down {cooldown:.0f}s before retry ({consecutive_fails} "
+                        "consecutive failure(s))",
+                        flush=True,
+                    )
+                    time.sleep(cooldown)
+                else:
+                    n_fail += 1
+                    print(f"  [{i}/{len(points)}] ({lat:+.4f}, {lon:+.4f}) FAILED: {exc}", flush=True)
         if i % 50 == 0 or i == len(points):
             print(
                 f"  [{i}/{len(points)}] {n_ok} ok, {n_fail} failed ({time.perf_counter() - t0:.0f}s elapsed)",
