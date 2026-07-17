@@ -1,0 +1,347 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath, amssymb}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{siunitx}
+\usepackage{hyperref}
+
+\title{Sherlock Plan: Global Grid LiCl Device-Parameter Sweep}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section*{Reference and scope}
+
+This document describes the plan for \texttt{solar\_lumped/scripts/grid\_param\_sweep.py}: a
+full-factorial device-parameter sweep at every land point of a \SI{3}{\degree} lat/lon grid,
+using the Wilson lumped SAWH model with a LiCl salt bed. One invocation of the script runs the
+full parameter grid for a single site; the Sherlock job is a SLURM array with one task per site.
+
+\section{Fixed parameters}\label{sec:fixed-above}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Parameter} & \textbf{Value} & \textbf{Notes} \\
+\midrule
+Salt & LiCl & only candidate; no feasibility fallback to other salts \\
+Salt:polymer ratio & 4.0 & \\
+Insulation gap & \SI{5}{\milli\meter} & \\
+Vapor gap & \SI{40}{\milli\meter} & fixed, not swept -- see Section~\ref{sec:swept} \\
+Tilt & \SI{35}{\degree} & \\
+Weather year & 2024 & Open-Meteo historical-forecast API, cached locally \\
+Grid spacing & \SI{3}{\degree} & land points only (Natural Earth 110m polygons) \\
+Excluded region & Canada, Russia above \SI{60}{\degree}N & country polygons, not just a \\
+ & & latitude line -- Alaska/Greenland/Scandinavia unaffected \\
+Grid site count & 1405 & lat $\in[-54,72]$ minus the excluded region; computed at run time \\
+ & & via \texttt{grid\_land\_points} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\section{Swept parameters}\label{sec:swept}
+
+Four axes, $5\times3\times3\times3 = 135$ combinations per site. Vapor gap was considered as a
+fifth axis but dropped from the sweep (fixed at the \SI{40}{\milli\meter} baseline instead --
+Section~\ref{sec:fixed-above}) to keep the grid smaller. Two of the remaining swept parameters
+(absorber emissivity, glass transmission) were not previously exposed by any script -- they are
+hardcoded constants (\texttt{table\_s3.EPS\_ABS}, \texttt{table\_s3.TAU\_GLASS}) unless overridden
+via an explicit \texttt{DeviceThermalParams}, which is how \texttt{grid\_param\_sweep.py} wires
+them in.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}llll@{}}
+\toprule
+\textbf{Parameter} & \textbf{CLI flag} & \textbf{Values} & \textbf{Baseline} \\
+\midrule
+Hydrogel thickness (mm) & \texttt{--hydrogel-thickness-mm} & 1.0, 3.25, 5.5, 7.75, 10.0 & 4.0 \\
+Absorber emissivity $\varepsilon_{abs}$ & \texttt{--eps-abs} & 0.85, 0.90, 0.95 & 0.95 \\
+Glass transmittance $\tau_{glass}$ & \texttt{--tau-glass} & 0.80, 0.85, 0.90 & 0.90 \\
+Condenser fin area ratio & \texttt{--fin-area-ratio} & 3.0, 7.1, 12.0 & 7.1 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Total problem size: $1405 \times 135 = 189{,}675$ independent (site, combo) evaluations.
+
+\section{Time resolution: monthly, not single mean-day}\label{sec:resolution}
+
+\subsection{Decision}
+The default (\texttt{--resolution monthly}) simulates 12 Aitken-converged representative mean
+days per site per combo (one per calendar month, day-weighted average), \emph{not} a single
+annual mean day. \texttt{--resolution single} (12$\times$ cheaper) remains available for quick
+previews, but is \emph{not} used for the production sweep.
+
+\subsection{Why}
+This sweep feeds a map that must be accurate everywhere -- not a search that only needs to find
+the best few sites, where errors at non-competitive sites could be waved away. That changes the
+trade-off. Validated by simulating the real day-by-day sequential year (365/366 days, gel state
+carried forward) against the single mean-day and monthly-mean-day shortcuts, at three test
+climates, after fixing \texttt{find\_cyclic\_state} to actually converge to the steady periodic
+state (Aitken $\Delta^2$ extrapolation) rather than a fixed, possibly under-converged, warmup
+count:
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+\textbf{Site} & \textbf{Annual (kg/m\textsuperscript{2})} & \textbf{1 mean-day} & \textbf{12 months} & \textbf{52 weeks} \\
+\midrule
+Patagonian coast (high seasonal variance) & 0.3809 & 0.3010 (-21.0\%) & 0.3287 (-13.7\%) & 0.3321 (-12.8\%) \\
+Atacama desert (low seasonal variance) & 1.9052 & 1.9018 (-0.2\%) & 1.9011 (-0.2\%) & 1.9007 (-0.2\%) \\
+Cambridge, MA (moderate seasonal variance) & 0.9032 & 0.7393 (-18.1\%) & 0.8606 (-4.7\%) & not run \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+A single mean day is off by double digits ($-21\%$, $-18\%$) at exactly the sites -- high
+seasonal variance -- where a map most needs to be trustworthy; monthly closes most of that gap
+(to $-14\%$ and $-5\%$) for $12\times$ the compute, which is the right price for a map product.
+Weekly buys almost nothing further over monthly (another $4.3\times$ cost for $\lesssim 1$
+percentage point at Patagonia, confirmed twice); it is not used. Monthly is the sweet spot:
+close to full-annual accuracy everywhere, at a small fraction of full-annual's cost
+($\sim$33$\times$ cheaper -- Section~\ref{sec:cost}).
+
+If a specific region still needs full-annual-level accuracy after seeing the monthly map (e.g. a
+published headline number, or a site under closer scrutiny), rerun just that site with
+\texttt{--resolution single} swapped for a direct call to
+\texttt{scripts/compare\_annual\_vs\_mean\_day.py} (Approach A), which is affordable one site at a
+time even though it is not affordable across the whole grid.
+
+\subsection{Numerics: Aitken convergence and the 2-cycle fallback}
+The steady periodic post-desorption state $(c_w, H)$ for a repeated day is found by
+\texttt{find\_cyclic\_state} (restarted vector Aitken $\Delta^2$ extrapolation), typically
+converging in 3--6 rounds (2 real one-day simulations per round) instead of the 100+ cycles
+plain fixed-point warmup can need at strongly seasonal sites. Some (profile, config) pairs have
+no single fixed point at all -- the one-cycle map bifurcates into a stable period-2 orbit (an
+alternating wetter-day/drier-day pattern under the repeated forcing). This is detected as two
+consecutive rounds where the relative step fails to shrink by at least half, and handled by
+returning the average of the two alternating states (with a one-line log message) rather than an
+arbitrary snapshot from whichever round happened to hit the round cap.
+
+\section{What gets saved}
+
+One CSV row per (site, combo), appended incrementally (not buffered), so a preempted job can
+resume without redoing completed combos:
+
+\begin{center}
+\small
+\texttt{lat, lon, salt, hydrogel\_thickness\_mm, eps\_abs, tau\_glass, fin\_area\_ratio,
+vapor\_gap\_mm, warmup\_method, resolution, mean\_yield\_kg\_m2, mean\_eta\_thermal, n\_periods}
+\end{center}
+
+This is water yield and thermal efficiency only -- no LCOW or economics. That can be computed
+from yield as a separate downstream step, the same way \texttt{lcow\_full\_global\_map.py} does.
+
+\section{Smoke test (already run locally)}
+
+Before any Sherlock submission, the following was validated on this machine:
+
+\begin{enumerate}
+  \item \textbf{Plumbing check} (no ODE, instant): built device configs for two combos at the
+  extremes of all four swept axes plus the fixed vapor gap and confirmed each reaches
+  \texttt{DeviceConfig} / \texttt{DeviceThermalParams} as the intended value. Passed.
+  \item \textbf{End-to-end run}, Atacama desert site (\ang{-23.6}, \ang{-70.4}), 2 combos
+  (\texttt{eps\_abs} = 0.90 and 0.95, everything else at baseline), \texttt{--resolution monthly}
+  (the production default):
+\begin{verbatim}
+python scripts/grid_param_sweep.py \
+  --lat-lon -23.6 -70.4 \
+  --hydrogel-thickness-mm 4.0 --eps-abs 0.90 0.95 \
+  --tau-glass 0.85 --fin-area-ratio 7.1 \
+  --output-csv outputs/smoke_test.csv
+\end{verbatim}
+  Result: combo 1 (eps\_abs=0.90) $\to$ yield \SI{1.707476}{\kilo\gram\per\meter\squared} in
+  \SI{386.9}{\second}; combo 2 (eps\_abs=0.95) $\to$ yield
+  \SI{1.800478}{\kilo\gram\per\meter\squared} in \SI{318.2}{\second}. Higher absorber emissivity
+  correctly gives higher yield and higher thermal efficiency -- the direction physics predicts,
+  confirming the full chain (weather fetch $\to$ 12 monthly mean-day profiles $\to$ Aitken steady
+  state per month, day-weighted $\to$ yield) is wired correctly, not just that the code runs
+  without error. The 2-cycle fallback (Section~\ref{sec:resolution}) fired on 3 of the 24
+  month-evaluations across the two combos, each logged with its stall value and round number.
+
+\end{enumerate}
+
+\subsection{Sherlock-side smoke test (to run there)}
+The only thing not yet validated is that this behaves identically on the cluster. A single-task
+array reproducing the exact run above:
+
+\begin{verbatim}
+ml python/3.12.1 uv
+uv venv && source .venv/bin/activate
+uv pip install numpy scipy pandas requests-cache retry-requests shapely cartopy
+
+sbatch <<'EOF'
+#!/bin/bash
+#SBATCH --job-name=sawh-smoke
+#SBATCH --time=00:20:00
+#SBATCH --cpus-per-task=1
+#SBATCH --mem-per-cpu=4G
+#SBATCH --partition=serc
+source .venv/bin/activate
+export PYTHONUNBUFFERED=True
+python scripts/grid_param_sweep.py \
+  --lat-lon -23.6 -70.4 \
+  --hydrogel-thickness-mm 4.0 --eps-abs 0.90 0.95 \
+  --tau-glass 0.85 --fin-area-ratio 7.1 \
+  --output-csv outputs/smoke_test_sherlock.csv
+EOF
+\end{verbatim}
+
+Expected: two rows, yields matching \num{1.707476} / \SI{1.800478}{\kilo\gram\per\meter\squared}
+(exactly, since this is deterministic given the same cached weather and the same code), total
+runtime around \SI{12}{\minute} (matches the local measurement above; scale \texttt{--time} up
+if the cluster's per-core throughput is slower). \textbf{This step needs the weather already
+cached} -- see Section~\ref{sec:weather} -- otherwise it will additionally pay one Open-Meteo
+fetch.
+
+\section{Full sweep}
+
+\subsection{Job structure}
+\textbf{One array task per site running all 135 combos serially does not work}: at the measured
+per-combo cost (Section~\ref{sec:cost}), one site takes 14.2--49.6 \emph{hours} serially, far
+beyond any reasonable single-task \texttt{--time}. Each site's 135 combos are instead split into
+15 chunks of 9 combos (135 divides evenly), so each array task is one (site, chunk) pair costing
+roughly \SI{0.95}{}--\SI{3.31}{\hour}. \texttt{--combo-offset}/\texttt{--combo-limit} (added to
+\texttt{grid\_param\_sweep.py} for this) slice the site's combo grid; the two array-index
+components are recovered from a single flattened SLURM index via integer div/mod:
+
+\begin{verbatim}
+#!/bin/bash
+#SBATCH --job-name=sawh-sweep
+#SBATCH --array=0-21074%300
+#SBATCH --time=06:00:00
+#SBATCH --cpus-per-task=1
+#SBATCH --mem-per-cpu=4G
+#SBATCH --partition=owners
+
+N_CHUNKS_PER_SITE=15
+CHUNK_SIZE=9
+SITE_INDEX=$(( SLURM_ARRAY_TASK_ID / N_CHUNKS_PER_SITE ))
+CHUNK_INDEX=$(( SLURM_ARRAY_TASK_ID % N_CHUNKS_PER_SITE ))
+COMBO_OFFSET=$(( CHUNK_INDEX * CHUNK_SIZE ))
+
+source .venv/bin/activate
+export PYTHONUNBUFFERED=True
+python scripts/grid_param_sweep.py \
+  --site-index $SITE_INDEX --step 3 \
+  --combo-offset $COMBO_OFFSET --combo-limit $CHUNK_SIZE \
+  --cache-dir $GROUP_HOME/.weather_cache \
+  --output-csv outputs/grid_sweep/site_${SITE_INDEX}_chunk_${CHUNK_INDEX}.csv --resume
+EOF
+\end{verbatim}
+
+\texttt{\%300} throttles to 300 concurrent tasks regardless of how many are queued; raise or
+lower it based on how the partition responds. Each (site, chunk) gets its own output file --
+\emph{not} one shared file per site -- because multiple chunks of the same site can run
+concurrently on different nodes, and concurrent appends/header-writes to one shared file would
+race. \texttt{--resume} makes a preempted/resubmitted task skip combos already written in its
+own chunk file, so preemption on \texttt{owners} costs at most the in-progress combo, not the
+whole chunk. \texttt{--time=06:00:00} leaves nearly $2\times$ margin over the slowest measured
+chunk (\SI{3.31}{\hour}); tighten it once more of the grid's actual climate spread is known.
+
+\textbf{Check the array size against this cluster's limit before submitting}: 21,075 elements in
+one \texttt{--array} directive may exceed the configured \texttt{MaxArraySize} (commonly a few
+thousand by default). Check with \texttt{scontrol show config | grep -i MaxArraySize} on a login
+node; if 21,075 exceeds it, split the submission into several \texttt{sbatch} calls each covering
+a slice of \texttt{SLURM\_ARRAY\_TASK\_ID} (e.g. \texttt{--array=0-9999}, \texttt{--array=10000-19999},
+\texttt{--array=20000-21074}) rather than one call.
+
+\subsection{Weather prefetch}\label{sec:weather}
+Each site needs one Open-Meteo fetch (cached permanently now that \texttt{WeatherClient}'s cache
+TTL is fixed -- see repository history). 1405 concurrent Sherlock nodes must \emph{not} each
+independently hit the API: prefetch/cache all 1405 sites in one throttled pass first (locally,
+reusing what's already cached, or from a single Sherlock login/dev node), then ship the resulting
+\texttt{.weather\_cache} directory to \texttt{\$GROUP\_HOME} before submitting the array. The
+full sweep should then make zero network calls. \texttt{--combo-limit 0} runs the weather
+fetch and builds the monthly profiles but evaluates no combos (confirmed: $\sim$\SI{1}{\second}
+per site once cached), making it a free prefetch-only invocation with no extra tooling needed:
+
+\begin{verbatim}
+for i in $(seq 0 1404); do
+  python scripts/grid_param_sweep.py --site-index $i --step 3 --combo-limit 0 \
+    --output-csv /dev/null
+  sleep 0.5
+done
+\end{verbatim}
+
+\subsection{Merging outputs}\label{sec:merge}
+The array produces up to 21,075 separate CSV files (one per (site, chunk), all sharing the same
+header). Concatenate them into one dataset for mapping once the array finishes:
+
+\begin{verbatim}
+n=$(ls outputs/grid_sweep/site_*_chunk_*.csv 2>/dev/null | wc -l)
+echo "found $n of 21075 expected chunk files"
+
+{ head -1 "$(ls outputs/grid_sweep/site_*_chunk_*.csv | head -1)"
+  for f in outputs/grid_sweep/site_*_chunk_*.csv; do tail -n +2 "$f"; done
+} > outputs/grid_sweep_full.csv
+\end{verbatim}
+
+Check the file count before treating the merge as final -- a short count means some array tasks
+haven't completed (still queued, still running, or failed and need resubmitting), not that the
+sweep silently skipped anything. Row count in the merged file should be at most $189{,}675$
+(fewer only if some chunks are still outstanding; \texttt{--resume} prevents it from ever being
+more).
+
+\subsection{Expected cost}\label{sec:cost}
+Measured per-combo cost at \texttt{--resolution monthly} (post 2-cycle fix): \SI{380.0}{\second}
+(Atacama desert, low-seasonal-variance) to \SI{1323.4}{\second} (Cambridge, moderate-seasonal-
+variance) -- roughly a $3.5\times$ spread by climate, consistent with everything else observed
+in this project. Total: $189{,}675$ units (1405 sites $\times$ 135 combos).
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lrrrr@{}}
+\toprule
+\textbf{Cost basis} & \textbf{Core-hours} & \textbf{@200 cores} & \textbf{@500 cores} & \textbf{@1000 cores} \\
+\midrule
+Fast/typical (\SI{380.0}{\second}/combo) & 20{,}021 & 100.1 h & 40.0 h & 20.0 h \\
+Slow (\SI{1323.4}{\second}/combo) & 69{,}727 & 348.6 h & 139.5 h & 69.7 h \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+So: realistically \textbf{20{,}000--70{,}000 core-hours}, i.e. roughly 1--3 days at 1000
+concurrent cores, or under 6 days at 500 cores in the typical (non-Cambridge-like) case. Dropping
+vapor gap from the sweep (Section~\ref{sec:swept}, $405\to135$ combos) and excluding northern
+Canada/Russia (Section~\ref{sec:fixed-above}, $1635\to1405$ sites) already cut this from what it
+would otherwise have been; monthly over single (Section~\ref{sec:resolution}) costs $12\times$
+more than the cheapest option, but buys the accuracy the map actually needs.
+
+\subsection{No GPU}
+This code is scalar SciPy (\texttt{solve\_ivp}, Radau/BDF methods) -- single-threaded CPU work,
+no GPU path exists. Target CPU-only allocation on \texttt{serc}/\texttt{owners}; do not request
+A100 nodes for this job.
+
+\section{Open items / caveats}
+\begin{itemize}
+  \item Per-site cost varies by climate; the $3.5\times$ spread above is from only 2 sampled
+  sites out of 1405 -- treat the cost table as order-of-magnitude, not a tight bound.
+  \item \texttt{find\_cyclic\_state}'s 2-cycle fallback logs a one-line warning whenever it
+  fires (it fired 2--4 times per combo at the two sites tested here); the full sweep's logs give
+  a free count of how often the grid actually hits this bifurcation, which was previously
+  unknown.
+  \item Vapor gap is fixed at the \SI{40}{\milli\meter} baseline rather than swept. If it turns
+  out to matter for the map, add it back as a fifth axis at the cost of another $\sim3\times$
+  (135$\to$405 combos).
+  \item Northern Canada and Russia above \SI{60}{\degree}N are excluded by country polygon, not
+  just a latitude line (Section~\ref{sec:fixed-above}) -- Alaska, Greenland, Iceland, and
+  Scandinavia's far north are still included. Pass
+  \texttt{exclude\_country\_above\_lat=\{\}} to \texttt{grid\_land\_points} to disable this and
+  restore the full 1635-site grid if that exclusion turns out to be unwanted.
+  \item If a specific site needs full-annual-level accuracy after seeing the monthly map, rerun
+  it directly with \texttt{compare\_annual\_vs\_mean\_day.py} rather than resubmitting the whole
+  grid at annual resolution ($\sim$33$\times$ monthly's cost, weeks of wall-clock even at large
+  core counts).
+\end{itemize}
+
+\end{document}

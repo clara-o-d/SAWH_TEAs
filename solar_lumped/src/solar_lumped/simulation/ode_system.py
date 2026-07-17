@@ -720,6 +720,102 @@ def warmup_to_cyclic_state(
     return cw, h
 
 
+def find_cyclic_state(
+    profile: DailyWeatherProfile,
+    config: DeviceConfig,
+    *,
+    c_w_initial: float | None = None,
+    h_initial: float | None = None,
+    tol: float = 1e-6,
+    max_rounds: int = 10,
+    stall_ratio: float = 0.5,
+    stall_rounds: int = 2,
+    verbose: bool = True,
+) -> tuple[float, float]:
+    """Find the steady periodic post-desorption (c_w, H) state for a profile
+    repeated indefinitely, without brute-force warmup cycling.
+
+    Plain fixed-point iteration (``warmup_to_cyclic_state``) can need 100+
+    cycles to converge at sites where the one-cycle map's slowest eigenvalue
+    is close to 1 (e.g. profiles averaged from strongly seasonal weather).
+    This instead accelerates convergence with restarted vector Aitken Δ²
+    extrapolation: each round applies the real map twice, then extrapolates
+    the fixed point from those two real evaluations (no derivative estimate,
+    so no finite-difference noise), typically converging in ~3-6 rounds.
+
+    Some (profile, config) pairs have no single fixed point: the one-cycle
+    map bifurcates into a stable period-2 orbit (an alternating "wetter
+    day / drier day" pattern under the repeated forcing), so ``rel_step``
+    plateaus (or wobbles) at a small-but-nonzero value instead of shrinking
+    toward ``tol``. This is detected as ``stall_rounds`` consecutive rounds
+    where ``rel_step`` fails to shrink by at least ``stall_ratio`` relative
+    to the previous round, and handled by returning the average of the two
+    most recent extrapolated states rather than an arbitrary snapshot (which
+    would otherwise depend on exactly which round happened to hit
+    ``max_rounds``). The same averaging is applied as a fallback if
+    ``max_rounds`` is exhausted without the detector firing (e.g. a noisier,
+    not-quite-periodic wobble). Callers wanting the true alternating yields
+    rather than the yield from this averaged state should run one cycle
+    from each of the two branches directly.
+    """
+    if h_initial is None:
+        h_initial = config.hydrogel_thickness_m
+    if c_w_initial is None:
+        c_w_initial = initial_loading(config)
+    x = np.array([c_w_initial, h_initial], dtype=float)
+
+    def step(state: np.ndarray) -> np.ndarray:
+        _, _, _, des_res = run_daily_cycle(
+            profile, config, c_w_initial=float(state[0]), h_initial=float(state[1])
+        )
+        return np.array(cycle_end_state(des_res))
+
+    prev_rel_step: float | None = None
+    prev_x_star: np.ndarray | None = None
+    stall_count = 0
+    for round_idx in range(1, max(1, max_rounds) + 1):
+        x1 = step(x)
+        x2 = step(x1)
+        d0 = x1 - x
+        d1 = x2 - x1
+        dd = d1 - d0
+        denom = float(np.dot(dd, dd))
+        x_star = x2 if denom < 1e-30 else x - d0 * (np.dot(d0, dd) / denom)
+        rel_step = float(np.linalg.norm(x_star - x2) / max(float(np.linalg.norm(x2)), 1e-12))
+        if rel_step < tol:
+            x = x_star
+            break
+        if prev_rel_step is not None and rel_step > stall_ratio * prev_rel_step:
+            stall_count += 1
+            if stall_count >= stall_rounds:
+                if verbose:
+                    print(
+                        f"    find_cyclic_state: rel_step stalled at {rel_step:.2e} "
+                        f"(round {round_idx}) -- not a single fixed point (likely a "
+                        "period-2 orbit); returning the average of the two "
+                        "alternating states instead.",
+                        flush=True,
+                    )
+                x = 0.5 * (x_star + x)
+                break
+        else:
+            stall_count = 0
+        prev_rel_step = rel_step
+        prev_x_star = x
+        x = x_star
+    else:
+        if prev_x_star is not None:
+            if verbose:
+                print(
+                    f"    find_cyclic_state: did not converge within {max_rounds} rounds "
+                    "(no stall detected either -- non-periodic drift); returning the "
+                    "average of the last two states.",
+                    flush=True,
+                )
+            x = 0.5 * (x + prev_x_star)
+    return float(x[0]), float(x[1])
+
+
 def run_daily_cycle(
     profile: DailyWeatherProfile,
     config: DeviceConfig,

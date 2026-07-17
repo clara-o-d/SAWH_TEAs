@@ -152,7 +152,7 @@ def sample_land_points(
 
 def parse_salt_names(names: list[str] | None) -> tuple[str, ...]:
     if not names:
-        return CANDIDATE_SALTS
+        return ("LiCl",)
     out: list[str] = []
     seen: set[str] = set()
     for raw in names:
@@ -237,7 +237,7 @@ def run_sites(
     if cache_dir is not None:
         print(f"  Weather cache: {cache_dir}", flush=True)
     econ = econ or LCOEconomicParams()
-    salts = salt_names or CANDIDATE_SALTS
+    salts = salt_names or ("LiCl",)
     results: list[SiteResult] = []
     all_attempts: list[SaltAttemptResult] = []
     t_batch = time.perf_counter()
@@ -786,7 +786,12 @@ def main() -> int:
         default=_REPO / "outputs" / "lcow_global" / "lcow_random_sites_all_salts.csv",
     )
     p.add_argument("--cache", type=str, default=str(_REPO / ".weather_cache"))
-    p.add_argument("--salts", nargs="+", default=None, help=f"Candidate salts (default: {CANDIDATE_SALTS})")
+    p.add_argument(
+        "--salts",
+        nargs="+",
+        default=None,
+        help=f"Candidate salts, tried in order until one is feasible (default: LiCl only; all: {CANDIDATE_SALTS})",
+    )
     p.add_argument("--salt-loading", type=float, default=4.0)
     p.add_argument("--tilt-deg", type=float, default=35.0)
     p.add_argument("--fin-area-ratio", type=float, default=7.1)
