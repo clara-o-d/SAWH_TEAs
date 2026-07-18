@@ -140,9 +140,9 @@ vapor\_gap\_mm, warmup\_method, resolution, mean\_yield\_kg\_m2, mean\_eta\_ther
 This is water yield and thermal efficiency only -- no LCOW or economics. That can be computed
 from yield as a separate downstream step, the same way \texttt{lcow\_full\_global\_map.py} does.
 
-\section{Smoke test (already run locally)}
+\section{Smoke test}\label{sec:smoke}
 
-Before any Sherlock submission, the following was validated on this machine:
+Validated end to end, both locally and on Sherlock itself, before any full-grid submission.
 
 \begin{enumerate}
   \item \textbf{Plumbing check} (no ODE, instant): built device configs for two combos at the
@@ -169,19 +169,22 @@ python scripts/grid_param_sweep.py \
 
 \end{enumerate}
 
-\subsection{Sherlock-side smoke test (to run there)}
-The only thing not yet validated is that this behaves identically on the cluster. A single-task
-array reproducing the exact run above:
+\subsection{Sherlock-side smoke test}
+Environment setup hit one snag worth documenting: the default \texttt{uv pip install} tried to
+build \texttt{pyproj} from source (no system PROJ library on this node) because the resolved
+\texttt{cartopy}/\texttt{pyproj} versions' wheels target a newer glibc than this cluster ships.
+Forcing binary-only installs resolves to slightly older, wheel-compatible versions instead of
+building anything:
 
 \begin{verbatim}
 ml python/3.12.1 uv
 uv venv && source .venv/bin/activate
-uv pip install numpy scipy pandas requests-cache retry-requests shapely cartopy
+uv pip install --only-binary :all: numpy scipy pandas requests-cache retry-requests shapely cartopy
 
 sbatch <<'EOF'
 #!/bin/bash
 #SBATCH --job-name=sawh-smoke
-#SBATCH --time=00:20:00
+#SBATCH --time=01:00:00
 #SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=4G
 #SBATCH --partition=serc
@@ -191,39 +194,51 @@ python scripts/grid_param_sweep.py \
   --lat-lon -23.6 -70.4 \
   --hydrogel-thickness-mm 4.0 --eps-abs 0.90 0.95 \
   --tau-glass 0.85 --fin-area-ratio 7.1 \
-  --output-csv outputs/smoke_test_sherlock.csv
+  --output-csv outputs/smoke_test_sherlock.csv --resume
 EOF
 \end{verbatim}
 
-Expected: two rows, yields matching \num{1.707476} / \SI{1.800478}{\kilo\gram\per\meter\squared}
-(exactly, since this is deterministic given the same cached weather and the same code), total
-runtime around \SI{12}{\minute} (matches the local measurement above; scale \texttt{--time} up
-if the cluster's per-core throughput is slower). \textbf{This step needs the weather already
-cached} -- see Section~\ref{sec:weather} -- otherwise it will additionally pay one Open-Meteo
-fetch.
+(\texttt{--time=01:00:00}, not \SI{20}{\minute} as first tried -- see below for why.
+\texttt{--resume} makes a resubmission after a timeout/preemption pick up where it left off
+instead of redoing the first combo.)
+
+\textbf{Result: yields matched the local run exactly} --
+\SI{1.707476}{\kilo\gram\per\meter\squared} and \SI{1.800478}{\kilo\gram\per\meter\squared},
+confirming the full chain (weather fetch $\to$ 12 monthly mean-day profiles $\to$ Aitken steady
+state per month, day-weighted $\to$ yield) runs identically on the cluster, not just that it
+runs without error.
+
+\textbf{But it ran much slower than the local Mac}: combo 1 took \SI{1011.1}{\second} on
+Sherlock versus \SI{386.9}{\second} locally; combo 2 took \SI{859.9}{\second} versus
+\SI{318.2}{\second} locally ($2.61$--$2.70\times$, average $2.66\times$). The first submission
+used \texttt{--time=00:20:00} (sized off the Mac timing) and got killed by the wall-clock limit
+mid-combo-2; resubmitting with \texttt{--resume} and more time completed it. This
+$2.66\times$ factor is what Section~\ref{sec:cost}'s cost estimate is actually calibrated on --
+a laptop benchmark alone would have understated the real job by the same factor.
 
 \section{Full sweep}
 
 \subsection{Job structure}
 \textbf{One array task per site running all 135 combos serially does not work}: at the measured
-per-combo cost (Section~\ref{sec:cost}), one site takes 14.2--49.6 \emph{hours} serially, far
-beyond any reasonable single-task \texttt{--time}. Each site's 135 combos are instead split into
-15 chunks of 9 combos (135 divides evenly), so each array task is one (site, chunk) pair costing
-roughly \SI{0.95}{}--\SI{3.31}{\hour}. \texttt{--combo-offset}/\texttt{--combo-limit} (added to
-\texttt{grid\_param\_sweep.py} for this) slice the site's combo grid; the two array-index
-components are recovered from a single flattened SLURM index via integer div/mod:
+per-combo cost (Section~\ref{sec:cost}), one site takes 37.9--131.9 \emph{hours} serially on
+Sherlock, far beyond any reasonable single-task \texttt{--time}. Each site's 135 combos are
+instead split into 45 chunks of 3 combos (135 divides evenly), so each array task is one (site,
+chunk) pair costing roughly \SI{0.84}{}--\SI{2.93}{\hour} on Sherlock (see
+Section~\ref{sec:cost} for how that's calibrated). \texttt{--combo-offset}/\texttt{--combo-limit}
+(added to \texttt{grid\_param\_sweep.py} for this) slice the site's combo grid; the two
+array-index components are recovered from a single flattened SLURM index via integer div/mod:
 
 \begin{verbatim}
 #!/bin/bash
 #SBATCH --job-name=sawh-sweep
-#SBATCH --array=0-21074%300
-#SBATCH --time=06:00:00
+#SBATCH --array=0-63224%300
+#SBATCH --time=05:00:00
 #SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=4G
 #SBATCH --partition=owners
 
-N_CHUNKS_PER_SITE=15
-CHUNK_SIZE=9
+N_CHUNKS_PER_SITE=45
+CHUNK_SIZE=3
 SITE_INDEX=$(( SLURM_ARRAY_TASK_ID / N_CHUNKS_PER_SITE ))
 CHUNK_INDEX=$(( SLURM_ARRAY_TASK_ID % N_CHUNKS_PER_SITE ))
 COMBO_OFFSET=$(( CHUNK_INDEX * CHUNK_SIZE ))
@@ -233,7 +248,6 @@ export PYTHONUNBUFFERED=True
 python scripts/grid_param_sweep.py \
   --site-index $SITE_INDEX --step 3 \
   --combo-offset $COMBO_OFFSET --combo-limit $CHUNK_SIZE \
-  --cache-dir $GROUP_HOME/.weather_cache \
   --output-csv outputs/grid_sweep/site_${SITE_INDEX}_chunk_${CHUNK_INDEX}.csv --resume
 EOF
 \end{verbatim}
@@ -244,46 +258,50 @@ lower it based on how the partition responds. Each (site, chunk) gets its own ou
 concurrently on different nodes, and concurrent appends/header-writes to one shared file would
 race. \texttt{--resume} makes a preempted/resubmitted task skip combos already written in its
 own chunk file, so preemption on \texttt{owners} costs at most the in-progress combo, not the
-whole chunk. \texttt{--time=06:00:00} leaves nearly $2\times$ margin over the slowest measured
-chunk (\SI{3.31}{\hour}); tighten it once more of the grid's actual climate spread is known.
+whole chunk. \texttt{--time=05:00:00} leaves nearly $1.7\times$ margin over the slowest measured
+chunk (\SI{2.93}{\hour}); the smaller 3-combo chunk (versus the originally-planned 9) trades more
+array tasks for a shorter preemption-exposure window per task, now that Sherlock's real per-combo
+cost is known to run higher than the local estimate.
 
-\textbf{Check the array size against this cluster's limit before submitting}: 21,075 elements in
-one \texttt{--array} directive may exceed the configured \texttt{MaxArraySize} (commonly a few
-thousand by default). Check with \texttt{scontrol show config | grep -i MaxArraySize} on a login
-node; if 21,075 exceeds it, split the submission into several \texttt{sbatch} calls each covering
-a slice of \texttt{SLURM\_ARRAY\_TASK\_ID} (e.g. \texttt{--array=0-9999}, \texttt{--array=10000-19999},
-\texttt{--array=20000-21074}) rather than one call.
+\texttt{MaxArraySize} on this cluster was checked directly (\texttt{scontrol show config | grep
+-i MaxArraySize}) and is \textbf{1{,}000{,}000} -- 63,225 array elements fits with enormous
+headroom, so no splitting across multiple \texttt{sbatch} calls is needed.
 
 \subsection{Weather prefetch}\label{sec:weather}
 Each site needs one Open-Meteo fetch (cached permanently now that \texttt{WeatherClient}'s cache
-TTL is fixed -- see repository history). 1405 concurrent Sherlock nodes must \emph{not} each
-independently hit the API: prefetch/cache all 1405 sites in one throttled pass first (locally, or
-from a single Sherlock node), then ship the resulting \texttt{.weather\_cache} directory to
-\texttt{\$GROUP\_HOME} before submitting the array. The full sweep should then make zero network
-calls.
+TTL is fixed -- see repository history). 1405 concurrent Sherlock array tasks must \emph{not}
+each independently hit the API: prefetch/cache all 1405 sites in one throttled pass first.
 
-Use \texttt{scripts/prefetch\_weather.py}, not a shell loop calling
-\texttt{grid\_param\_sweep.py} once per site: building the land/country-exclusion geometry and
-importing the physics stack costs $\sim$\SI{1.4}{\second} and is identical for every site, but a
-subprocess-per-site loop pays that cost 1405 times. \texttt{prefetch\_weather.py} pays it once
-and fetches every site in the same process and connection pool -- measured $\sim$6$\times$
-faster overall (a 1405-site run drops from $\sim$30+ minutes to $\sim$5--10 minutes):
+Originally planned as a local (Mac) prefetch followed by an \texttt{rsync} of the resulting
+21GB \texttt{.weather\_cache} to \texttt{\$GROUP\_HOME}. In practice, home-network upload
+bandwidth ($\sim$\SI{1.3}{\mega\byte\per\second} measured) made that transfer impractically
+slow (multi-hour estimate, and it dropped mid-transfer at least once). \textbf{Run the prefetch
+directly on Sherlock instead} -- there's no reason to build the cache locally and ship it when
+Sherlock's own network link to Open-Meteo is unrelated to a laptop's home upload speed:
 
 \begin{verbatim}
+sh_dev
+cd $GROUP_HOME/SAWH_TEAs/solar_lumped
+source .venv/bin/activate
 python scripts/prefetch_weather.py --step 3
 \end{verbatim}
 
-If running this on Sherlock itself rather than locally, use an interactive \texttt{sh\_dev}
-session rather than the login node (it's light on CPU but runs for several minutes, which is
-what \texttt{sh\_dev} is for).
+Use an interactive \texttt{sh\_dev} session rather than the login node (light on CPU but runs
+for several minutes, which is what \texttt{sh\_dev} is for). \texttt{prefetch\_weather.py} builds
+the land/country-exclusion geometry and imports the physics stack once, then fetches every site
+in the same process and connection pool ($\sim$6$\times$ faster than a subprocess-per-site
+loop), and retries failed fetches with an exponential cooldown (Open-Meteo's free tier is
+rate-limited to 600 calls/min, 5{,}000/hour, 10{,}000/day) instead of giving up on the first 429.
+With this cache now living directly on Sherlock, drop \texttt{--cache-dir} from the sweep
+commands below -- the script's default (relative to the repo) already resolves correctly.
 
 \subsection{Merging outputs}\label{sec:merge}
-The array produces up to 21,075 separate CSV files (one per (site, chunk), all sharing the same
+The array produces up to 63,225 separate CSV files (one per (site, chunk), all sharing the same
 header). Concatenate them into one dataset for mapping once the array finishes:
 
 \begin{verbatim}
 n=$(ls outputs/grid_sweep/site_*_chunk_*.csv 2>/dev/null | wc -l)
-echo "found $n of 21075 expected chunk files"
+echo "found $n of 63225 expected chunk files"
 
 { head -1 "$(ls outputs/grid_sweep/site_*_chunk_*.csv | head -1)"
   for f in outputs/grid_sweep/site_*_chunk_*.csv; do tail -n +2 "$f"; done
@@ -297,28 +315,34 @@ sweep silently skipped anything. Row count in the merged file should be at most 
 more).
 
 \subsection{Expected cost}\label{sec:cost}
-Measured per-combo cost at \texttt{--resolution monthly} (post 2-cycle fix): \SI{380.0}{\second}
+Mac-measured per-combo cost at \texttt{--resolution monthly} (post 2-cycle fix): \SI{380.0}{\second}
 (Atacama desert, low-seasonal-variance) to \SI{1323.4}{\second} (Cambridge, moderate-seasonal-
-variance) -- roughly a $3.5\times$ spread by climate, consistent with everything else observed
-in this project. Total: $189{,}675$ units (1405 sites $\times$ 135 combos).
+variance). \textbf{Sherlock itself runs $\sim$2.66$\times$ slower per combo than that Mac} for
+this workload -- measured directly from the Sherlock smoke test (Section~\ref{sec:smoke}):
+\SI{1011.1}{\second} and \SI{859.9}{\second} there versus \SI{386.9}{\second} and
+\SI{318.2}{\second} locally for the identical two combos (ratios 2.61$\times$ and 2.70$\times$).
+Scaling the Mac-measured fast/slow bounds by that factor gives the real Sherlock-calibrated cost.
+Total: $189{,}675$ units (1405 sites $\times$ 135 combos).
 
 \begin{table}[h]
 \centering
 \small
 \begin{tabular}{@{}lrrrr@{}}
 \toprule
-\textbf{Cost basis} & \textbf{Core-hours} & \textbf{@200 cores} & \textbf{@500 cores} & \textbf{@1000 cores} \\
+\textbf{Cost basis} & \textbf{Core-hours} & \textbf{@500 cores} & \textbf{@1000 cores} & \textbf{@2000 cores} \\
 \midrule
-Fast/typical (\SI{380.0}{\second}/combo) & 20{,}021 & 100.1 h & 40.0 h & 20.0 h \\
-Slow (\SI{1323.4}{\second}/combo) & 69{,}727 & 348.6 h & 139.5 h & 69.7 h \\
+Fast/typical (\SI{1010}{\second}/combo) & 53{,}214 & 106.4 h & 53.2 h & 26.6 h \\
+Slow (\SI{3518}{\second}/combo) & 185{,}324 & 370.6 h & 185.3 h & 92.7 h \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-So: realistically \textbf{20{,}000--70{,}000 core-hours}, i.e. roughly 1--3 days at 1000
-concurrent cores, or under 6 days at 500 cores in the typical (non-Cambridge-like) case. Dropping
-vapor gap from the sweep (Section~\ref{sec:swept}, $405\to135$ combos) and excluding northern
-Canada/Russia (Section~\ref{sec:fixed-above}, $1635\to1405$ sites) already cut this from what it
+So: realistically \textbf{53{,}000--185{,}000 core-hours}, i.e. roughly 1--8 days at 1000
+concurrent cores. This is $\sim$2.66$\times$ the earlier Mac-only estimate -- the lesson being
+that a laptop benchmark is a starting point, not a substitute for measuring on the actual
+target hardware before sizing the real job. Dropping vapor gap from the sweep
+(Section~\ref{sec:swept}, $405\to135$ combos) and excluding northern Canada/Russia
+(Section~\ref{sec:fixed-above}, $1635\to1405$ sites) still meaningfully reduce this from what it
 would otherwise have been; monthly over single (Section~\ref{sec:resolution}) costs $12\times$
 more than the cheapest option, but buys the accuracy the map actually needs.
 
