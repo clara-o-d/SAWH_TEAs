@@ -133,12 +133,21 @@ resume without redoing completed combos:
 
 \begin{center}
 \small
-\texttt{lat, lon, salt, hydrogel\_thickness\_mm, eps\_abs, tau\_glass, fin\_area\_ratio,
-vapor\_gap\_mm, warmup\_method, resolution, mean\_yield\_kg\_m2, mean\_eta\_thermal, n\_periods}
+\texttt{lat, lon, mean\_rh\_frac, mean\_t\_amb\_c, mean\_solar\_w\_m2, salt,
+hydrogel\_thickness\_mm, eps\_abs, tau\_glass, fin\_area\_ratio, vapor\_gap\_mm,
+warmup\_method, resolution, mean\_yield\_kg\_m2, mean\_eta\_thermal, n\_periods}
 \end{center}
 
-This is water yield and thermal efficiency only -- no LCOW or economics. That can be computed
-from yield as a separate downstream step, the same way \texttt{lcow\_full\_global\_map.py} does.
+\texttt{mean\_rh\_frac}, \texttt{mean\_t\_amb\_c}, and \texttt{mean\_solar\_w\_m2} are site
+properties, not per-combo ones (identical across all 135 rows for a given site) -- day-weighted
+means of the same monthly profiles already built for the ODE runs, so they cost nothing beyond
+aggregating data already in memory. \texttt{mean\_solar\_w\_m2} is averaged over the desorption
+(daylight) phase only; blending in the absorption (night) phase, which is by definition
+low-solar, would dilute it with $\sim$12h of near-zero values.
+
+Otherwise this is water yield and thermal efficiency only -- no LCOW or economics. That can be
+computed from yield as a separate downstream step, the same way \texttt{lcow\_full\_global\_map.py}
+does.
 
 \section{Smoke test}\label{sec:smoke}
 
