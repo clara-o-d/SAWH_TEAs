@@ -170,9 +170,43 @@ def combo_yield_kg_m2(
     return mean_yield, mean_eta
 
 
+def mean_weather_stats(
+    profiles: list[tuple[int, DailyWeatherProfile, int]],
+) -> tuple[float, float, float]:
+    """Day-weighted mean RH (fraction), mean ambient temperature (C), and mean daylight
+    solar irradiance (W/m^2) across profiles.
+
+    A site property, not a per-combo one -- computed once per site and reused across
+    all combos, since it costs nothing beyond aggregating data already in memory
+    (no ODE solves, no extra fetches). Solar is averaged over the desorption (daylight)
+    phase only: absorption is by definition the low-solar half of the day, so blending
+    it in would dilute the number with ~12h of near-zero nighttime values.
+    """
+    rh_means: list[float] = []
+    t_means: list[float] = []
+    solar_means: list[float] = []
+    weights: list[int] = []
+    for _period, profile, n_days in profiles:
+        rh = list(profile.absorption.relative_humidity) + list(profile.desorption.relative_humidity)
+        t = list(profile.absorption.temperature_c) + list(profile.desorption.temperature_c)
+        solar = profile.desorption.solar_w_m2
+        rh_means.append(sum(rh) / len(rh))
+        t_means.append(sum(t) / len(t))
+        solar_means.append(sum(solar) / len(solar))
+        weights.append(n_days)
+    total_w = sum(weights)
+    mean_rh = sum(r * w for r, w in zip(rh_means, weights)) / total_w
+    mean_t = sum(t * w for t, w in zip(t_means, weights)) / total_w
+    mean_solar = sum(s * w for s, w in zip(solar_means, weights)) / total_w
+    return mean_rh, mean_t, mean_solar
+
+
 _CSV_COLUMNS: tuple[str, ...] = (
     "lat",
     "lon",
+    "mean_rh_frac",
+    "mean_t_amb_c",
+    "mean_solar_w_m2",
     "salt",
     "hydrogel_thickness_mm",
     "eps_abs",
@@ -318,6 +352,12 @@ def main(argv: list[str] | None = None) -> int:
     profiles = single_mean_profile(df) if args.resolution == "single" else monthly_mean_profiles(df)
     print(f"Built {len(profiles)} {args.resolution} mean-day profile(s)", flush=True)
 
+    mean_rh, mean_t_amb, mean_solar = mean_weather_stats(profiles)
+    print(
+        f"  Site mean RH={mean_rh:.3f}  T_amb={mean_t_amb:.1f}C  Q_solar={mean_solar:.0f}W/m²",
+        flush=True,
+    )
+
     done = _existing_combo_keys(args.output_csv, lat, lon) if args.resume else set()
     if done:
         print(f"Resume: {len(done)} combo(s) already done for this site.", flush=True)
@@ -352,6 +392,9 @@ def main(argv: list[str] | None = None) -> int:
             {
                 "lat": lat,
                 "lon": lon,
+                "mean_rh_frac": f"{mean_rh:.6f}",
+                "mean_t_amb_c": f"{mean_t_amb:.4f}",
+                "mean_solar_w_m2": f"{mean_solar:.2f}",
                 "salt": args.salt,
                 "hydrogel_thickness_mm": combo.hydrogel_thickness_mm,
                 "eps_abs": combo.eps_abs,
