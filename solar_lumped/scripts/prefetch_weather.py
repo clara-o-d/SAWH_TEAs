@@ -16,16 +16,12 @@ import time
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
-_SCRIPTS = _REPO / "scripts"
 _SRC = _REPO / "src"
-if str(_SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS))
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from lcow_full_global_map import grid_land_points  # noqa: E402
-
 from solar_lumped.weather.client import WeatherClient  # noqa: E402
+from solar_lumped.weather.land_grid import grid_land_points  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:

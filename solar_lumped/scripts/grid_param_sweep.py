@@ -31,20 +31,16 @@ from dataclasses import dataclass
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
-_SCRIPTS = _REPO / "scripts"
 _SRC = _REPO / "src"
-if str(_SCRIPTS) not in sys.path:
-    sys.path.insert(0, str(_SCRIPTS))
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
-
-from lcow_full_global_map import grid_land_points  # noqa: E402
 
 from solar_lumped.physics.device_balances import DeviceThermalParams  # noqa: E402
 from solar_lumped.simulation.device_config import DeviceConfig  # noqa: E402
 from solar_lumped.simulation.ode_system import find_cyclic_state, run_daily_cycle  # noqa: E402
 from solar_lumped.weather.client import WeatherClient  # noqa: E402
 from solar_lumped.weather.climate import representative_mean_day_df  # noqa: E402
+from solar_lumped.weather.land_grid import grid_land_points  # noqa: E402
 from solar_lumped.weather.profiles import DailyWeatherProfile, profile_from_day_df  # noqa: E402
 
 # Baselines: table_s3.H0_M=4mm, L_G_M=40mm, EPS_ABS=0.95, TAU_GLASS=0.9, FIN_AREA_RATIO=7.1.
