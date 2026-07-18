@@ -45,14 +45,12 @@ class DailyWeatherProfile:
     cooling: PhaseProfile | None = None
 
 
-def _wind_series(df: pd.DataFrame, n: int) -> tuple[float, ...]:
-    if "wind_speed_10m" in df.columns:
-        w = df["wind_speed_10m"].astype(float).values
-    else:
-        w = np.full(n, 0.5)
-    from solar_lumped.physics.correlations import wind_to_h_amb_w_m2_k
+FIXED_H_AMB_W_M2_K = 10.0
 
-    return tuple(wind_to_h_amb_w_m2_k(float(v)) for v in w)
+
+def _wind_series(_df: pd.DataFrame, n: int) -> tuple[float, ...]:
+    """Ambient convection coefficient per timestep -- fixed, not wind-derived."""
+    return (FIXED_H_AMB_W_M2_K,) * n
 
 
 def _resample_phase(df: pd.DataFrame, n: int = STEPS_PER_PHASE) -> PhaseProfile:
