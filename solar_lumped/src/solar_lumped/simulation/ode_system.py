@@ -827,8 +827,11 @@ def run_daily_cycle(
 ) -> tuple[float, float, PhaseResult, PhaseResult]:
     """Run absorption then desorption; return (yield kg/m2, eta_thermal, abs_res, des_res).
 
-    If ``cyclic_initial`` is True, run ``cyclic_warmup_cycles`` full days from the
-    fabrication default first, then simulate one reporting day from that end state.
+    If ``cyclic_initial`` is True, first find the true steady periodic state via
+    Aitken Δ² extrapolation (``find_cyclic_state``, ~3-6 rounds; see its docstring)
+    rather than a fixed number of warmup cycles, then simulate one reporting day
+    from that end state. ``cyclic_warmup_cycles`` is passed through as
+    ``max_rounds`` (floored at 3, since a round is 2 full daily cycles).
     """
     if config.uses_comsol_physics():
         from solar_lumped.simulation.comsol_integrator import run_comsol_daily_cycle
@@ -841,12 +844,13 @@ def run_daily_cycle(
         )
 
     if cyclic_initial:
-        cw, h = warmup_to_cyclic_state(
+        cw, h = find_cyclic_state(
             profile,
             config,
-            n_cycles=cyclic_warmup_cycles,
             c_w_initial=c_w_initial,
             h_initial=h_initial,
+            max_rounds=max(3, cyclic_warmup_cycles),
+            verbose=False,
         )
         c_w_initial, h_initial = cw, h
 

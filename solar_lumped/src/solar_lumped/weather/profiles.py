@@ -58,17 +58,24 @@ def _resample_phase(df: pd.DataFrame, n: int = STEPS_PER_PHASE) -> PhaseProfile:
         raise ValueError("Empty weather slice for phase profile.")
     if len(df) >= n:
         idx = np.linspace(0, len(df) - 1, n).astype(int)
-        sub = df.iloc[idx]
+        rh = df["relative_humidity_2m"].astype(float).values[idx] / 100.0
+        temp = df["temperature_2m"].astype(float).values[idx]
+        solar_src = df.get("shortwave_radiation", pd.Series(0.0, index=df.index))
+        solar = solar_src.astype(float).values[idx]
     else:
-        sub = df.reindex(
-            pd.date_range(df.index[0], periods=n, freq=f"{int(PHASE_DT_S)}s")
-        ).interpolate(method="time").bfill().ffill()
-
-    rh = sub["relative_humidity_2m"].astype(float).values / 100.0
-    temp = sub["temperature_2m"].astype(float).values
-    solar = sub.get("shortwave_radiation", pd.Series(0.0, index=sub.index)).astype(float).values
+        # The absorption/desorption day/night split can wrap midnight, so the
+        # slice's rows aren't contiguous in calendar time (e.g. 20:00-23:45
+        # then 00:00-05:45). Interpolate by row position within the slice,
+        # not by real timestamp -- a calendar reindex would silently drop
+        # whichever chunk falls outside the first chunk's forward span.
+        x_src = np.arange(len(df))
+        x_tgt = np.linspace(0, len(df) - 1, n)
+        rh = np.interp(x_tgt, x_src, df["relative_humidity_2m"].astype(float).values) / 100.0
+        temp = np.interp(x_tgt, x_src, df["temperature_2m"].astype(float).values)
+        solar_src = df.get("shortwave_radiation", pd.Series(0.0, index=df.index))
+        solar = np.interp(x_tgt, x_src, solar_src.astype(float).values)
     solar = np.maximum(0.0, solar)
-    h_amb = _wind_series(sub, n)
+    h_amb = _wind_series(df, n)
     return PhaseProfile(
         temperature_c=tuple(float(x) for x in temp),
         relative_humidity=tuple(float(x) for x in rh),
@@ -77,8 +84,45 @@ def _resample_phase(df: pd.DataFrame, n: int = STEPS_PER_PHASE) -> PhaseProfile:
     )
 
 
+def _native_dt_s(df: pd.DataFrame) -> float:
+    deltas = df.index.to_series().diff().dropna().dt.total_seconds()
+    return float(deltas.median()) if len(deltas) else PHASE_DT_S
+
+
+def _steps_for(n_rows: int, native_dt_s: float) -> int:
+    """Step count at PHASE_DT_S resolution matching a slice's real elapsed duration.
+
+    Absorption and desorption aren't equal-length in real time (day/night varies by
+    latitude and season), so each phase gets its own step count rather than being
+    forced onto a fixed 12 h grid -- that would silently speed up or slow down real
+    time within the ODE integration.
+    """
+    return max(4, int(round(n_rows * native_dt_s / PHASE_DT_S)))
+
+
+def _rotate_chronological(df: pd.DataFrame, *, pivot_hour: float) -> pd.DataFrame:
+    """Reorder rows into real elapsed-time order for a slice that may wrap around pivot_hour.
+
+    A boolean mask (e.g. solar < threshold) preserves calendar-day row order --
+    00:00 first, then whatever comes after sunset appended at the end -- not real
+    elapsed time within the night, which actually runs sunset -> midnight ->
+    sunrise. ``pivot_hour`` must be an hour the slice never contains (noon for
+    night, midnight for day), so rotating the axis to start there never splits
+    the slice's one real contiguous span in two.
+    """
+    hour_frac = df.index.hour + df.index.minute / 60.0
+    rel_hour = (hour_frac - pivot_hour) % 24
+    order = np.argsort(rel_hour, kind="stable")
+    return df.iloc[order]
+
+
 def profile_from_day_df(day_df: pd.DataFrame) -> DailyWeatherProfile:
-    """Split one calendar day into 12 h absorption (night) + 12 h desorption (day)."""
+    """Split one calendar day into absorption (night) + desorption (day).
+
+    The two halves run for their true real-time duration (via each phase's own
+    step count at PHASE_DT_S resolution), not a fixed 12 h/12 h split.
+    """
+    native_dt_s = _native_dt_s(day_df)
     solar = day_df.get("shortwave_radiation", pd.Series(0.0, index=day_df.index)).astype(float)
     night = day_df[solar < SOLAR_NIGHT_THRESHOLD_W_M2]
     day = day_df[solar >= SOLAR_NIGHT_THRESHOLD_W_M2]
@@ -86,9 +130,11 @@ def profile_from_day_df(day_df: pd.DataFrame) -> DailyWeatherProfile:
         night = day_df.nsmallest(max(STEPS_PER_PHASE, len(day_df) // 2), "shortwave_radiation")
     if len(day) < 4:
         day = day_df.nlargest(max(STEPS_PER_PHASE, len(day_df) // 2), "shortwave_radiation")
+    night = _rotate_chronological(night, pivot_hour=12.0)
+    day = _rotate_chronological(day, pivot_hour=0.0)
     return DailyWeatherProfile(
-        absorption=_resample_phase(night),
-        desorption=_resample_phase(day),
+        absorption=_resample_phase(night, _steps_for(len(night), native_dt_s)),
+        desorption=_resample_phase(day, _steps_for(len(day), native_dt_s)),
     )
 
 
