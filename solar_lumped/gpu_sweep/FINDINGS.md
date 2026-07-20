@@ -290,21 +290,58 @@ Extrapolating from the 60,000-instance warm throughput (60,000 instances in
 837.02s = ~71.7 instances/sec) to the full 189,675-instance grid (3.16x more)
 gives very roughly 2,650s (~44 min) for one Aitken pass over the *entire*
 site x combo grid, if throughput holds at that rate -- vs. the CPU sweep's
-current multi-day, cluster-wide job. **Attempting 189,675 directly failed**: the
-process was killed with a bare `Killed` (no Python traceback), which is
-consistent with the Linux OOM killer hitting the `salloc --mem=32G` **host** RAM
-cap during batch-array construction/XLA compilation (not GPU memory, which had
-~19GB of headroom at 60,000). Re-running with a much larger `--mem` is the
-immediate next step to rule that out before concluding anything about whether the
-full grid fits in one batch.
+current multi-day, cluster-wide job. (This estimate and the whole table above
+are measured under the architecture Result 9 below replaced -- kept here as the
+historical record of what motivated the fix, not the current expected numbers.)
+
+**Attempting 189,675 directly failed differently than expected**: not a `salloc
+--mem` host-RAM issue (a bigger `--mem` wouldn't have helped -- see Result 9),
+but a genuine GPU `RESOURCE_EXHAUSTED` from XLA trying to allocate a single
+~60GB tensor.
+
+## Result 9: the 189,675 OOM was a real architecture bug, not a hardware ceiling -- fixed
+
+The batched daily-cycle function computed the water yield by (1) telling diffrax
+to save the *entire* trajectory (`SaveAt(ts=t_eval)`, one saved point per ODE
+step -- ~478 points for desorption), then (2) recomputing `m_des` at every one of
+those saved points via a second `jax.vmap`, then (3) trapezoidally integrating
+that over time. Step (2)'s vmap was *inside* a function that itself gets `vmap`ed
+over the batch axis for the batched pipeline -- nesting two vmaps means XLA
+effectively materializes a `(batch x num_saved_points)`-wide parallel computation,
+each lane doing a full 4x4 Newton-solve-with-Jacobian. At the full grid,
+that's `189,675 x 478 ~= 90.6 million` lanes computed simultaneously -- consistent
+with the single ~60GB tensor allocation XLA's error message reported (and with
+`--mem=128G` on the host not helping at all -- this was GPU device memory, not
+host RAM, so the earlier guess about the cause was wrong).
+
+**Fix**: integrate the cumulative water yield as a 4th ODE state variable
+(`dW/dt = m_des`) instead of reconstructing it after the fact from a densely
+saved trajectory. diffrax already computes `m_des` internally at every step to
+advance the other three states -- folding it into the state vector means the
+solver accumulates the answer as part of the normal integration, and only the
+*final* state needs to be saved (`SaveAt(t1=True)`, not `SaveAt(ts=...)`). This
+removes the second vmap and the dense trajectory entirely, for both
+`make_daily_cycle_fn` (serial) and `make_batched_daily_cycle_fn` (batched) in
+`jax_daily_cycle.py`. Also switched `adjoint=DirectAdjoint()` ->
+`RecursiveCheckpointAdjoint()` while in there (lower memory if this code is ever
+differentiated later; not required for the OOM fix itself, since nothing here
+calls `jax.grad`, but no reason to keep the more memory-hungry default).
+
+Re-validated on CPU after the fix: `validate_batched_pipeline.py` still agrees
+with the serial pipeline to the same ~0.03% worst-case / 0.016% mean-yield
+tolerance as before the fix (small yield-value shifts of ~0.1% vs. the pre-fix
+numbers are expected and *more* accurate, not a regression -- integrating
+continuously replaces a discrete trapezoidal approximation over ~478 points with
+what the adaptive stepper actually computes). **Not yet re-measured on the GPU**
+-- that's the immediate next step, now that the fix is in.
 
 ## Next steps, in order
 
-1. **Get the missing 189,675 data point** with more host memory
-   (`benchmark_gpu_batch_size.py --sizes 189675`, `salloc --mem=128G` or more) --
-   this is the one number needed to know whether the full grid actually fits in
-   one batch and
-   what it would cost.
+1. **Re-run `benchmark_gpu_batch_size.py` on the GPU now that Result 9's fix is
+   in** -- rerun the full default size list (`12 120 1200 12000 60000 189675`),
+   not just 189,675, since the fix changes the per-instance memory/compute
+   profile for every size, not just the one that OOM'd. This is the number
+   needed to know whether the full grid fits in one batch and what it costs.
 2. **Batch across sites, not just months at one site** -- Result 7/8 batch 12
    months at the *same* site (same device config, different weather only). The
    real grid varies device config too (135 combos x however many sites fit in one

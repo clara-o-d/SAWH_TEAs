@@ -73,6 +73,15 @@ def make_daily_cycle_fn(profile, config):
         return dy
 
     def des_vector_field(t, y, args):
+        """y = [c_w, H, T_cond, W] -- W (cumulative desorbed water, kg/m^2) is
+        integrated directly (dW/dt = m_des) instead of being reconstructed
+        afterward from a densely-saved trajectory. Densely saving every step and
+        recomputing m_des via a second vmap over all saved points is what
+        blew up GPU memory at large batch sizes (see FINDINGS.md Result 8/9) --
+        vmapping *that* over the batch axis too meant (batch x num_saved_points)
+        parallel Newton solves materialized at once, ~90M-wide at the full grid
+        size. Integrating W as a state avoids ever needing the dense trajectory.
+        """
         i = idx_des(t)
         t_amb_c = t_amb_des[i]
         q_solar = solar_des[i]
@@ -85,32 +94,13 @@ def make_daily_cycle_fn(profile, config):
                 t_amb_c + 2.0,
             ]
         )
-        dy, _aux = jp.desorption_rhs(
-            y, t_amb_c=t_amb_c, q_solar_w_m2=q_solar, h_amb=h_amb, thermal=thermal, mass=mass,
+        dy, aux = jp.desorption_rhs(
+            y[:3], t_amb_c=t_amb_c, q_solar_w_m2=q_solar, h_amb=h_amb, thermal=thermal, mass=mass,
             h0_ref_m=h0_ref_m, h_fg_j_per_kg=h_fg, fin_area_ratio=fin_area_ratio, x0_guess=x0_guess,
         )
-        return dy
+        m_des = aux[3]
+        return jnp.concatenate([dy, jnp.array([m_des])])
 
-    def aux_at_des(y_k, i):
-        t_amb_c = t_amb_des[i]
-        q_solar = solar_des[i]
-        h_amb = h_amb_des[i]
-        t_cond_c = jnp.clip(y_k[2], -40.0, 120.0)
-        x0_guess = jnp.array(
-            [
-                jnp.maximum(t_amb_c + 5.0, t_cond_c + 5.0),
-                jnp.maximum(t_amb_c + 5.0, t_cond_c + 5.0) + jnp.clip(q_solar / 40.0, 5.0, 30.0),
-                t_amb_c + 2.0,
-            ]
-        )
-        _, aux = jp.desorption_rhs(
-            y_k, t_amb_c=t_amb_c, q_solar_w_m2=q_solar, h_amb=h_amb, thermal=thermal, mass=mass,
-            h0_ref_m=h0_ref_m, h_fg_j_per_kg=h_fg, fin_area_ratio=fin_area_ratio, x0_guess=x0_guess,
-        )
-        return aux[3]
-
-    t_eval_des = jnp.linspace(0.0, dt_des * n_des, n_des + 1)
-    idx_arr_des = jnp.clip((t_eval_des / dt_des).astype(jnp.int32), 0, n_des - 1)
     solar_sum_des = jnp.sum(solar_des) * dt_des
 
     abs_term = diffrax.ODETerm(abs_vector_field)
@@ -130,20 +120,17 @@ def make_daily_cycle_fn(profile, config):
         h_mid = jnp.clip(h_mid, h0_ref_m, h_max_m)
 
         t_cond0 = jnp.clip(t_amb_des[0], -40.0, 120.0)
-        y0_des = jnp.array([c_w_mid, h_mid, t_cond0])
+        y0_des = jnp.array([c_w_mid, h_mid, t_cond0, 0.0])
         sol_des = diffrax.diffeqsolve(
             des_term, diffrax.Tsit5(), t0=0.0, t1=dt_des * n_des, dt0=dt_des, y0=y0_des, args=None,
-            saveat=diffrax.SaveAt(ts=t_eval_des), stepsize_controller=des_controller,
+            saveat=diffrax.SaveAt(t1=True), stepsize_controller=des_controller,
             max_steps=16384, adjoint=diffrax.DirectAdjoint(), throw=False,
         )
-        ys_des = sol_des.ys
-        m_des_hist = jax.vmap(aux_at_des)(ys_des, idx_arr_des)
-        water = jnp.trapezoid(m_des_hist, dx=dt_des)
-        water = jnp.maximum(0.0, water)
+        water = jnp.maximum(0.0, sol_des.ys[0, 3])
         eta = jnp.where(solar_sum_des > 0.0, water * h_fg / solar_sum_des, 0.0)
 
-        c_w_end = jnp.clip(ys_des[-1, 0], jp.C_W_MIN_MOL_M3, jp.C_W_MAX_MOL_M3)
-        h_end = jnp.maximum(ys_des[-1, 1], h0_ref_m)
+        c_w_end = jnp.clip(sol_des.ys[0, 0], jp.C_W_MIN_MOL_M3, jp.C_W_MAX_MOL_M3)
+        h_end = jnp.maximum(sol_des.ys[0, 1], h0_ref_m)
         return water, eta, c_w_end, h_end
 
     return jax.jit(daily_cycle)
@@ -263,7 +250,6 @@ def make_batched_daily_cycle_fn(batch, dt, n_abs_max, n_des_max):
     (c_w_initial, h_initial) [each shape (batch,)] -> (yield, eta, c_w_end, h_end)
     [each shape (batch,)], compiled once for the whole batch regardless of size.
     """
-    t_eval_des = jnp.linspace(0.0, dt * n_des_max, n_des_max + 1)
 
     def single(
         c_w_initial, h_initial,
@@ -298,6 +284,15 @@ def make_batched_daily_cycle_fn(batch, dt, n_abs_max, n_des_max):
             return jnp.where(i < n_abs_real, dy, 0.0)
 
         def des_vf(t, y, args):
+            """y = [c_w, H, T_cond, W] -- W integrated directly (dW/dt = m_des)
+            instead of densely saving the trajectory and recomputing m_des via a
+            second vmap over every saved point. That second vmap, combined with
+            this whole function already being vmapped over the batch axis, made
+            a (batch x num_saved_points) parallel Newton-solve-with-Jacobian
+            computation -- ~90M-wide at the full 189,675-instance grid, which is
+            what actually exhausted GPU memory (not a hardware batch-size limit).
+            See FINDINGS.md Result 9.
+            """
             i = idx_des(t)
             t_amb_c = t_amb_des[i]
             q_solar = solar_des[i]
@@ -310,29 +305,13 @@ def make_batched_daily_cycle_fn(batch, dt, n_abs_max, n_des_max):
                     t_amb_c + 2.0,
                 ]
             )
-            dy, _aux = jp.desorption_rhs(
-                y, t_amb_c=t_amb_c, q_solar_w_m2=q_solar, h_amb=h_amb, thermal=thermal, mass=mass,
+            dy, aux = jp.desorption_rhs(
+                y[:3], t_amb_c=t_amb_c, q_solar_w_m2=q_solar, h_amb=h_amb, thermal=thermal, mass=mass,
                 h0_ref_m=h0_ref_m, h_fg_j_per_kg=h_fg_j_per_kg, fin_area_ratio=fin_area_ratio, x0_guess=x0_guess,
             )
-            return jnp.where(i < n_des_real, dy, 0.0)
-
-        def aux_at(y_k, i):
-            t_amb_c = t_amb_des[i]
-            q_solar = solar_des[i]
-            h_amb = h_amb_des[i]
-            t_cond_c = jnp.clip(y_k[2], -40.0, 120.0)
-            x0_guess = jnp.array(
-                [
-                    jnp.maximum(t_amb_c + 5.0, t_cond_c + 5.0),
-                    jnp.maximum(t_amb_c + 5.0, t_cond_c + 5.0) + jnp.clip(q_solar / 40.0, 5.0, 30.0),
-                    t_amb_c + 2.0,
-                ]
-            )
-            _, aux = jp.desorption_rhs(
-                y_k, t_amb_c=t_amb_c, q_solar_w_m2=q_solar, h_amb=h_amb, thermal=thermal, mass=mass,
-                h0_ref_m=h0_ref_m, h_fg_j_per_kg=h_fg_j_per_kg, fin_area_ratio=fin_area_ratio, x0_guess=x0_guess,
-            )
-            return aux[3]
+            m_des = aux[3]
+            dy4 = jnp.concatenate([dy, jnp.array([m_des])])
+            return jnp.where(i < n_des_real, dy4, 0.0)
 
         y0_abs = jnp.array([c_w_initial, jnp.maximum(h_initial, h0_ref_m)])
         sol_abs = diffrax.diffeqsolve(
@@ -345,24 +324,20 @@ def make_batched_daily_cycle_fn(batch, dt, n_abs_max, n_des_max):
         h_mid = jnp.clip(sol_abs.ys[0, 1], h0_ref_m, h_max_m)
 
         t_cond0 = jnp.clip(t_amb_des[0], -40.0, 120.0)
-        y0_des = jnp.array([c_w_mid, h_mid, t_cond0])
+        y0_des = jnp.array([c_w_mid, h_mid, t_cond0, 0.0])
         sol_des = diffrax.diffeqsolve(
             diffrax.ODETerm(des_vf), diffrax.Tsit5(), t0=0.0, t1=dt * n_des_max, dt0=dt, y0=y0_des, args=None,
-            saveat=diffrax.SaveAt(ts=t_eval_des),
+            saveat=diffrax.SaveAt(t1=True),
             stepsize_controller=diffrax.PIDController(rtol=1e-4, atol=1e-7, dtmax=dt),
             max_steps=16384, adjoint=diffrax.DirectAdjoint(), throw=False,
         )
-        ys_des = sol_des.ys
-        idx_arr = jnp.clip((t_eval_des / dt).astype(jnp.int32), 0, n_des_max - 1)
-        m_des_hist = jax.vmap(aux_at)(ys_des, idx_arr)
-        m_des_hist = jnp.where(idx_arr < n_des_real, m_des_hist, 0.0)
-        water = jnp.maximum(0.0, jnp.trapezoid(m_des_hist, dx=dt))
+        water = jnp.maximum(0.0, sol_des.ys[0, 3])
 
         solar_sum = jnp.sum(jnp.where(jnp.arange(n_des_max) < n_des_real, solar_des, 0.0)) * dt
         eta = jnp.where(solar_sum > 0.0, water * h_fg_j_per_kg / solar_sum, 0.0)
 
-        c_w_end = jnp.clip(ys_des[-1, 0], jp.C_W_MIN_MOL_M3, jp.C_W_MAX_MOL_M3)
-        h_end = jnp.maximum(ys_des[-1, 1], h0_ref_m)
+        c_w_end = jnp.clip(sol_des.ys[0, 0], jp.C_W_MIN_MOL_M3, jp.C_W_MAX_MOL_M3)
+        h_end = jnp.maximum(sol_des.ys[0, 1], h0_ref_m)
         return water, eta, c_w_end, h_end
 
     in_axes = (0, 0) + (0,) * len(batch)  # c_w_initial, h_initial, then every batch dict value
