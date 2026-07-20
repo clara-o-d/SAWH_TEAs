@@ -391,6 +391,42 @@ sequential estimate, no new engineering beyond chunking. The actual root-cause
 fix (making many sites share one compiled shape, "Next steps" #2 below) would
 help *even a single GPU*, and remains unstarted.
 
+## Result 12: the full-grid job array is running, correctness spot-checked, and faster than the smoke test predicted
+
+After fixing a `sbatch_gpu_sweep_array.sh` bug (`grid_land_points()`'s one-time
+"Loading Natural Earth land polygons..." stdout message was getting captured
+ahead of the actual site-range output in the per-task python subshell, so every
+task failed immediately with `invalid int value: 'Loading'` -- fixed by piping
+through `tail -1`), the full 1,405-site x 135-combo job array is running on
+`serc` (`--array=0-39%8`, 40 chunks of ~36 sites each, 8 concurrent).
+
+**Per-site time in the real run (~94-98s) is noticeably better than the smoke
+test's 161.4s average** -- task 0 finished all 36 of its sites in 4,400.9s
+(~73 min, ~122s/site including its own first-site cold start). Not yet
+understood why (possibly a compilation-cache effect from nearby-latitude sites
+sharing similar/identical day-length shapes within one task's sequential site
+loop; not confirmed). At this rate, 5 sequential waves of 8 concurrent
+~73-minute chunks would finish the whole grid in **~6 hours**, better than the
+~8 hour estimate extrapolated from the smoke test alone.
+
+**Correctness spot-checked against the CPU pipeline at this real full-scale
+run** (not just the smoke test): site (-54, -72), hydrogel 1.0mm, eps_abs 0.85,
+tau_glass 0.8, all 3 fin_area_ratio values --
+
+| fin_area_ratio | CPU mean_yield | GPU chunk_0.csv | rel. diff |
+|---|---|---|---|
+| 3.0 | 0.355796 | 0.355786 | 0.0028% |
+| 7.1 | 0.366755 | 0.366889 | 0.0365% |
+| 12.0 | 0.369801 | 0.369890 | 0.0241% |
+
+Site-level weather stats (`mean_rh_frac`, `mean_t_amb_c`, `mean_solar_w_m2`)
+matched the CPU pipeline exactly. All yield differences are within the same
+<0.05% fixed-round-count tolerance seen throughout this document -- no new
+discrepancy at full scale. This site's CPU convergence also hit the period-2
+orbit stall-detection path Wilson's code already anticipates (cold,
+strongly-seasonal high-latitude site), and the GPU pipeline's simplified
+vectorized stall handling (Result 7) tracked it correctly.
+
 ## Next steps, in order
 
 1. **Run `sbatch_gpu_sweep_array.sh` and see if the chunked/parallel approach
