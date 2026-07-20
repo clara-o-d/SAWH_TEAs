@@ -40,6 +40,9 @@ STEP=3.0
 TASK_ID="${SLURM_ARRAY_TASK_ID}"
 NUM_TASKS=$(( SLURM_ARRAY_TASK_MAX - SLURM_ARRAY_TASK_MIN + 1 ))
 
+# grid_land_points() prints a one-time diagnostic ("Loading Natural Earth land
+# polygons...") to stdout on first call -- `tail -1` keeps only the final
+# "start end" line so that diagnostic can't get parsed as the range.
 RANGE=$(python3 -c "
 import sys
 sys.path.insert(0, 'src')
@@ -50,7 +53,7 @@ chunk = -(-total // num_tasks)  # ceil division
 start = ${TASK_ID} * chunk
 end = min(start + chunk, total)
 print(start, end)
-")
+" | tail -1)
 read -r START END <<< "${RANGE}"
 echo "Task ${TASK_ID}/${NUM_TASKS}: sites [${START}, ${END})"
 
