@@ -113,41 +113,58 @@ the CPU findings; the timing numbers are the new data). Specifically useful:
 
 I'll fold whatever comes back into `FINDINGS.md` as a real GPU data point.
 
-## 6. Once steps 1-5 check out: the actual sweep, on a small subset of real sites
+## 6. The actual sweep, on a small subset of real sites -- done, see FINDINGS.md Result 11
 
 `run_gpu_sweep.py` is the GPU counterpart to `scripts/grid_param_sweep.py` (see
 its module docstring) -- it reuses that script's CLI, weather fetch, combo grid,
 and CSV schema directly, but batches one site's full 135-combo x 12-month grid
 (up to 1,620 instances) into a single compiled call instead of looping calls to
-SciPy. This has only been validated on real weather data locally on a Mac CPU so
-far (matches `grid_param_sweep.py`'s own `combo_yield_kg_m2` to ~0.02-0.07%,
-consistent with Result 7's fixed-round-count tolerance) -- **not yet run on a
-real GPU with the actual 1,620-instance-per-site batch size**, which is
-meaningfully bigger than anything validated in steps 1-5 for a *single* site (all
-the batch-size scaling data so far *tiled* one small profile set; this uses 12
-genuinely different real months x up to 135 real combos at once).
+SciPy.
 
-Submit the smoke test (10 real sites, not tiled data) as a batch job rather than
-running it interactively -- more realistic for something that might take a while,
-and matches how the CPU sweep itself runs:
+The 10-site smoke test (`sbatch gpu_sweep/sbatch_gpu_sweep_smoke.sh`) already
+ran and is recorded in `FINDINGS.md` Result 11: correct (1,350/1,350 expected
+rows, no errors), but **~161s/site, dominated by a per-site recompile** (each
+site has a different weather-profile shape) rather than actual computation.
+Extrapolated, that's ~63 hours sequentially for the full 1,405-site grid on one
+GPU -- worth splitting across multiple GPUs before running the full grid (step 7).
+
+## 7. Scaling to the full grid: split across multiple GPUs with a Slurm job array
+
+`run_gpu_sweep.py` now takes `--site-range START END` (half-open interval into
+the `--step` land grid), and `sbatch_gpu_sweep_array.sh` is a Slurm array script
+that computes each array task's own site range automatically and writes to its
+own `chunk_<task_id>.csv` (no concurrent-write contention between tasks):
 
 ```bash
-sbatch gpu_sweep/sbatch_gpu_sweep_smoke.sh
-squeue --me                              # watch it queue/run
-tail -f gpu_sweep/logs/smoke_<jobid>.out  # jobid from squeue or the sbatch output
+sbatch gpu_sweep/sbatch_gpu_sweep_array.sh
+squeue --me                                        # watch tasks queue/run
+tail -f gpu_sweep/logs/full_<jobid>_<taskid>.out    # any one task's log
 ```
 
-Output lands in `outputs/gpu_grid_sweep/smoke_10sites.csv` -- a **separate**
-directory from the live CPU sweep's `outputs/grid_sweep/`, so there's no risk of
-the two runs touching the same files. When it finishes, send back:
+The script's `--array=0-39%8` header (40 chunks, ~35 sites each, at most 8
+running at once) is a starting guess, not a measured number -- **tune both
+numbers to your account's real serc GPU quota** (more concurrent tasks = closer
+to a full N-way speedup over the ~63-hour sequential estimate; the `%K` throttle
+lets you submit more chunks than you can run at once and let Slurm queue the
+rest automatically). Once all tasks finish, merge the chunks:
 
-- The full log output (per-site timing, any errors/OOMs -- 1,620 instances/site
-  is 27x bigger than the 60,000-instance *tiled* test from step 5, but it's also
-  a much smaller total batch than 189,675, so this is genuinely new territory,
-  not a strict subset of what's already been measured).
-- A few rows of `smoke_10sites.csv` so I can spot-check them against
-  `grid_param_sweep.py`'s own CPU function for the same sites (I'll need the
-  specific lat/lon values it picked, which the log prints).
+```bash
+(head -1 outputs/gpu_grid_sweep/chunk_0.csv; tail -n +2 -q outputs/gpu_grid_sweep/chunk_*.csv) \
+  > outputs/gpu_grid_sweep/full_sweep.csv
+```
 
-If this holds up, next is scaling `--num-sites`/`--site-indices` up toward the
-full 1,405-site grid -- not attempted yet.
+This is genuinely new territory -- concurrent array tasks sharing the `serc`
+partition/GPU pool hasn't been tried, and neither has the merge step. Send back:
+
+- `squeue --me` output while it's running (how many tasks actually ran
+  concurrently vs. queued).
+- Total wall-clock from submission to all tasks finishing.
+- Any task that failed/errored, and its log.
+- A spot-check: a few rows of the merged CSV compared against
+  `grid_param_sweep.py`'s own CPU function for the same sites (send the specific
+  lat/lon values, which each chunk's log prints).
+
+The per-site recompile cost itself (why each site takes ~161s instead of ~23s)
+is still unfixed -- `FINDINGS.md`'s next steps cover that as the follow-up once
+the array approach is confirmed working, since it would help even a single GPU
+and reduce how many concurrent GPUs the array approach needs.

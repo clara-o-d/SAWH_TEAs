@@ -51,6 +51,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                        help="One site; repeat this flag for multiple explicit sites.")
     site.add_argument("--num-sites", type=int, help="First N sites of the --step land grid (index 0..N-1).")
     site.add_argument("--site-indices", type=int, nargs="+", help="Specific indices into the --step land grid.")
+    site.add_argument("--site-range", type=int, nargs=2, metavar=("START", "END"),
+                       help="Sites [START, END) of the --step land grid -- for splitting the full grid across "
+                       "multiple concurrent GPU jobs (see sbatch_gpu_sweep_array.sh).")
     p.add_argument("--step", type=float, default=3.0, help="Grid spacing in degrees, used with --num-sites/--site-indices")
     p.add_argument("--year", type=int, default=2024)
     p.add_argument("--cache-dir", type=str, default=str(_REPO / ".weather_cache"))
@@ -75,6 +78,9 @@ def _site_list(args: argparse.Namespace) -> list[tuple[float, float]]:
     points = grid_land_points(args.step)
     if args.num_sites is not None:
         indices = range(min(args.num_sites, len(points)))
+    elif args.site_range is not None:
+        start, end = args.site_range
+        indices = range(max(0, start), min(end, len(points)))
     else:
         indices = args.site_indices
     out = []

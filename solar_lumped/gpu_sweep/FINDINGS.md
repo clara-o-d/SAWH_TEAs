@@ -355,34 +355,60 @@ Validated locally (CPU, real Atacama weather, 2 combos x 12 months = 24
 instances) against `grid_param_sweep.py`'s own `combo_yield_kg_m2` for the exact
 same combos: CPU `2.074918`/`2.174242` (eps_abs 0.90/0.95) vs. this script's
 `2.073405`/`2.172332` -- 0.073%/0.088% differences, the same order of magnitude
-as Result 7's fixed-round-count approximation, not a new discrepancy. **Not yet run on a real
-GPU**, and not yet tested at the full 1,620-instances-per-site scale (only 24
-locally) -- `SHERLOCK_GPU_RUNBOOK.md` step 6 / `sbatch_gpu_sweep_smoke.sh` is a
-10-real-site smoke test for that, still pending.
+as Result 7's fixed-round-count approximation, not a new discrepancy.
+
+## Result 11: the 10-site smoke test ran on the A100 -- correct, but compile-per-site dominates
+
+`sbatch_gpu_sweep_smoke.sh` (10 real sites spanning different latitudes, full
+135-combo grid) completed on the `serc` A100: **1,350 rows written (135 x 10,
+exactly as expected), no errors**. Per-site time ranged 104.8s-200.4s
+(mean 161.4s), 1614.3s total for all 10.
+
+**Correctness carried over again** -- this is the first time the full
+1,620-instance combo x month batch shape has run on real GPU hardware (bigger
+than anything in Results 7-9's tiled benchmarks) using genuinely different real
+per-site weather, not tiled/repeated data, and it held up.
+
+**But the per-site time is compile-dominated, not compute-dominated**: the
+60,000-instance tiled throughput from Result 8/9 (~71.7 instances/sec) predicts
+only ~23s of actual computation for 1,620 instances; the other ~80-180s per site
+is JAX recompiling from scratch, because every site has a different weather
+profile shape (`n_abs_max`/`n_des_max` depend on that site's real day lengths, so
+nothing compiled for one site is reusable for the next). Extrapolating the
+measured 161.4s/site rate to the full 1,405-site grid gives **~63 hours (~2.6
+days) sequentially on one A100** -- not the dramatic win the tiled benchmarks
+alone would have suggested, because those never paid a per-shape recompile cost
+(one shape, reused across the whole scan).
+
+**Immediate mitigation, not yet the root-cause fix**: split the grid across
+multiple concurrent GPU allocations rather than one sequential job --
+`run_gpu_sweep.py` now takes `--site-range START END` for exactly this, and
+`sbatch_gpu_sweep_array.sh` is a Slurm job array that computes each task's
+range automatically from the array size (`--array=0-39%8` -- 40 chunks, 8
+running at once by default, tune both numbers to your account's actual serc
+GPU quota). N tasks running concurrently -> roughly N x faster than the 63-hour
+sequential estimate, no new engineering beyond chunking. The actual root-cause
+fix (making many sites share one compiled shape, "Next steps" #2 below) would
+help *even a single GPU*, and remains unstarted.
 
 ## Next steps, in order
 
-1. **Run the `run_gpu_sweep.py` smoke test on the GPU** (`sbatch_gpu_sweep_smoke.sh`,
-   10 real sites, full combo grid) -- this is new territory: 1,620
-   instances/site is bigger than anything validated on real GPU hardware for a
-   single call, and uses genuinely different real per-site weather, not tiled
-   data.
-2. **Re-run `benchmark_gpu_batch_size.py` on the GPU now that Result 9's fix is
+1. **Run `sbatch_gpu_sweep_array.sh` and see if the chunked/parallel approach
+   holds up** -- new territory again: concurrent array tasks sharing the same
+   `serc` partition/GPU pool, and the merge-the-chunk-CSVs step
+   (`sbatch_gpu_sweep_array.sh`'s header comment) hasn't been exercised.
+2. **Fix the per-site recompile cost directly** (Result 11's root cause, not
+   yet attempted) -- group sites by similar day-length/latitude so many sites
+   share one padded shape and one compile, the same trick Result 7 already
+   uses across a *site's* 12 months, extended across *sites*. Would speed up
+   both the sequential and the array-job paths, and reduces how many GPUs the
+   array approach needs to hit a given wall-clock target.
+3. **Re-run `benchmark_gpu_batch_size.py` on the GPU now that Result 9's fix is
    in** -- rerun the full default size list (`12 120 1200 12000 60000 189675`),
    not just 189,675, since the fix changes the per-instance memory/compute
    profile for every size, not just the one that OOM'd. This is the number
-   needed to know whether the full grid fits in one batch and what it costs.
-3. **Batch across sites, not just months at one site** -- Result 7/8 batch 12
-   months at the *same* site (same device config, different weather only).
-   `run_gpu_sweep.py` (Result 10) still loops over sites one at a time; batching
-   several sites' combo x month grids together in one call is the next real
-   scale-up, once step 1 confirms per-site batching works on GPU.
-4. Decide how to split the 1405 sites x 135 combos = 189,675 total instances into
-   batches (one shape per batch after padding to that batch's max weather-profile
-   length -- sites vary a lot in day length depending on latitude/season, so
-   padding *all* 189,675 into one shape would waste a lot of compute on short-day
-   sites; grouping by latitude band before padding would help). Less urgent if
-   step 2 shows the whole grid fits in one batch/shape anyway.
-5. Revisit `lax.while_loop` for Aitken convergence if the larger batches in step 2
-   show the fixed-round-count waste becoming a real cost (see the open question
-   above) -- no evidence of this yet at 12,000 instances.
+   needed to know whether the full grid fits in one batch and what it costs
+   (relevant to step 2's site-batching design, not just curiosity).
+4. Revisit `lax.while_loop` for Aitken convergence if larger batches show the
+   fixed-round-count waste becoming a real cost (see the open question above)
+   -- no evidence of this yet at 12,000 instances.
