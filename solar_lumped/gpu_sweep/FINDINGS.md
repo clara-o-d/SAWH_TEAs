@@ -232,21 +232,80 @@ revisiting with real batch sizes (hundreds+) and on a GPU, not concluded here.
   ~1e4-1e5 mol/m³ scale to resolve the CPU's `atol~1e-7`-level fluxes). Worth an
   explicit float32-vs-float64 accuracy sweep before committing, but there was no
   reason to try float32 here since x64 was already fast enough on CPU.
-- **Per-instance memory / max batch size per GPU?** Not tested -- no GPU available
-  in this environment. The 15-combo vmap above is a correctness/architecture
-  smoke test, not a sizing test.
+- **Per-instance memory / max batch size per GPU?** Partially answered (Result
+  8): memory usage is nearly flat from 12 to 12,000 instances (61.2GB -> 61.5GB
+  of 80GB on an A100), so memory is very unlikely to be the limiter for the full
+  189,675-instance grid -- but 60,000 and 189,675 haven't been measured yet
+  (timed out on a 1hr allocation), so the actual ceiling (if any) isn't confirmed.
 
 ## Recommended next steps, in order
 
 The reference-value discrepancy from Result 6 is confirmed stale/not a concern
 (per follow-up) -- not tracked as a next step.
 
-1. **Scale the batch up from 12 instances toward the real grid size** (189,675
-   site x combo pairs) and check whether compile time, memory, and the
-   fixed-round-count accuracy cost (Result 7) hold up at hundreds or thousands of
-   instances per batch, not just 12 -- everything validated so far is at small
-   scale, on CPU.
-2. **Batch across sites, not just months at one site** -- Result 7 batched 12
+## Result 8: real A100 numbers (Sherlock `serc`) -- small batches are much slower than CPU, but the amortization curve is real
+
+First real-GPU data, on an A100-SXM4-80GB (`nvidia-smi`: driver 550.163.01, CUDA
+12.4), via `salloc --partition=serc --gres=gpu:1`.
+
+**Correctness carried over exactly**: `validate_batched_pipeline.py` on the GPU
+reproduced the same ~0.03% worst-per-month / 0.016% mean-yield agreement against
+the serial pipeline as the CPU run (Result 7) -- the physics port is correct on
+real GPU hardware, not just a CPU JAX backend.
+
+**Speed at small batch size (12 instances) is *worse* than CPU, by design of the
+problem, not a bug**: the same `validate_batched_pipeline.py` that took ~47s total
+on the Mac CPU took **585s (serial) + 104s/92s (batched first/warm)** on the A100
+-- 15-19x slower. This is expected in hindsight: the pipeline does thousands of
+tiny sequential steps per instance (fixed-iteration Newton solves inside an
+adaptive ODE stepper inside an 8-round Aitken loop), each a real dispatch to the
+GPU. At only 12 instances there isn't nearly enough parallel work per step to
+amortize that per-dispatch overhead, so the GPU pays the same thousands of
+round-trips as one instance would, for barely more work. A CPU doesn't pay that
+discrete-device dispatch cost, so it wins easily at this size. (See
+`GPU_PRIMER.md` for a plainer-language version of this.)
+
+**But the amortization curve is exactly what was hoped for as batch size grows**
+(`benchmark_gpu_batch_size.py`, same 12 real profiles tiled up to each size,
+`find_cyclic_state_batched` with `max_rounds=8`):
+
+| batch size | warm-rerun wall-clock | ms/instance | GPU memory used |
+|---|---|---|---|
+| 12 | 91.95s | 7662.1 | 61233 / 81920 MiB |
+| 120 | 98.27s | 818.9 | 61237 / 81920 MiB |
+| 1,200 | 111.76s | 93.1 | 61273 / 81920 MiB |
+| 12,000 | 246.24s | 20.5 | 61505 / 81920 MiB |
+| 60,000 | 837.02s | 14.0 | 62567 / 81920 MiB |
+| 189,675 (full grid) | *(pending -- see below)* | | |
+
+Going from 12 to 60,000 instances (5000x more work) cost only ~9.1x more
+wall-clock -- a **~550x per-instance throughput improvement**. The speedup-per-10x
+is shrinking as batch size grows (9.4x -> 8.8x -> 4.5x -> ~1.5x per decade from
+12k->60k), consistent with the A100's actual parallel capacity (108 SMs) becoming
+the limit rather than dispatch overhead -- expected diminishing returns, not a
+problem. **GPU memory usage stays modest** (61.2GB -> 62.6GB from 12 to 60,000
+instances, out of 80GB) -- still no sign of memory being the limiter.
+
+Extrapolating from the 60,000-instance warm throughput (60,000 instances in
+837.02s = ~71.7 instances/sec) to the full 189,675-instance grid (3.16x more)
+gives very roughly 2,650s (~44 min) for one Aitken pass over the *entire*
+site x combo grid, if throughput holds at that rate -- vs. the CPU sweep's
+current multi-day, cluster-wide job. **Attempting 189,675 directly failed**: the
+process was killed with a bare `Killed` (no Python traceback), which is
+consistent with the Linux OOM killer hitting the `salloc --mem=32G` **host** RAM
+cap during batch-array construction/XLA compilation (not GPU memory, which had
+~19GB of headroom at 60,000). Re-running with a much larger `--mem` is the
+immediate next step to rule that out before concluding anything about whether the
+full grid fits in one batch.
+
+## Next steps, in order
+
+1. **Get the missing 189,675 data point** with more host memory
+   (`benchmark_gpu_batch_size.py --sizes 189675`, `salloc --mem=128G` or more) --
+   this is the one number needed to know whether the full grid actually fits in
+   one batch and
+   what it would cost.
+2. **Batch across sites, not just months at one site** -- Result 7/8 batch 12
    months at the *same* site (same device config, different weather only). The
    real grid varies device config too (135 combos x however many sites fit in one
    batch); `build_batch_arrays`/`make_batched_daily_cycle_fn` already accept
@@ -256,13 +315,8 @@ The reference-value discrepancy from Result 6 is confirmed stale/not a concern
    batches (one shape per batch after padding to that batch's max weather-profile
    length -- sites vary a lot in day length depending on latitude/season, so
    padding *all* 189,675 into one shape would waste a lot of compute on short-day
-   sites; grouping by latitude band before padding would help).
-4. Get access to an actual GPU (`serc` A100 partition, see
-   [`SHERLOCK_GPU_RUNBOOK.md`](SHERLOCK_GPU_RUNBOOK.md) -- in progress) and
-   re-measure everything above -- every number in this document is a single CPU
-   core, no GPU at all. The ~3-8x speedups already seen from compile-once
-   batching are a lower bound; the real win is expected once thousands of
-   instances batch into one compiled
-   call on a GPU instead of 12.
-5. Revisit `lax.while_loop` for Aitken convergence if step 1's larger batches show
-   the fixed-round-count waste becoming a real cost (see the open question above).
+   sites; grouping by latitude band before padding would help). Less urgent if
+   step 1 shows the whole grid fits in one batch/shape anyway.
+4. Revisit `lax.while_loop` for Aitken convergence if the larger batches in step 1
+   show the fixed-round-count waste becoming a real cost (see the open question
+   above) -- no evidence of this yet at 12,000 instances.
