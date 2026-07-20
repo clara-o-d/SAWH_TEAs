@@ -19,7 +19,12 @@ Aitken pipeline vs. CPU and vs. the paper's reference values),
 [`validate_batched_pipeline.py`](validate_batched_pipeline.py) (cross-length
 batching + fixed-round-count Aitken vs. the serial pipeline),
 [`benchmark_gpu_batch_size.py`](benchmark_gpu_batch_size.py) (batch-size scaling
-scan -- written for, but not yet run on, real GPU hardware). If you're new to
+scan -- written for, but not yet run on, real GPU hardware),
+[`run_gpu_sweep.py`](run_gpu_sweep.py) (the actual GPU-driven sweep -- mirrors
+`scripts/grid_param_sweep.py`'s CLI/weather/combo-grid/CSV-schema, batches one
+site's full combo x month grid per compiled call; validated locally against real
+weather on CPU, not yet run on GPU -- see `SHERLOCK_GPU_RUNBOOK.md` step 6). If
+you're new to
 JAX/GPU work generally, see [`GPU_PRIMER.md`](GPU_PRIMER.md) first; to actually
 run any of this on Sherlock's `serc` A100s, see
 [`SHERLOCK_GPU_RUNBOOK.md`](SHERLOCK_GPU_RUNBOOK.md).
@@ -335,25 +340,49 @@ continuously replaces a discrete trapezoidal approximation over ~478 points with
 what the adaptive stepper actually computes). **Not yet re-measured on the GPU**
 -- that's the immediate next step, now that the fix is in.
 
+## Result 10: `run_gpu_sweep.py` -- the actual GPU-driven sweep, not yet run on GPU
+
+Everything above validates the physics/integration/batching *machinery*; none of
+it is a runnable replacement for `scripts/grid_param_sweep.py`. `run_gpu_sweep.py`
+is that -- it imports `grid_param_sweep.py` directly (CLI patterns, weather
+fetch, `combo_grid`/`build_device_config`, `_CSV_COLUMNS`/`_append_row`) so its
+output is schema-identical to the CPU sweep's, and batches one site's full combo
+x month cross product (up to 135 x 12 = 1,620 instances) into a single compiled
+call via `build_batch_arrays`/`make_batched_daily_cycle_fn`/
+`find_cyclic_state_batched`.
+
+Validated locally (CPU, real Atacama weather, 2 combos x 12 months = 24
+instances) against `grid_param_sweep.py`'s own `combo_yield_kg_m2` for the exact
+same combos: CPU `2.074918`/`2.174242` (eps_abs 0.90/0.95) vs. this script's
+`2.073405`/`2.172332` -- 0.073%/0.088% differences, the same order of magnitude
+as Result 7's fixed-round-count approximation, not a new discrepancy. **Not yet run on a real
+GPU**, and not yet tested at the full 1,620-instances-per-site scale (only 24
+locally) -- `SHERLOCK_GPU_RUNBOOK.md` step 6 / `sbatch_gpu_sweep_smoke.sh` is a
+10-real-site smoke test for that, still pending.
+
 ## Next steps, in order
 
-1. **Re-run `benchmark_gpu_batch_size.py` on the GPU now that Result 9's fix is
+1. **Run the `run_gpu_sweep.py` smoke test on the GPU** (`sbatch_gpu_sweep_smoke.sh`,
+   10 real sites, full combo grid) -- this is new territory: 1,620
+   instances/site is bigger than anything validated on real GPU hardware for a
+   single call, and uses genuinely different real per-site weather, not tiled
+   data.
+2. **Re-run `benchmark_gpu_batch_size.py` on the GPU now that Result 9's fix is
    in** -- rerun the full default size list (`12 120 1200 12000 60000 189675`),
    not just 189,675, since the fix changes the per-instance memory/compute
    profile for every size, not just the one that OOM'd. This is the number
    needed to know whether the full grid fits in one batch and what it costs.
-2. **Batch across sites, not just months at one site** -- Result 7/8 batch 12
-   months at the *same* site (same device config, different weather only). The
-   real grid varies device config too (135 combos x however many sites fit in one
-   batch); `build_batch_arrays`/`make_batched_daily_cycle_fn` already accept
-   per-instance config arrays, so this should compose directly, but hasn't been
-   tried.
-3. Decide how to split the 1405 sites x 135 combos = 189,675 total instances into
+3. **Batch across sites, not just months at one site** -- Result 7/8 batch 12
+   months at the *same* site (same device config, different weather only).
+   `run_gpu_sweep.py` (Result 10) still loops over sites one at a time; batching
+   several sites' combo x month grids together in one call is the next real
+   scale-up, once step 1 confirms per-site batching works on GPU.
+4. Decide how to split the 1405 sites x 135 combos = 189,675 total instances into
    batches (one shape per batch after padding to that batch's max weather-profile
    length -- sites vary a lot in day length depending on latitude/season, so
    padding *all* 189,675 into one shape would waste a lot of compute on short-day
    sites; grouping by latitude band before padding would help). Less urgent if
-   step 1 shows the whole grid fits in one batch/shape anyway.
-4. Revisit `lax.while_loop` for Aitken convergence if the larger batches in step 1
+   step 2 shows the whole grid fits in one batch/shape anyway.
+5. Revisit `lax.while_loop` for Aitken convergence if the larger batches in step 2
    show the fixed-round-count waste becoming a real cost (see the open question
    above) -- no evidence of this yet at 12,000 instances.

@@ -101,7 +101,7 @@ e.g. to binary-search around wherever it starts struggling:
 python3 gpu_sweep/benchmark_gpu_batch_size.py --sizes 20000 30000 40000
 ```
 
-## What to send back
+## What to send back (steps 1-5)
 
 For each script: the full printed output (accuracy/`rel_err` numbers should match
 the CPU findings; the timing numbers are the new data). Specifically useful:
@@ -111,4 +111,43 @@ the CPU findings; the timing numbers are the new data). Specifically useful:
   "max batch size per GPU" and "real GPU speedup" questions in `FINDINGS.md`.
 - Whatever batch size (if any) it fails at, and the error message.
 
-I'll fold whatever comes back into `FINDINGS.md` as the first real GPU data point.
+I'll fold whatever comes back into `FINDINGS.md` as a real GPU data point.
+
+## 6. Once steps 1-5 check out: the actual sweep, on a small subset of real sites
+
+`run_gpu_sweep.py` is the GPU counterpart to `scripts/grid_param_sweep.py` (see
+its module docstring) -- it reuses that script's CLI, weather fetch, combo grid,
+and CSV schema directly, but batches one site's full 135-combo x 12-month grid
+(up to 1,620 instances) into a single compiled call instead of looping calls to
+SciPy. This has only been validated on real weather data locally on a Mac CPU so
+far (matches `grid_param_sweep.py`'s own `combo_yield_kg_m2` to ~0.02-0.07%,
+consistent with Result 7's fixed-round-count tolerance) -- **not yet run on a
+real GPU with the actual 1,620-instance-per-site batch size**, which is
+meaningfully bigger than anything validated in steps 1-5 for a *single* site (all
+the batch-size scaling data so far *tiled* one small profile set; this uses 12
+genuinely different real months x up to 135 real combos at once).
+
+Submit the smoke test (10 real sites, not tiled data) as a batch job rather than
+running it interactively -- more realistic for something that might take a while,
+and matches how the CPU sweep itself runs:
+
+```bash
+sbatch gpu_sweep/sbatch_gpu_sweep_smoke.sh
+squeue --me                              # watch it queue/run
+tail -f gpu_sweep/logs/smoke_<jobid>.out  # jobid from squeue or the sbatch output
+```
+
+Output lands in `outputs/gpu_grid_sweep/smoke_10sites.csv` -- a **separate**
+directory from the live CPU sweep's `outputs/grid_sweep/`, so there's no risk of
+the two runs touching the same files. When it finishes, send back:
+
+- The full log output (per-site timing, any errors/OOMs -- 1,620 instances/site
+  is 27x bigger than the 60,000-instance *tiled* test from step 5, but it's also
+  a much smaller total batch than 189,675, so this is genuinely new territory,
+  not a strict subset of what's already been measured).
+- A few rows of `smoke_10sites.csv` so I can spot-check them against
+  `grid_param_sweep.py`'s own CPU function for the same sites (I'll need the
+  specific lat/lon values it picked, which the log prints).
+
+If this holds up, next is scaling `--num-sites`/`--site-indices` up toward the
+full 1,405-site grid -- not attempted yet.
