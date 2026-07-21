@@ -18,10 +18,27 @@ it's the exact same JAX/diffrax dependency this package now shares.
 cd /home/groups/cdiazm/SAWH_TEAs/sawh_bayesopt   # sibling of solar_lumped in the same checkout
 ml python/3.12.1 uv
 uv venv .venv_gpu && source .venv_gpu/bin/activate
-uv pip install -e ../solar_lumped   # sawh_bayesopt depends on solar-lumped-sawh, installed editable
-uv pip install -e .                 # pulls scikit-learn, scipy, pandas, matplotlib, plain jax/diffrax
-uv pip install "jax[cuda12]"        # replace the CPU jax wheel with the CUDA build
+uv pip install --only-binary :all: -e ../solar_lumped   # sawh_bayesopt depends on solar-lumped-sawh, installed editable
+uv pip install --only-binary :all: -e .                 # pulls scikit-learn, scipy, pandas, matplotlib, plain jax/diffrax
+uv pip install "jax[cuda12]"                             # replace the CPU jax wheel with the CUDA build
 ```
+
+`--only-binary :all:` forces every dependency to come from a prebuilt wheel
+instead of compiling from source -- without it, `uv` can try to build
+matplotlib's `pillow` dependency from source and fail on a login node with
+`RequiredDependencyException: jpeg` (no `libjpeg` headers). If it still fails
+with `--only-binary :all:` (a clean "no matching distribution" error rather
+than a compile attempt), that means no wheel exists for this exact
+Python/platform combo -- try `ml spider jpeg`/`ml load libjpeg-turbo` (module
+name varies by cluster) to get headers for a from-source build, or pin an
+older `pillow` version with broader wheel coverage.
+
+If `solar-lumped-sawh` (`uv pip install -e .`'s own dependency) ever errors
+with "not found in the package registry" instead of "already installed",
+that means the `-e ../solar_lumped` step above didn't actually complete --
+it's a local-only package name, never published anywhere, so it's only
+resolvable once that editable install has succeeded in this same venv. Fix
+whatever broke step 1 and rerun it before retrying `-e .`.
 
 `jax[cuda12]` pulls a self-contained CUDA/cuDNN runtime via pip -- it doesn't
 need a matching `ml load cuda/...` system module, only an NVIDIA driver new
