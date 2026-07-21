@@ -449,9 +449,17 @@ slightly higher than Case 1's tightest matches but the same order of magnitude
 and consistent with the fixed-round-count approximation's normal variation, not
 a new discrepancy from the modified physics. **Case 2's smoke test is fully
 verified; the full 1,405-site grid (`sbatch_gpu_sweep_array_case2.sh`) is the
-next step.** Case 3 (`eps=0` idealized limits) has not yet run on Sherlock at
-all -- only validated at the pointwise-residual level (see
-`docs/gpu_sweep_handoff.md`) and locally on CPU-backed JAX.
+next step.**
+
+**Case 3 ("optical material limits", `eps_abs_ir=eps_glass_ir=0`,
+`eps_abs=tau_glass=1`) also ran its smoke test on `serc` and checked out** --
+same site (-54, -72), `hydrogel=1.0mm`, `fin_area_ratio=3.0`: CPU `0.674242` vs
+GPU `0.672840`, 0.208% difference. Same story as Case 2 -- slightly higher than
+Case 1's tightest matches, same order of magnitude, no new discrepancy despite
+this being the most numerically extreme parameter regime tested (the `eps=0`
+values that originally triggered the `ZeroDivisionError` bug fix). **Both Case
+2 and Case 3 smoke tests are verified; both full 1,405-site grids
+(`sbatch_gpu_sweep_array_case2.sh`/`_case3.sh`) are cleared to run.**
 
 ## Next steps, in order
 
