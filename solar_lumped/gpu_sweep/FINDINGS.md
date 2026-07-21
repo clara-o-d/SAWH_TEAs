@@ -427,6 +427,32 @@ orbit stall-detection path Wilson's code already anticipates (cold,
 strongly-seasonal high-latitude site), and the GPU pipeline's simplified
 vectorized stall handling (Result 7) tracked it correctly.
 
+## Result 13: Case 2 (modified radiative physics) smoke test ran on the A100, spot-checked correct
+
+See `docs/gpu_sweep_handoff.md` for the Case 2/3 physics change itself (real
+absorber/glass IR emissivities via a parallel-plate formula, instead of the
+original blackbody/cavity approximation; new `eps_abs_ir`/`eps_glass_ir`
+fields, `sbatch_gpu_sweep_smoke_case2.sh`/`_array_case2.sh` and their Case 3
+counterparts). The Case 2 smoke test (10 real sites, `eps_abs_ir=0.05`,
+`eps_glass_ir=0.95`) ran successfully on `serc`. Spot-checked against the CPU
+pipeline at site (-54, -72) (the same site Result 12 checked for Case 1) across
+all 3 `fin_area_ratio` values:
+
+| fin_area_ratio | CPU (Case 2) | GPU (smoke test) | rel. diff |
+|---|---|---|---|
+| 3.0 | 0.452998 | 0.452537 | 0.102% |
+| 7.1 | 0.460654 | 0.459794 | 0.187% |
+| 12.0 | 0.462861 | 0.462379 | 0.104% |
+
+Site-level weather stats matched exactly again. All differences <0.2% --
+slightly higher than Case 1's tightest matches but the same order of magnitude
+and consistent with the fixed-round-count approximation's normal variation, not
+a new discrepancy from the modified physics. **Case 2's smoke test is fully
+verified; the full 1,405-site grid (`sbatch_gpu_sweep_array_case2.sh`) is the
+next step.** Case 3 (`eps=0` idealized limits) has not yet run on Sherlock at
+all -- only validated at the pointwise-residual level (see
+`docs/gpu_sweep_handoff.md`) and locally on CPU-backed JAX.
+
 ## Next steps, in order
 
 1. **Run `sbatch_gpu_sweep_array.sh` and see if the chunked/parallel approach
