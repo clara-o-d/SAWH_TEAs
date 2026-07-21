@@ -101,6 +101,15 @@ class WeatherClient:
                     # Requests are always for a fixed, already-elapsed date range
                     # (a past calendar year), so the archive response never changes.
                     expire_after=requests_cache.NEVER_EXPIRE,
+                    # WAL mode lets concurrent readers/writers not block each other
+                    # (vs. SQLite's default rollback-journal mode, which serializes
+                    # all writes); busy_timeout (ms) is how long a writer waits on a
+                    # lock before raising "database is locked" instead of the
+                    # 5s sqlite3 default -- both needed once many GPU-sweep array
+                    # tasks share this one cache file concurrently (see
+                    # gpu_sweep/FINDINGS.md/docs/gpu_sweep_handoff.md).
+                    wal=True,
+                    busy_timeout=60_000,
                 )
             except ImportError:
                 warnings.warn("requests-cache not installed; caching disabled.", stacklevel=2)
