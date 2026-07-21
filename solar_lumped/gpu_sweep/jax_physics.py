@@ -127,6 +127,14 @@ def water_activity_licl_from_c_w(c_w, *, c_s, h0_ref_m, formula_weight_g_mol, te
 
 
 def parallel_plate_emissivity(eps_a, eps_b):
+    # jnp.asarray first: if eps_a/eps_b arrive as plain Python floats (e.g. a
+    # closure constant from the serial, non-batched daily-cycle path) rather
+    # than JAX arrays, "1.0 / 0.0" is eager Python division and raises
+    # ZeroDivisionError immediately -- jnp.where can't mask a branch that
+    # never got the chance to be lazy. As real arrays, "1.0 / 0.0" is a safe,
+    # lazy `inf` that jnp.where then correctly discards.
+    eps_a = jnp.asarray(eps_a)
+    eps_b = jnp.asarray(eps_b)
     return jnp.where((eps_a <= 0.0) | (eps_b <= 0.0), 0.0, 1.0 / (1.0 / eps_a + 1.0 / eps_b - 1.0))
 
 
@@ -247,14 +255,23 @@ def m_des_kg_s_m2_from_dc_w(dc_w_dt_val, *, h0_ref_m):
 
 
 class ThermalParams:
-    """Mirrors DeviceThermalParams for the note_s1/has_glass=True Atacama-baseline path."""
+    """Mirrors DeviceThermalParams for the note_s1/has_glass=True Atacama-baseline path.
 
-    def __init__(self, *, insulation_gap_m, vapor_gap_m, eps_abs, tau_glass, tilt_deg):
+    eps_abs_ir/eps_glass_ir default to 1.0 (blackbody), which makes
+    parallel_plate_emissivity(1.0, 1.0) == 1.0 -- i.e. the default reproduces
+    the original Wilson Eqs. 3/4 cavity/blackbody approximation exactly (Case
+    1). Pass real IR emissivities to activate the modified physics (Case 2/3,
+    see device_balances.py's _residuals for the CPU-side mirror of this).
+    """
+
+    def __init__(self, *, insulation_gap_m, vapor_gap_m, eps_abs, tau_glass, tilt_deg, eps_abs_ir=1.0, eps_glass_ir=1.0):
         self.insulation_gap_m = insulation_gap_m
         self.vapor_gap_m = vapor_gap_m
         self.eps_abs = eps_abs
         self.tau_glass = tau_glass
         self.tilt_deg = tilt_deg
+        self.eps_abs_ir = eps_abs_ir
+        self.eps_glass_ir = eps_glass_ir
         self.h_des_j_per_kg = H_DES_J_PER_KG
 
 
@@ -268,9 +285,11 @@ def _thermal_residuals(x, *, t_cond_c, t_amb_c, q_solar_w_m2, m_des, h_amb, para
     q_des = m_des * params.h_des_j_per_kg
     r1 = u_gel * (t_abs - t_gel) - h_conv_g * (t_gel - t_cond_c) - q_des - q_rad_gc
 
+    eps_ag = parallel_plate_emissivity(params.eps_abs_ir, params.eps_glass_ir)
+    eps_ga = params.eps_glass_ir
     q_cond_ag = conduction_air_gap_w_m2(t_abs, t_glass, params.insulation_gap_m)
-    q_rad_ag = radiative_exchange_w_m2(t_abs, t_glass, 1.0)
-    q_rad_ga = radiative_exchange_w_m2(t_glass, t_amb_c, 1.0)
+    q_rad_ag = radiative_exchange_w_m2(t_abs, t_glass, eps_ag)
+    q_rad_ga = radiative_exchange_w_m2(t_glass, t_amb_c, eps_ga)
     r3 = q_cond_ag + q_rad_ag - h_amb * (t_glass - t_amb_c) - q_rad_ga
     r4 = (
         params.eps_abs * params.tau_glass * q_solar_w_m2

@@ -35,7 +35,13 @@ class DeviceThermalParams:
     tau_glass: float = table_s3.TAU_GLASS
     eps_gel: float = table_s3.EPS_GEL
     eps_al: float = table_s3.EPS_AL
-    eps_glass: float = table_s3.EPS_GLASS
+    # Real absorber/glass IR emissivities for the modified Eqs. 3/4 radiative
+    # exchange terms (2026-07 update to the original blackbody/cavity
+    # approximation below). Both None (default) reproduces the original
+    # Wilson Eqs. 3/4 exactly (eps_ag=eps_ga=1.0) -- set both together to
+    # activate the modified physics; see _residuals.
+    eps_abs_ir: float | None = None
+    eps_glass_ir: float | None = None
     tilt_deg: float = table_s3.TILT_DEG
     h_des_j_per_kg: float = table_s3.H_DES_J_PER_KG
     has_glass: bool = True
@@ -113,13 +119,21 @@ def _residuals(
         - q_rad_gc
     )
 
-    # Absorber→glass: Wilson Eq. 4 writes σ(T_abs⁴ − T_glass⁴) without an
-    # explicit emissivity factor (cavity / blackbody approximation).
-    eps_ag = 1.0
-    # Glass→surroundings: Wilson Eq. 3 writes σ(T_glass⁴ − T_amb⁴) with no emissivity
-    # factor (blackbody in the IR). The sink temperature is ambient by default; the
-    # COMSOL Atacama field model uses a surroundings/sky temperature below air temp.
-    eps_ga = 1.0
+    if params.eps_abs_ir is not None and params.eps_glass_ir is not None:
+        # Modified Eqs. 3/4: real absorber/glass IR emissivities instead of the
+        # blackbody cavity approximation. eps_ag via the same parallel-plate
+        # formula already used for eps_gel/eps_al; eps_ga is the glass's own
+        # IR emissivity directly (glass radiates to ambient, not a cavity).
+        eps_ag = parallel_plate_emissivity(params.eps_abs_ir, params.eps_glass_ir)
+        eps_ga = params.eps_glass_ir
+    else:
+        # Absorber→glass: Wilson Eq. 4 writes σ(T_abs⁴ − T_glass⁴) without an
+        # explicit emissivity factor (cavity / blackbody approximation).
+        eps_ag = 1.0
+        # Glass→surroundings: Wilson Eq. 3 writes σ(T_glass⁴ − T_amb⁴) with no emissivity
+        # factor (blackbody in the IR). The sink temperature is ambient by default; the
+        # COMSOL Atacama field model uses a surroundings/sky temperature below air temp.
+        eps_ga = 1.0
     t_sky_c = t_amb_c - params.sky_temp_depression_c
 
     if not params.has_glass:

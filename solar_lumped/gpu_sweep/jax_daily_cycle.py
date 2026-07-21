@@ -56,6 +56,8 @@ def make_daily_cycle_fn(profile, config):
     thermal = jp.ThermalParams(
         insulation_gap_m=thermal_p.insulation_gap_m, vapor_gap_m=vapor_gap_m,
         eps_abs=thermal_p.eps_abs, tau_glass=thermal_p.tau_glass, tilt_deg=config.tilt_deg,
+        eps_abs_ir=thermal_p.eps_abs_ir if thermal_p.eps_abs_ir is not None else 1.0,
+        eps_glass_ir=thermal_p.eps_glass_ir if thermal_p.eps_glass_ir is not None else 1.0,
     )
 
     def idx_abs(t):
@@ -234,6 +236,8 @@ def build_batch_arrays(profiles, configs):
         g_conv_m_s=jnp.array([m.g_conv_m_s for m in mass_ps]),
         eps_abs=jnp.array([t.eps_abs for t in thermal_ps]),
         tau_glass=jnp.array([t.tau_glass for t in thermal_ps]),
+        eps_abs_ir=jnp.array([t.eps_abs_ir if t.eps_abs_ir is not None else 1.0 for t in thermal_ps]),
+        eps_glass_ir=jnp.array([t.eps_glass_ir if t.eps_glass_ir is not None else 1.0 for t in thermal_ps]),
         h0_ref_m=jnp.array([c.hydrogel_thickness_m for c in configs]),
         vapor_gap_m=jnp.array([c.vapor_gap_m for c in configs]),
         insulation_gap_m=jnp.array([t.insulation_gap_m for t in thermal_ps]),
@@ -256,6 +260,7 @@ def make_batched_daily_cycle_fn(batch, dt, n_abs_max, n_des_max):
         t_amb_abs, rh_abs, h_amb_abs, n_abs_real,
         t_amb_des, solar_des, h_amb_des, n_des_real,
         c_s_mol_m3, formula_weight_g_mol, g_conv_m_s, eps_abs, tau_glass,
+        eps_abs_ir, eps_glass_ir,
         h0_ref_m, vapor_gap_m, insulation_gap_m, tilt_deg, fin_area_ratio,
         salt_to_polymer_ratio, h_fg_j_per_kg,
     ):
@@ -266,6 +271,7 @@ def make_batched_daily_cycle_fn(batch, dt, n_abs_max, n_des_max):
         thermal = jp.ThermalParams(
             insulation_gap_m=insulation_gap_m, vapor_gap_m=vapor_gap_m,
             eps_abs=eps_abs, tau_glass=tau_glass, tilt_deg=tilt_deg,
+            eps_abs_ir=eps_abs_ir, eps_glass_ir=eps_glass_ir,
         )
         h_max_m = jnp.maximum(vapor_gap_m - jp.VAPOR_GAP_TRANSPORT_MIN_M, h0_ref_m + 1e-6)
 

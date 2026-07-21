@@ -66,6 +66,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--tau-glass", type=float, nargs="+", default=list(gps.DEFAULT_TAU_GLASS))
     p.add_argument("--fin-area-ratio", type=float, nargs="+", default=list(gps.DEFAULT_FIN_AREA_RATIO))
     p.add_argument("--vapor-gap-mm", type=float, default=gps.DEFAULT_VAPOR_GAP_MM)
+    p.add_argument(
+        "--eps-abs-ir", type=float, default=None,
+        help="Absorber IR emissivity for the modified Eqs. 3/4 radiative exchange (fixed constant, "
+        "not swept). Default None reproduces the original blackbody/cavity approximation exactly "
+        "(Case 1) -- set together with --eps-glass-ir for Case 2 (0.05) or Case 3 (0.0).",
+    )
+    p.add_argument(
+        "--eps-glass-ir", type=float, default=None,
+        help="Glass IR emissivity for the modified Eqs. 3/4 radiative exchange. See --eps-abs-ir. "
+        "(Case 2: 0.95; Case 3: 0.0.)",
+    )
     p.add_argument("--max-rounds", type=int, default=8, help="Fixed Aitken round count (see FINDINGS.md Result 7)")
     p.add_argument("--output-csv", type=Path, required=True)
     p.add_argument("--resume", action="store_true", help="Skip a site entirely if all its combos are already in --output-csv")
@@ -127,6 +138,7 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, client: WeatherCl
         gps.build_device_config(
             c, salt=args.salt, salt_loading=args.salt_loading, insulation_gap_mm=args.insulation_gap_mm,
             tilt_deg=args.tilt_deg, vapor_gap_mm=args.vapor_gap_mm,
+            eps_abs_ir=args.eps_abs_ir, eps_glass_ir=args.eps_glass_ir,
         )
         for c in combos
     ]
@@ -168,7 +180,10 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, client: WeatherCl
                 "mean_rh_frac": f"{mean_rh:.6f}", "mean_t_amb_c": f"{mean_t_amb:.4f}", "mean_solar_w_m2": f"{mean_solar:.2f}",
                 "salt": args.salt,
                 "hydrogel_thickness_mm": combo.hydrogel_thickness_mm, "eps_abs": combo.eps_abs,
-                "tau_glass": combo.tau_glass, "fin_area_ratio": combo.fin_area_ratio,
+                "tau_glass": combo.tau_glass,
+                "eps_abs_ir": args.eps_abs_ir if args.eps_abs_ir is not None else "",
+                "eps_glass_ir": args.eps_glass_ir if args.eps_glass_ir is not None else "",
+                "fin_area_ratio": combo.fin_area_ratio,
                 "vapor_gap_mm": args.vapor_gap_mm,
                 "warmup_method": "aitken-gpu-fixed-round", "resolution": "monthly",
                 "mean_yield_kg_m2": f"{mean_yield[ci]:.6f}", "mean_eta_thermal": f"{mean_eta[ci]:.6f}",

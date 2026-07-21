@@ -81,6 +81,8 @@ def build_device_config(
     insulation_gap_mm: float,
     tilt_deg: float,
     vapor_gap_mm: float,
+    eps_abs_ir: float | None = None,
+    eps_glass_ir: float | None = None,
 ) -> DeviceConfig:
     thermal = DeviceThermalParams(
         insulation_gap_m=insulation_gap_mm * 1e-3,
@@ -88,6 +90,8 @@ def build_device_config(
         eps_abs=combo.eps_abs,
         tau_glass=combo.tau_glass,
         tilt_deg=tilt_deg,
+        eps_abs_ir=eps_abs_ir,
+        eps_glass_ir=eps_glass_ir,
     )
     return DeviceConfig(
         salt_name=salt,
@@ -211,6 +215,8 @@ _CSV_COLUMNS: tuple[str, ...] = (
     "hydrogel_thickness_mm",
     "eps_abs",
     "tau_glass",
+    "eps_abs_ir",
+    "eps_glass_ir",
     "fin_area_ratio",
     "vapor_gap_mm",
     "warmup_method",
@@ -267,6 +273,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--eps-abs", type=float, nargs="+", default=list(DEFAULT_EPS_ABS))
     p.add_argument("--tau-glass", type=float, nargs="+", default=list(DEFAULT_TAU_GLASS))
     p.add_argument("--fin-area-ratio", type=float, nargs="+", default=list(DEFAULT_FIN_AREA_RATIO))
+    p.add_argument(
+        "--eps-abs-ir", type=float, default=None,
+        help="Absorber IR emissivity for the modified Eqs. 3/4 radiative exchange (fixed constant, "
+        "not swept). Default None reproduces the original blackbody/cavity approximation "
+        "(eps_ag=eps_ga=1.0) exactly -- set together with --eps-glass-ir to activate the modified "
+        "physics (Case 2: 0.05; Case 3 'optical material limits': 0.0).",
+    )
+    p.add_argument(
+        "--eps-glass-ir", type=float, default=None,
+        help="Glass IR emissivity for the modified Eqs. 3/4 radiative exchange (fixed constant, not "
+        "swept). See --eps-abs-ir. (Case 2: 0.95; Case 3: 0.0.)",
+    )
     p.add_argument(
         "--vapor-gap-mm",
         type=float,
@@ -380,6 +398,8 @@ def main(argv: list[str] | None = None) -> int:
             insulation_gap_mm=args.insulation_gap_mm,
             tilt_deg=args.tilt_deg,
             vapor_gap_mm=args.vapor_gap_mm,
+            eps_abs_ir=args.eps_abs_ir,
+            eps_glass_ir=args.eps_glass_ir,
         )
         mean_yield, mean_eta = combo_yield_kg_m2(
             profiles,
@@ -399,6 +419,8 @@ def main(argv: list[str] | None = None) -> int:
                 "hydrogel_thickness_mm": combo.hydrogel_thickness_mm,
                 "eps_abs": combo.eps_abs,
                 "tau_glass": combo.tau_glass,
+                "eps_abs_ir": args.eps_abs_ir if args.eps_abs_ir is not None else "",
+                "eps_glass_ir": args.eps_glass_ir if args.eps_glass_ir is not None else "",
                 "fin_area_ratio": combo.fin_area_ratio,
                 "vapor_gap_mm": args.vapor_gap_mm,
                 "warmup_method": args.warmup_method,
