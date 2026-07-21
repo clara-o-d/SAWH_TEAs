@@ -158,20 +158,25 @@ exact blackbody behavior ($\varepsilon_{a\text{-}g}=1$, glass emits at 1).
 **Important**: the CSV schema changed (2 new columns) — use a **new**
 `--output-csv`/output directory for Case 2/3, don't append to Case 1's files.
 
-Same GPU approach as Case 1, just with the two new flags:
+Same GPU approach as Case 1, with dedicated scripts already set up (mirrors of
+`sbatch_gpu_sweep_smoke.sh`/`sbatch_gpu_sweep_array.sh` with the new flags and
+their own output directories baked in — nothing to edit):
 
 ```bash
-# Smoke-test a few real sites first (mirrors sbatch_gpu_sweep_smoke.sh):
-python3 gpu_sweep/run_gpu_sweep.py --num-sites 10 \
-  --eps-abs-ir 0.05 --eps-glass-ir 0.95 \
-  --output-csv outputs/gpu_grid_sweep_case2/smoke_10sites.csv --resume
+sbatch gpu_sweep/sbatch_gpu_sweep_smoke_case2.sh   # 10 real sites first
+sbatch gpu_sweep/sbatch_gpu_sweep_array_case2.sh   # then the full 1,405-site grid
 ```
 
-Then the full grid via a copy of `sbatch_gpu_sweep_array.sh` with
-`--eps-abs-ir 0.05 --eps-glass-ir 0.95` added to its `run_gpu_sweep.py` call and
-its `--output-csv`/chunk paths pointed at a Case-2-specific output directory
-(e.g. `outputs/gpu_grid_sweep_case2/`). For Case 3, same again with
-`--eps-abs-ir 0 --eps-glass-ir 0` and its own output directory.
+and for Case 3:
+
+```bash
+sbatch gpu_sweep/sbatch_gpu_sweep_smoke_case3.sh
+sbatch gpu_sweep/sbatch_gpu_sweep_array_case3.sh
+```
+
+(Case 3 passes `--eps-abs 1.0 --tau-glass 1.0` explicitly, since those are fixed
+idealized values there, not the usual swept lists.) Both array scripts default
+to `--array=0-39%8` like Case 1's — tune to your actual `serc` GPU quota.
 
 Before trusting a full Case 2/3 run: re-run the smoke test and spot-check a few
 rows against the CPU `grid_param_sweep.py`/`build_device_config(...,
