@@ -195,7 +195,6 @@ class DeviceConfig:
             tau_glass=table_s3.TAU_GLASS,
             eps_gel=table_s3.EPS_GEL,
             eps_al=table_s3.EPS_AL,
-            eps_glass=table_s3.EPS_GLASS,
             tilt_deg=self.tilt_deg,
             h_des_j_per_kg=h_des,
         )
