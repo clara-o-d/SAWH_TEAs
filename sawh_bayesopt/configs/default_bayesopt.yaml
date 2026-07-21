@@ -1,0 +1,36 @@
+# Reference only -- not loaded automatically by code (mirrors
+# solar_lumped/configs/default_solar.yaml's role). See
+# src/sawh_bayesopt/design_space.py::DesignBounds and
+# src/sawh_bayesopt/bayesopt.py::BayesOptConfig for the actual defaults.
+
+design_bounds:
+  hydrogel_thickness_m: [0.001, 0.010]
+  vapor_gap_m: [0.007, 0.060]
+  insulation_gap_m: [0.001, 0.020]
+  fin_area_ratio: [3.0, 12.0]
+  tilt_deg: [0.0, 60.0]
+  salt_to_polymer_ratio: [1.0, 8.0]
+  # No condenser_thickness_m: fixed at Table S3's constant, both because
+  # economics/lcow.py charges a flat condenser BOM cost regardless of it,
+  # and because the JAX gpu_sweep fast path this now evaluates against
+  # hardcodes condenser thermal mass at that same constant rather than
+  # taking it as a per-instance input.
+
+sites: [cambridge, atacama]
+combine_rule: mean
+
+bayesopt:
+  n_init: 24 # ~= 3*(d+1), d=6
+  n_total: 50 # wall-clock now dominated by weather fetch + jax compile, not
+  # by per-design CPU processes -- see evaluator.py / gpu_sweep/FINDINGS.md
+  # for the ~8x speedup this batches on top of.
+  batch_size: 3
+  seed: 0
+  ei_xi: 0.01
+  stall_rel_tol: 0.005
+  stall_rounds: 3
+
+verification:
+  n_neighbors: 5
+  perturbation_frac: 0.10
+  artifact_tolerance: 0.02

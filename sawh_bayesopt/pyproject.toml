@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "sawh-bayesopt"
+version = "0.1.0"
+description = "Surrogate-assisted (GP + Expected Improvement) global optimization of solar_lumped SAWH device design"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Clara" }]
+
+dependencies = [
+    "solar-lumped-sawh",
+    "scikit-learn>=1.3",
+    "threadpoolctl>=3.1",
+    "scipy>=1.11",
+    "numpy>=1.26",
+    "pandas>=2.0",
+    "matplotlib>=3.8",
+    # Real evaluations run through solar_lumped/gpu_sweep's JAX/diffrax fast
+    # path (see evaluator.py). Plain "jax" runs on CPU already ~8x faster
+    # than the CPU ode_system.py path (gpu_sweep/FINDINGS.md); for a real
+    # GPU node, install "jax[cuda12]" instead (see
+    # solar_lumped/gpu_sweep/SHERLOCK_GPU_RUNBOOK.md) before installing this
+    # package, or reinstall it afterward.
+    "jax",
+    "diffrax",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "black>=24.0",
+    "ruff>=0.4",
+]
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short -q"
