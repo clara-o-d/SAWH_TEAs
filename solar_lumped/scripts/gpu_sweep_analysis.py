@@ -149,60 +149,85 @@ def _subplot_grid(n: int) -> list[int]:
     return [nrows * 100 + ncols * 10 + (i + 1) for i in range(n)]
 
 
-# --------------------------------------------------------------------------- 1. per-parameter yield maps
+# --------------------------------------------------------------------------- 1. per-parameter maps (any metric)
+
+
+def plot_parameter_metric_map(
+    df: pd.DataFrame,
+    param: str,
+    metric: str,
+    device_params: tuple[str, ...],
+    out_path: Path,
+    *,
+    cmap: str = "YlGnBu",
+    log_scale: bool = False,
+    metric_label: str | None = None,
+    levels: list[float] | None = None,
+) -> None:
+    """One figure, one row of panels: *metric* vs. every value *param* takes
+    (other swept device params held at their median/baseline level), all
+    sharing one colorbar. Generalization of the per-parameter yield map to any
+    metric column (e.g. lcow_usd_per_m3) and, via *levels*, any subset of a
+    parameter's values (e.g. just low/median/high tau_glass).
+    """
+    ccrs, cfeature = _import_map_stack()
+    baseline = _baseline_levels(df, device_params)
+    metric_label = metric_label or _METRIC_TITLES.get(metric, metric)
+
+    all_levels = sorted(df[param].unique())
+    levels = levels if levels is not None else all_levels
+
+    others = [p for p in device_params if p != param]
+    mask = np.ones(len(df), dtype=bool)
+    for p in others:
+        mask &= np.isclose(df[p].to_numpy(), baseline[p])
+    sub = df.loc[mask]
+
+    vals = sub.loc[np.isin(sub[param].to_numpy(), levels), metric].to_numpy()
+    if log_scale:
+        vals = np.clip(vals, 1e-9, None)
+        norm = LogNorm(vmin=float(vals.min() * 0.9), vmax=float(vals.max() * 1.1))
+        vmin = vmax = None
+    else:
+        norm = None
+        vmin, vmax = 0.0, float(vals.max()) * 1.02
+
+    n = len(levels)
+    fig = plt.figure(figsize=(5.2 * n + 1.2, 5.4))
+    fixed_txt = ", ".join(f"{_PARAM_TITLES[p]}={baseline[p]:g}" for p in others) or "n/a (only swept param)"
+    fig.suptitle(
+        f"{metric_label} vs. {_PARAM_TITLES.get(param, param)}\n"
+        f"(all {sub[['lat', 'lon']].drop_duplicates().shape[0]} land sites; other device params fixed at {fixed_txt})",
+        fontsize=11,
+        y=1.02,
+    )
+
+    sc_last = None
+    for i, lvl in enumerate(levels):
+        ax = _world_ax(fig, (1, n, i + 1), ccrs=ccrs, cfeature=cfeature)
+        row = sub.loc[np.isclose(sub[param].to_numpy(), lvl)].sort_values(["lat", "lon"])
+        ax.set_title(f"{param} = {lvl:g}", fontsize=10, pad=5)
+        sc_last = ax.scatter(
+            row["lon"], row["lat"], c=row[metric], s=12, marker="o",
+            transform=ccrs.PlateCarree(), zorder=4, cmap=cmap,
+            norm=norm, vmin=vmin, vmax=vmax,
+        )
+
+    cbar = fig.colorbar(sc_last, ax=fig.axes, fraction=0.02, pad=0.03, shrink=0.85)
+    cbar.set_label(metric_label, fontsize=9)
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(out_path, dpi=160, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Wrote {out_path}", flush=True)
 
 
 def plot_parameter_yield_maps(df: pd.DataFrame, device_params: tuple[str, ...], yield_dir: Path) -> None:
-    ccrs, cfeature = _import_map_stack()
-    baseline = _baseline_levels(df, device_params)
-
-    vmin = 0.0
-    vmax = float(df["mean_yield_kg_m2"].max()) * 1.02
-
-    yield_dir.mkdir(parents=True, exist_ok=True)
     for param in device_params:
-        levels = sorted(df[param].unique())
-        others = [p for p in device_params if p != param]
-        mask = np.ones(len(df), dtype=bool)
-        for p in others:
-            mask &= np.isclose(df[p].to_numpy(), baseline[p])
-        sub = df.loc[mask]
-
-        n = len(levels)
-        fig = plt.figure(figsize=(5.2 * n + 1.2, 5.4))
-        fixed_txt = ", ".join(f"{_PARAM_TITLES[p]}={baseline[p]:g}" for p in others) or "n/a (only swept param)"
-        fig.suptitle(
-            f"Mean daily water yield vs. {_PARAM_TITLES[param]}\n"
-            f"(all {sub[['lat', 'lon']].drop_duplicates().shape[0]} land sites; other device params fixed at {fixed_txt})",
-            fontsize=11,
-            y=1.02,
+        plot_parameter_metric_map(
+            df, param, "mean_yield_kg_m2", device_params, yield_dir / f"yield_map_{param}.png",
+            cmap="YlGnBu", metric_label="Mean daily yield (kg/m²/day)",
         )
-
-        sc_last = None
-        for i, lvl in enumerate(levels):
-            ax = _world_ax(fig, (1, n, i + 1), ccrs=ccrs, cfeature=cfeature)
-            row = sub.loc[np.isclose(sub[param].to_numpy(), lvl)].sort_values(["lat", "lon"])
-            ax.set_title(f"{param} = {lvl:g}", fontsize=10, pad=5)
-            sc_last = ax.scatter(
-                row["lon"],
-                row["lat"],
-                c=row["mean_yield_kg_m2"],
-                s=12,
-                marker="o",
-                transform=ccrs.PlateCarree(),
-                zorder=4,
-                cmap="YlGnBu",
-                vmin=vmin,
-                vmax=vmax,
-            )
-
-        cbar = fig.colorbar(sc_last, ax=fig.axes, fraction=0.02, pad=0.03, shrink=0.85)
-        cbar.set_label("Mean daily yield (kg/m²/day)", fontsize=9)
-
-        out_path = yield_dir / f"yield_map_{param}.png"
-        fig.savefig(out_path, dpi=160, bbox_inches="tight")
-        plt.close(fig)
-        print(f"Wrote {out_path}", flush=True)
 
 
 # --------------------------------------------------------------------------- 2. optimal-config LCOW map
