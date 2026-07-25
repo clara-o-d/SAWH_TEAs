@@ -101,12 +101,24 @@ def design_vector_hash(
     *,
     sites: tuple[str, ...],
     resolution: str = "monthly",
+    case: str = "case1",
 ) -> str:
-    """Stable cache key: sig-fig-rounded design vector + site set + resolution,
-    so float jitter from LHS/EI proposals doesn't create spurious cache misses
-    for effectively-identical points."""
+    """Stable cache key: sig-fig-rounded design vector + site set + resolution
+    (+ case, when non-default), so float jitter from LHS/EI proposals doesn't
+    create spurious cache misses for effectively-identical points.
+
+    ``case`` is deliberately left out of the payload for the default
+    "case1" -- every cache.jsonl written before case-awareness existed used
+    keys with no case field at all, and case1 reproduces the original
+    physics exactly (see design_space.CASE_EPS_IR), so this keeps those
+    caches valid instead of invalidating them on the next run. Case2/3 get a
+    distinct key space so they can never collide with a case1 (or each
+    other's) cached LCOW for the same raw design vector.
+    """
     rounded = tuple(_round_sig(float(v)) for v in np.asarray(x, dtype=float).reshape(-1))
     payload = {"x": rounded, "sites": sorted(sites), "resolution": resolution}
+    if case != "case1":
+        payload["case"] = case
     blob = json.dumps(payload, sort_keys=True)
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()[:24]
 
@@ -248,6 +260,7 @@ def evaluate_batch(
     econ,
     combine_rule: CombineRule = "mean",
     resolution: str = "monthly",
+    case: str = "case1",
 ) -> list[DesignEvalResult]:
     """Evaluate every x in *xs*, skipping any already present in *cache*.
 
@@ -256,13 +269,17 @@ def evaluate_batch(
     (see jax_daily_cycle.py::make_batched_daily_cycle_fn) instead of
     dispatching one process per design; that cross-design batching is what
     actually delivers the JAX path's speedup, not just a faster single call.
+
+    ``case`` selects the absorber/glass IR emissivity variant (see
+    design_space.CASE_EPS_IR / to_device_config_kwargs) -- "case1" (default)
+    reproduces the physics every pre-existing run used.
     """
     from solar_lumped.economics.lcow import FAIL_LCO, lcow_from_daily_yield
     from solar_lumped.physics.sorbent import initial_loading
     from solar_lumped.simulation.device_config import DeviceConfig
 
     site_names = tuple(s.name for s in sites)
-    keys = [design_vector_hash(x, sites=site_names, resolution=resolution) for x in xs]
+    keys = [design_vector_hash(x, sites=site_names, resolution=resolution, case=case) for x in xs]
     results: list[DesignEvalResult | None] = [None] * len(xs)
 
     to_run = [i for i, key in enumerate(keys) if cache.get_or_none(key) is None]
@@ -275,7 +292,7 @@ def evaluate_batch(
         assert all(r is not None for r in results)
         return results  # type: ignore[return-value]
 
-    configs = {i: DeviceConfig(**design_space.to_device_config_kwargs(xs[i])) for i in to_run}
+    configs = {i: DeviceConfig(**design_space.to_device_config_kwargs(xs[i], case=case)) for i in to_run}
 
     # Flatten every (design, site, month) instance that actually has weather
     # data into one cross-product batch. (design, site) pairs with no

@@ -23,6 +23,7 @@ def _fake_evaluate_batch(
     econ=None,
     combine_rule="mean",
     resolution="monthly",
+    case="case1",
 ):
     results = []
     for x in xs:
@@ -89,6 +90,7 @@ def _fake_evaluate_batch_with_infeasible_region(
     econ=None,
     combine_rule="mean",
     resolution="monthly",
+    case="case1",
 ):
     """Same quadratic-bowl objective, but the whole region where the first
     design variable exceeds its midpoint is infeasible (penalty y) -- exactly

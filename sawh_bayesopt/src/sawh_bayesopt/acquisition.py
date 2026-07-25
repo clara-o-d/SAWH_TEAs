@@ -54,8 +54,21 @@ def propose_next(
     seed: int = 0,
     maxiter: int = 200,
     popsize: int = 20,
+    record: list[dict] | None = None,
 ) -> np.ndarray:
-    """Raw (denormalized) design vector maximizing constrained EI over the unit cube."""
+    """Raw (denormalized) design vector maximizing constrained EI over the unit cube.
+
+    ``record``, if given, gets one dict appended per call summarizing the
+    inner differential_evolution optimization itself (success, nit vs.
+    maxiter, final -EI). DE is gradient-free and stochastic-population-based,
+    so it can silently exhaust ``maxiter`` without its internal convergence
+    tolerance being satisfied; a proposal from an unconverged DE run is only
+    an approximate EI maximizer, which matters when interpreting apparent
+    under-exploration -- it could be the acquisition landscape genuinely
+    favors exploitation, or it could be DE not finding the true (possibly
+    farther-out) maximizer in time. See scripts/diagnostics/gp_diagnostics.py
+    for where this is surfaced.
+    """
     bounds_unit = [(0.0, 1.0)] * len(VAR_ORDER)
     y_best = state.y_best
     result = differential_evolution(
@@ -68,6 +81,15 @@ def propose_next(
         polish=True,
         tol=1e-8,
     )
+    if record is not None:
+        record.append({
+            "success": bool(result.success),
+            "nit": int(result.nit),
+            "maxiter": maxiter,
+            "hit_maxiter": bool(result.nit >= maxiter),
+            "message": str(result.message),
+            "neg_ei": float(result.fun),
+        })
     return from_unit_cube(result.x, state.bounds)
 
 
@@ -79,6 +101,7 @@ def propose_batch(
     xi: float = 0.01,
     maxiter: int = 200,
     popsize: int = 20,
+    record: list[dict] | None = None,
 ) -> list[np.ndarray]:
     """Kriging-Believer: propose_next, fantasize y=mu(x) there, refit a scratch
     GP, repeat -- cheap way to get *batch_size* diverse parallel candidates
@@ -101,7 +124,7 @@ def propose_batch(
     )
     proposals: list[np.ndarray] = []
     for i in range(batch_size):
-        x_next = propose_next(scratch, xi=xi, seed=seed + i, maxiter=maxiter, popsize=popsize)
+        x_next = propose_next(scratch, xi=xi, seed=seed + i, maxiter=maxiter, popsize=popsize, record=record)
         mu, _ = predict(scratch, x_next)
         scratch = append_observations(scratch, x_next.reshape(1, len(VAR_ORDER)), np.array([mu]))
         fit(scratch)

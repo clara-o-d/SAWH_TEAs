@@ -42,8 +42,20 @@ def write_run_config(cfg: BayesOptConfig, path: str | Path) -> None:
         "stall_rel_tol": cfg.stall_rel_tol,
         "stall_rounds": cfg.stall_rounds,
         "resolution": cfg.resolution,
+        "case": cfg.case,
     }
     path.write_text(json.dumps(payload, indent=2))
+
+
+def write_de_diagnostics(de_diagnostics: list[dict], path: str | Path) -> None:
+    """Dump every EI-proposal round's differential_evolution result summary
+    (success/nit/maxiter -- see acquisition.propose_next's `record` param) so
+    scripts/diagnostics/gp_diagnostics.py can flag rounds where DE hit
+    maxiter without its own convergence tolerance being satisfied, separately
+    from the LCOW-GP calibration checks it already does."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(de_diagnostics, indent=2))
 
 
 def write_history_csv(history: list[DesignEvalResult], path: str | Path) -> None:
@@ -124,6 +136,7 @@ def evaluate_baseline(cfg: BayesOptConfig, run_dir: str | Path) -> DesignEvalRes
         econ=econ,
         combine_rule=cfg.combine_rule,
         resolution=cfg.resolution,
+        case=cfg.case,
     )
     return result
 
@@ -173,6 +186,7 @@ def write_final_report(
         improvement = None
 
     report = {
+        "case": cfg.case,
         "recommended_design": dict(zip(VAR_ORDER, result.best.design_vector)),
         "recommended_combined_lcow_usd_per_m3": result.best.combined_lcow,
         "recommended_per_site": {

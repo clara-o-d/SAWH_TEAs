@@ -87,6 +87,7 @@ def main(argv: list[str] | None = None) -> int:
         results = evaluate_batch(
             batch, cache=cache, sites=sites, site_profiles=site_profiles, econ=econ,
             combine_rule=bo_config["combine_rule"], resolution=bo_config["resolution"],
+            case=bo_config.get("case", "case1"),
         )
         history.extend(results)
         print(f"  {len(history)}/{n_total} evaluated, best so far: {min(r.combined_lcow for r in history):.4f}", flush=True)

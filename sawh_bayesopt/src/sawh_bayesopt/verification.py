@@ -82,6 +82,7 @@ def verify_optimum(
         econ=econ,
         combine_rule=cfg.combine_rule,
         resolution=cfg.resolution,
+        case=cfg.case,
     )
 
     best_true = results[0].combined_lcow

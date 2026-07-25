@@ -9,6 +9,7 @@ invented -- see docs/design_notes.md for the per-variable provenance.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Any
 
 import numpy as np
 from scipy.stats import qmc
@@ -27,6 +28,22 @@ VAR_ORDER: tuple[str, ...] = (
 # initial samples on designs the physics already handles gracefully as
 # near-zero yield.
 VAPOR_GAP_TRANSPORT_MIN_M: float = 0.007
+
+# Absorber/glass IR emissivity pairs for solar_lumped's modified Eqs. 3/4
+# radiative-exchange term (device_balances.py::DeviceThermalParams.eps_abs_ir/
+# eps_glass_ir), matching gpu_sweep/run_gpu_sweep.py's --eps-abs-ir/
+# --eps-glass-ir CLI convention exactly (see gpu_sweep_handoff.md's Case
+# table): case1 (both None) reproduces the original blackbody/cavity
+# approximation; case2 is the "selective surface" variant; case3 is the
+# idealized optical-material-limits variant. case1 is deliberately encoded as
+# (None, None) rather than (1.0, 1.0) so to_device_config_kwargs(case="case1")
+# doesn't add a "thermal" kwarg at all -- see the case1 branch below --
+# keeping every existing (pre-case-aware) call and its cache keys unchanged.
+CASE_EPS_IR: dict[str, tuple[float | None, float | None]] = {
+    "case1": (None, None),
+    "case2": (0.05, 0.95),
+    "case3": (0.0, 0.0),
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,12 +75,42 @@ def bounds_array(bounds: DesignBounds) -> np.ndarray:
     return bounds.as_array()
 
 
-def to_device_config_kwargs(x: np.ndarray) -> dict[str, float]:
-    """Map an unnamed VAR_ORDER-ordered vector to DeviceConfig field names."""
+def to_device_config_kwargs(x: np.ndarray, *, case: str = "case1") -> dict[str, Any]:
+    """Map an unnamed VAR_ORDER-ordered vector to DeviceConfig field names.
+
+    ``case`` selects the absorber/glass IR emissivity pair (CASE_EPS_IR) for
+    solar_lumped's modified Eqs. 3/4 radiative exchange. "case1" (the
+    default, matching every pre-existing call site) leaves the returned dict
+    exactly as before -- no "thermal" key -- so DeviceConfig.thermal_params()
+    falls through to its own Case-1-reproducing default. "case2"/"case3" add
+    a "thermal" kwarg built the same way grid_param_sweep.py's
+    build_device_config does: DeviceThermalParams re-derived from this design
+    point's insulation_gap_m/vapor_gap_m/tilt_deg (all three are swept
+    VAR_ORDER dims, so they must be rebuilt per-point, not fixed once) plus
+    the fixed eps_abs/tau_glass table_s3 constants, with eps_abs_ir/
+    eps_glass_ir overridden to the requested case.
+    """
     x = np.asarray(x, dtype=float).reshape(-1)
     if x.shape[0] != len(VAR_ORDER):
         raise ValueError(f"Expected a length-{len(VAR_ORDER)} design vector, got shape {x.shape}")
-    return dict(zip(VAR_ORDER, (float(v) for v in x)))
+    if case not in CASE_EPS_IR:
+        raise ValueError(f"Unknown case {case!r}, expected one of {sorted(CASE_EPS_IR)}")
+    kwargs: dict[str, Any] = dict(zip(VAR_ORDER, (float(v) for v in x)))
+    if case != "case1":
+        from solar_lumped.physics import table_s3
+        from solar_lumped.physics.device_balances import DeviceThermalParams
+
+        eps_abs_ir, eps_glass_ir = CASE_EPS_IR[case]
+        kwargs["thermal"] = DeviceThermalParams(
+            insulation_gap_m=kwargs["insulation_gap_m"],
+            vapor_gap_m=kwargs["vapor_gap_m"],
+            eps_abs=table_s3.EPS_ABS,
+            tau_glass=table_s3.TAU_GLASS,
+            tilt_deg=kwargs["tilt_deg"],
+            eps_abs_ir=eps_abs_ir,
+            eps_glass_ir=eps_glass_ir,
+        )
+    return kwargs
 
 
 def to_unit_cube(x: np.ndarray, bounds: DesignBounds) -> np.ndarray:
@@ -89,7 +136,7 @@ def is_gap_degenerate(x: np.ndarray, *, margin_m: float = VAPOR_GAP_TRANSPORT_MI
     doesn't raise), just a signal to avoid spending an expensive sample there.
     """
     kwargs = to_device_config_kwargs(x)
-    return (kwargs["vapor_gap_m"] - kwargs["hydrogel_thickness_m"]) < margin_m
+    return (float(kwargs["vapor_gap_m"]) - float(kwargs["hydrogel_thickness_m"])) < margin_m
 
 
 def latin_hypercube_design(

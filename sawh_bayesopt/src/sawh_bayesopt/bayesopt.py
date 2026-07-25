@@ -51,6 +51,10 @@ class BayesOptConfig:
     stall_rounds: int = 3
     resolution: str = "monthly"
     weather_cache_dir: str = ".weather_cache"
+    # Absorber/glass IR emissivity variant (design_space.CASE_EPS_IR) -- see
+    # to_device_config_kwargs. "case1" reproduces every pre-existing run's
+    # physics exactly.
+    case: str = "case1"
 
 
 @dataclass
@@ -59,6 +63,11 @@ class BayesOptResult:
     best: DesignEvalResult
     surrogate: SurrogateState
     stopped_reason: StoppedReason
+    # One dict per differential_evolution call made during EI-based proposal
+    # (see acquisition.propose_next's `record` param) -- success/nit/maxiter
+    # for each, tagged with the round it was proposed in. Empty for rounds
+    # that fell back to pure LHS exploration (no DE involved).
+    de_diagnostics: list[dict]
 
 
 def _to_xyf(results: list[DesignEvalResult]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -105,6 +114,7 @@ def run_bayesopt(cfg: BayesOptConfig, run_dir: str | Path) -> BayesOptResult:
             econ=econ,
             combine_rule=cfg.combine_rule,
             resolution=cfg.resolution,
+            case=cfg.case,
         )
 
     X0 = latin_hypercube_design(cfg.n_init, cfg.bounds, seed=cfg.seed, reject_gap_degenerate=True)
@@ -118,13 +128,21 @@ def run_bayesopt(cfg: BayesOptConfig, run_dir: str | Path) -> BayesOptResult:
     best_so_far = state.y_best
     stall_count = 0
     stopped_reason: StoppedReason = "budget"
+    de_diagnostics: list[dict] = []
+    round_idx = 0
 
     while len(history) < cfg.n_total:
         remaining = cfg.n_total - len(history)
         batch_n = min(cfg.batch_size, remaining)
 
         if fitted:
-            batch = propose_batch(state, batch_size=batch_n, seed=cfg.seed + len(history), xi=cfg.ei_xi)
+            round_record: list[dict] = []
+            batch = propose_batch(
+                state, batch_size=batch_n, seed=cfg.seed + len(history), xi=cfg.ei_xi, record=round_record,
+            )
+            for d in round_record:
+                d["round"] = round_idx
+            de_diagnostics.extend(round_record)
         else:
             # Not enough feasible observations yet to fit the LCOW GP --
             # keep exploring blindly (this design space region's feasibility
@@ -156,10 +174,13 @@ def run_bayesopt(cfg: BayesOptConfig, run_dir: str | Path) -> BayesOptResult:
             stopped_reason = "stalled"
             break
 
+        round_idx += 1
+
     best_idx = int(np.argmin([r.combined_lcow for r in history]))
     return BayesOptResult(
         history=history,
         best=history[best_idx],
         surrogate=state,
+        de_diagnostics=de_diagnostics,
         stopped_reason=stopped_reason,
     )

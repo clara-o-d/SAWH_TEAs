@@ -151,6 +151,48 @@ def cross_validate(
     }
 
 
+def summarize_de_diagnostics(run_dir: Path) -> dict | None:
+    """Summarize acquisition.py's per-round differential_evolution results
+    (written by reporting.write_de_diagnostics, run_bayesopt.py), if present.
+
+    DE is gradient-free/population-based and can exhaust maxiter without its
+    own convergence tolerance being satisfied -- a proposal from such a call
+    is only an approximate EI maximizer, not the true one. A high
+    hit_maxiter/not_success rate means EI-based proposals (and therefore
+    apparent explore/exploit behavior) may be an artifact of an
+    under-budgeted inner optimizer rather than genuine acquisition-function
+    preference -- worth ruling out before tuning ei_xi/stall_rel_tol/n_init.
+    Returns None if no de_diagnostics.json exists (e.g. an older run, or a
+    run that never got far enough to fit a GP and propose via EI at all).
+    """
+    path = run_dir / "diagnostics" / "de_diagnostics.json"
+    if not path.is_file():
+        return None
+    records = json.loads(path.read_text())
+    n = len(records)
+    if n == 0:
+        return {"n_de_calls": 0}
+    n_hit_maxiter = sum(1 for d in records if d["hit_maxiter"])
+    n_not_success = sum(1 for d in records if not d["success"])
+    nit_frac = [d["nit"] / d["maxiter"] for d in records]
+    return {
+        "n_de_calls": n,
+        "n_hit_maxiter": n_hit_maxiter,
+        "frac_hit_maxiter": n_hit_maxiter / n,
+        "n_not_success": n_not_success,
+        "frac_not_success": n_not_success / n,
+        "nit_over_maxiter_mean": float(np.mean(nit_frac)),
+        "nit_over_maxiter_min": float(np.min(nit_frac)),
+        "interpretation": (
+            "frac_hit_maxiter/frac_not_success should be near 0 -- otherwise a "
+            "meaningful fraction of EI-proposed points came from an "
+            "unconverged inner differential_evolution search (raise maxiter "
+            "and/or popsize in acquisition.propose_next before trusting "
+            "apparent under-exploration as a property of EI itself)."
+        ),
+    }
+
+
 def detect_outliers(y: np.ndarray, *, iqr_multiplier: float = 3.0) -> np.ndarray:
     """Tukey's "far out" fence (Q3 + iqr_multiplier*IQR) on percentiles of *y*.
 
@@ -283,12 +325,34 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("  All fitted hyperparameters are comfortably within their bounds.", flush=True)
 
+    de_summary = summarize_de_diagnostics(run_dir)
+    if de_summary is None:
+        print("\nNo diagnostics/de_diagnostics.json found (older run, or no EI-based proposals made).", flush=True)
+    elif de_summary.get("n_de_calls", 0) == 0:
+        print("\nde_diagnostics.json present but empty (run never got far enough to propose via EI).", flush=True)
+    else:
+        print(
+            f"\nDE proposal diagnostics: {de_summary['n_de_calls']} calls, "
+            f"{de_summary['n_hit_maxiter']} hit maxiter ({de_summary['frac_hit_maxiter']:.1%}), "
+            f"{de_summary['n_not_success']} not marked success ({de_summary['frac_not_success']:.1%}), "
+            f"mean nit/maxiter={de_summary['nit_over_maxiter_mean']:.2f}",
+            flush=True,
+        )
+        if de_summary["frac_hit_maxiter"] > 0.1 or de_summary["frac_not_success"] > 0.1:
+            print(
+                "  WARNING: a meaningful fraction of EI proposals came from an unconverged "
+                "differential_evolution search -- consider raising acquisition.propose_next's "
+                "maxiter/popsize before drawing conclusions about explore/exploit behavior.",
+                flush=True,
+            )
+
     report = {
         "cross_validation": cv,
         "cross_validation_excluding_outliers": cv_no_outliers,
         "outlier_values_excluded": sorted(y_feas[outlier_mask_feas].tolist()) if outlier_mask_feas.sum() else [],
         "final_fit_hyperparameters": hyperparams,
         "hyperparameter_convergence_warnings": hp_warnings,
+        "de_diagnostics_summary": de_summary,
     }
     report_path = out_dir / "gp_regression_report.json"
     report_path.write_text(json.dumps(report, indent=2))
