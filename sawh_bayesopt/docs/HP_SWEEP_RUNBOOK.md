@@ -86,12 +86,25 @@ sbatch scripts/sbatch_hp_sweep_full.sh
 ```
 
 27 combinations (3 ei_xi x 3 stall_rel_tol x 3 n_init values, full two-site
-monthly evaluations each), 8 workers split across 2 GPUs, 12-hour time
+monthly evaluations each), 4 workers split across 2 GPUs, 12-hour time
 limit -- adjust `--gres=gpu:2`/`--cpus-per-task`/`--time` in the sbatch
 script if your allocation differs. Each combination writes its own
 `outputs/runs/hp_sweep_1/<combo-tag>/` (same layout as any single
 `run_bayesopt.py` run -- `config.json`, `cache.jsonl`, `history.csv`,
 `report.json`, `diagnostics/gp_regression_report.json`,
+
+**If it hits the 12-hour limit** (a real possibility -- see the sbatch
+script's own comment block for the timing math): just resubmit the exact
+same command. `hp_sweep.py` is called with `--resume`, so any combination
+whose `run_dir` already has a complete `report.json` +
+`gp_regression_report.json` is skipped instead of re-run; a combination that
+was only partway done gets re-run, but `evaluator.EvalCache` durably persists
+every completed batch of evaluations to `cache.jsonl` as it happens, so even
+that only redoes whatever batch was actually in flight when the job died, not
+everything. `sweep_results.csv`/`.json` are rewritten after every single
+combination finishes (not just at the very end), so `outputs/runs/hp_sweep_1/
+sweep_results.csv` is always an up-to-date, inspectable partial summary even
+mid-sweep.
 `diagnostics/de_diagnostics.json`, `diagnostics/gp_slices.png`).
 
 ## 5. What to look at
