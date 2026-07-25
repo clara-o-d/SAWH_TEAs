@@ -37,7 +37,13 @@ import numpy as np  # noqa: E402
 
 from sawh_bayesopt.design_space import DesignBounds, VAR_ORDER  # noqa: E402
 from sawh_bayesopt.evaluator import PENALTY_LCOW_USD_PER_M3, EvalCache  # noqa: E402
-from sawh_bayesopt.surrogate import SurrogateState, build_gp, fit, predict_batch  # noqa: E402
+from sawh_bayesopt.surrogate import (  # noqa: E402
+    SurrogateState,
+    build_gp,
+    check_hyperparameter_convergence,
+    fit,
+    predict_batch,
+)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -58,14 +64,15 @@ def _load_bounds(run_dir: Path) -> DesignBounds:
     return DesignBounds(**{name: tuple(v) for name, v in payload["bounds"].items()})
 
 
-def _load_xy(run_dir: Path) -> tuple[np.ndarray, np.ndarray]:
+def _load_xy(run_dir: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     cache = EvalCache(run_dir / "cache.jsonl")
     results = cache.all_results()
     if len(results) < 2:
         raise SystemExit(f"Only {len(results)} evaluated design(s) in {run_dir}/cache.jsonl -- need at least 2.")
     X = np.array([r.design_vector for r in results], dtype=float)
     y = np.array([r.combined_lcow for r in results], dtype=float)
-    return X, y
+    feasible = np.array([r.is_feasible for r in results], dtype=bool)
+    return X, y, feasible
 
 
 def _kfold_indices(n: int, k: int, seed: int) -> list[tuple[np.ndarray, np.ndarray]]:
@@ -80,16 +87,21 @@ def _kfold_indices(n: int, k: int, seed: int) -> list[tuple[np.ndarray, np.ndarr
     return out
 
 
-def cross_validate(X: np.ndarray, y: np.ndarray, bounds: DesignBounds, *, k: int, seed: int) -> dict:
+def cross_validate(
+    X: np.ndarray, y: np.ndarray, feasible: np.ndarray, bounds: DesignBounds, *, k: int, seed: int
+) -> dict:
     n = len(y)
     n_penalized = int(np.sum(y >= 0.99 * PENALTY_LCOW_USD_PER_M3))
     k = min(k, n)  # can't have more folds than points
     mu_all = np.zeros(n)
     sigma_all = np.zeros(n)
     for train_idx, test_idx in _kfold_indices(n, k, seed):
-        if len(train_idx) < 2:
+        train_feasible = feasible[train_idx]
+        if train_feasible.sum() < 2:
             continue
-        state = SurrogateState(gp=build_gp(seed=seed), bounds=bounds, X_raw=X[train_idx], y=y[train_idx])
+        state = SurrogateState(
+            gp=build_gp(seed=seed), bounds=bounds, X_raw=X[train_idx], y=y[train_idx], feasible=train_feasible
+        )
         state = fit(state)
         mu, sigma = predict_batch(state, X[test_idx])
         mu_all[test_idx] = mu
@@ -155,9 +167,9 @@ def detect_outliers(y: np.ndarray, *, iqr_multiplier: float = 3.0) -> np.ndarray
 
 
 def final_fit_hyperparameters(
-    X: np.ndarray, y: np.ndarray, bounds: DesignBounds, *, seed: int
+    X: np.ndarray, y: np.ndarray, feasible: np.ndarray, bounds: DesignBounds, *, seed: int
 ) -> tuple[dict, SurrogateState]:
-    state = SurrogateState(gp=build_gp(seed=seed), bounds=bounds, X_raw=X, y=y)
+    state = SurrogateState(gp=build_gp(seed=seed), bounds=bounds, X_raw=X, y=y, feasible=feasible)
     state = fit(state)
     kernel = state.gp.kernel_
     # ConstantKernel * Matern(length_scale=[...]) + WhiteKernel -- see surrogate.py::build_gp.
@@ -217,49 +229,73 @@ def main(argv: list[str] | None = None) -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
 
     bounds = _load_bounds(run_dir)
-    X, y = _load_xy(run_dir)
-    print(f"Loaded {len(y)} evaluated designs from {run_dir}/cache.jsonl", flush=True)
+    X, y, feasible = _load_xy(run_dir)
+    print(
+        f"Loaded {len(y)} evaluated designs from {run_dir}/cache.jsonl "
+        f"({int(feasible.sum())} feasible, {int((~feasible).sum())} infeasible)",
+        flush=True,
+    )
 
-    print(f"Running {args.k_folds}-fold cross-validation...", flush=True)
-    cv = cross_validate(X, y, bounds, k=args.k_folds, seed=args.seed)
-    print(f"  n_penalized_points: {cv['n_penalized_points']}/{cv['n_points']}", flush=True)
+    # Cross-validation and the final fit both operate on feasible designs
+    # only, matching surrogate.py::fit -- infeasible designs carry a penalty
+    # or partial-penalty-blend LCOW (see evaluator.py::combine_site_lcows),
+    # never a real measurement, so judging LCOW-regression calibration
+    # against them isn't meaningful regardless of how "outlying" they look.
+    X_feas, y_feas = X[feasible], y[feasible]
+
+    print(f"Running {args.k_folds}-fold cross-validation on feasible points...", flush=True)
+    cv = cross_validate(X_feas, y_feas, np.ones_like(y_feas, dtype=bool), bounds, k=args.k_folds, seed=args.seed)
+    cv["n_infeasible_excluded"] = int((~feasible).sum())
+    print(f"  n_infeasible_excluded: {cv['n_infeasible_excluded']}/{len(y)}", flush=True)
     for key in ("cv_mse", "cv_rmse", "standardized_residual_mean", "standardized_residual_std", "msll_gp_minus_trivial"):
         print(f"  {key}: {cv[key]:.4g}", flush=True)
 
-    outlier_mask = detect_outliers(y)
+    outlier_mask_feas = detect_outliers(y_feas)
     cv_no_outliers = None
-    if outlier_mask.sum() > 0 and (~outlier_mask).sum() >= 2:
+    if outlier_mask_feas.sum() > 0 and (~outlier_mask_feas).sum() >= 2:
         print(
-            f"\n{outlier_mask.sum()} outlier(s) beyond Tukey's far-out fence (Q3 + 3*IQR): "
-            f"{sorted(y[outlier_mask].tolist())} -- re-running CV excluding them "
-            "(a couple of extreme values, penalized or not, can dominate cv_mse/standardized "
-            "residuals when n is small; this isolates outlier-driven miscalibration from the "
-            "surrogate's calibration on the well-behaved majority of points)",
+            f"\n{outlier_mask_feas.sum()} outlier(s) among feasible points beyond Tukey's far-out "
+            f"fence (Q3 + 3*IQR): {sorted(y_feas[outlier_mask_feas].tolist())} -- re-running CV "
+            "excluding them (a couple of extreme *genuine* LCOW measurements can still dominate "
+            "cv_mse/standardized residuals when n is small, separately from anything to do with "
+            "infeasibility, which is already excluded above)",
             flush=True,
         )
         cv_no_outliers = cross_validate(
-            X[~outlier_mask], y[~outlier_mask], bounds,
-            k=min(args.k_folds, int((~outlier_mask).sum())), seed=args.seed,
+            X_feas[~outlier_mask_feas], y_feas[~outlier_mask_feas],
+            np.ones(int((~outlier_mask_feas).sum()), dtype=bool), bounds,
+            k=min(args.k_folds, int((~outlier_mask_feas).sum())), seed=args.seed,
         )
         for key in ("cv_rmse", "standardized_residual_mean", "standardized_residual_std", "msll_gp_minus_trivial"):
             print(f"  (excl. outliers) {key}: {cv_no_outliers[key]:.4g}", flush=True)
 
-    print("Fitting final GP on all evaluated points...", flush=True)
-    hyperparams, state = final_fit_hyperparameters(X, y, bounds, seed=args.seed)
+    print("Fitting final GP on all feasible points...", flush=True)
+    hyperparams, state = final_fit_hyperparameters(
+        X_feas, y_feas, np.ones_like(y_feas, dtype=bool), bounds, seed=args.seed
+    )
     print(f"  kernel: {hyperparams['kernel_repr']}", flush=True)
+
+    hp_warnings = check_hyperparameter_convergence(state.gp)
+    if hp_warnings:
+        print(f"\n{len(hp_warnings)} hyperparameter(s) landed near an optimization bound:", flush=True)
+        for w in hp_warnings:
+            print(f"  WARNING: {w}", flush=True)
+    else:
+        print("  All fitted hyperparameters are comfortably within their bounds.", flush=True)
 
     report = {
         "cross_validation": cv,
         "cross_validation_excluding_outliers": cv_no_outliers,
-        "outlier_values_excluded": sorted(y[outlier_mask].tolist()) if outlier_mask.sum() else [],
+        "outlier_values_excluded": sorted(y_feas[outlier_mask_feas].tolist()) if outlier_mask_feas.sum() else [],
         "final_fit_hyperparameters": hyperparams,
+        "hyperparameter_convergence_warnings": hp_warnings,
     }
     report_path = out_dir / "gp_regression_report.json"
     report_path.write_text(json.dumps(report, indent=2))
     print(f"Report written to {report_path}", flush=True)
 
     slices_path = out_dir / "gp_slices.png"
-    plot_slices(state, X, y, bounds, n_points=args.n_slice_points, out_path=slices_path)
+    plot_slices(state, X_feas, y_feas, bounds, n_points=args.n_slice_points, out_path=slices_path)
     print(f"Posterior slice plot written to {slices_path}", flush=True)
     return 0
 

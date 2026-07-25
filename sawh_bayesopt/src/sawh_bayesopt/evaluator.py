@@ -69,6 +69,19 @@ class DesignEvalResult:
     # evaluate_batch() call gets the same value.
     wall_time_s: float
 
+    @property
+    def is_feasible(self) -> bool:
+        """True iff every site succeeded. A property (not a stored field) so
+        it's always exactly consistent with site_results and free for old
+        cache.jsonl records to pick up -- see surrogate.py/gp_diagnostics.py's
+        outlier-exclusion logic, which this backs. combined_lcow itself isn't
+        a reliable feasibility signal: with combine_rule="mean" it can land
+        anywhere between a real value and the penalty (e.g. one feasible site
+        averaged with one infeasible site's penalty), not just exactly at
+        PENALTY_LCOW_USD_PER_M3.
+        """
+        return all(r.feasible for r in self.site_results)
+
     def site(self, name: str) -> SiteResult:
         for r in self.site_results:
             if r.site_name == name:

@@ -28,10 +28,22 @@ def expected_improvement(mu: np.ndarray, sigma: np.ndarray, y_best: float, *, xi
     return np.where(sigma > 1e-12, np.maximum(ei, 0.0), 0.0)
 
 
-def _neg_ei_unit_cube(u: np.ndarray, gp, y_best: float, xi: float) -> float:
+def _neg_ei_unit_cube(u: np.ndarray, gp, y_best: float, xi: float, clf=None) -> float:
+    """Negative *constrained* EI: EI(x) * P(feasible(x)) when a feasibility
+    classifier is available, plain EI otherwise (clf=None -- no infeasible
+    observations yet, see surrogate.py::fit_feasibility). This is what keeps
+    DE from proposing designs deep in a known-infeasible region: EI alone has
+    no way to know a region is bad if the LCOW GP was never fit on points
+    there (it's only ever fit on feasible points -- see surrogate.py::fit),
+    so without this term the optimizer could repeatedly re-propose infeasible
+    designs the LCOW surrogate is silently blind to.
+    """
     u = np.asarray(u, dtype=float).reshape(1, -1)
     mu, sigma = gp.predict(u, return_std=True)
     ei = expected_improvement(mu, sigma, y_best, xi=xi)
+    if clf is not None:
+        p_feasible = clf.predict_proba(u)[:, list(clf.classes_).index(True)]
+        ei = ei * p_feasible
     return -float(ei[0])
 
 
@@ -43,13 +55,13 @@ def propose_next(
     maxiter: int = 200,
     popsize: int = 20,
 ) -> np.ndarray:
-    """Raw (denormalized) design vector maximizing EI over the unit cube."""
+    """Raw (denormalized) design vector maximizing constrained EI over the unit cube."""
     bounds_unit = [(0.0, 1.0)] * len(VAR_ORDER)
     y_best = state.y_best
     result = differential_evolution(
         _neg_ei_unit_cube,
         bounds_unit,
-        args=(state.gp, y_best, xi),
+        args=(state.gp, y_best, xi, state.clf),
         seed=seed,
         maxiter=maxiter,
         popsize=popsize,
@@ -70,12 +82,22 @@ def propose_batch(
 ) -> list[np.ndarray]:
     """Kriging-Believer: propose_next, fantasize y=mu(x) there, refit a scratch
     GP, repeat -- cheap way to get *batch_size* diverse parallel candidates
-    from a vanilla (non-batch) GP/EI without a qEI dependency."""
+    from a vanilla (non-batch) GP/EI without a qEI dependency.
+
+    Fantasized points are always treated as feasible (a believed-good real
+    LCOW estimate, not a real evaluation -- see append_observations). The
+    feasibility classifier itself is carried over read-only, not refit each
+    iteration: it's only ever consulted (predict_proba) inside the DE
+    objective, and one more assumed-feasible point wouldn't meaningfully move
+    its decision boundary anyway.
+    """
     scratch = SurrogateState(
         gp=deepcopy(state.gp),
         bounds=state.bounds,
         X_raw=state.X_raw.copy(),
         y=state.y.copy(),
+        feasible=state.feasible.copy(),
+        clf=state.clf,
     )
     proposals: list[np.ndarray] = []
     for i in range(batch_size):

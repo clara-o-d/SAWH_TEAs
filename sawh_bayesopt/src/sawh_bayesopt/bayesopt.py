@@ -3,6 +3,7 @@ run directly against solar_lumped/gpu_sweep's JAX fast path."""
 
 from __future__ import annotations
 
+import logging
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,9 +15,26 @@ from sawh_bayesopt.acquisition import propose_batch
 from sawh_bayesopt.design_space import DesignBounds, latin_hypercube_design
 from sawh_bayesopt.evaluator import DesignEvalResult, EvalCache, evaluate_batch
 from sawh_bayesopt.sites import DEFAULT_SITES, SiteSpec, fetch_monthly_profiles
-from sawh_bayesopt.surrogate import SurrogateState, append_observations, build_gp, fit
+from sawh_bayesopt.surrogate import (
+    SurrogateState,
+    append_observations,
+    build_gp,
+    check_hyperparameter_convergence,
+    fit,
+    fit_feasibility,
+)
+
+logger = logging.getLogger(__name__)
 
 StoppedReason = Literal["budget", "stalled"]
+
+# Below this many feasible observations, the LCOW GP can't be fit at all
+# (surrogate.py::fit requires >=2) -- fall back to pure Latin-hypercube
+# exploration instead of EI-based proposal until enough accumulate. Should be
+# rare (LHS init over a reasonable design space normally finds several
+# feasible points immediately), but a design space where most of the box is
+# infeasible shouldn't crash the optimizer, it should just explore longer.
+MIN_FEASIBLE_TO_FIT = 2
 
 
 @dataclass
@@ -43,10 +61,27 @@ class BayesOptResult:
     stopped_reason: StoppedReason
 
 
-def _to_xy(results: list[DesignEvalResult]) -> tuple[np.ndarray, np.ndarray]:
+def _to_xyf(results: list[DesignEvalResult]) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     X = np.array([r.design_vector for r in results], dtype=float)
     y = np.array([r.combined_lcow for r in results], dtype=float)
-    return X, y
+    feasible = np.array([r.is_feasible for r in results], dtype=bool)
+    return X, y, feasible
+
+
+def _try_fit(state: SurrogateState, *, seed: int) -> tuple[SurrogateState, bool]:
+    """Fit the LCOW GP if there are enough feasible points yet, and the
+    feasibility classifier whenever both classes have been observed (a
+    no-op, clf left as None, otherwise -- see fit_feasibility). Returns
+    (state, fitted) so the caller knows whether EI-based proposal is usable
+    this round or it should still fall back to exploration.
+    """
+    state = fit_feasibility(state, seed=seed)
+    if state.n_feasible < MIN_FEASIBLE_TO_FIT:
+        return state, False
+    state = fit(state)
+    for w in check_hyperparameter_convergence(state.gp):
+        logger.warning("LCOW GP hyperparameter near optimization bound: %s", w)
+    return state, True
 
 
 def run_bayesopt(cfg: BayesOptConfig, run_dir: str | Path) -> BayesOptResult:
@@ -76,8 +111,9 @@ def run_bayesopt(cfg: BayesOptConfig, run_dir: str | Path) -> BayesOptResult:
     history = _evaluate(list(X0))
 
     state = SurrogateState(gp=build_gp(seed=cfg.seed), bounds=cfg.bounds)
-    X_all, y_all = _to_xy(history)
-    state = fit(append_observations(state, X_all, y_all))
+    X_all, y_all, feasible_all = _to_xyf(history)
+    state = append_observations(state, X_all, y_all, feasible_all)
+    state, fitted = _try_fit(state, seed=cfg.seed)
 
     best_so_far = state.y_best
     stall_count = 0
@@ -86,22 +122,37 @@ def run_bayesopt(cfg: BayesOptConfig, run_dir: str | Path) -> BayesOptResult:
     while len(history) < cfg.n_total:
         remaining = cfg.n_total - len(history)
         batch_n = min(cfg.batch_size, remaining)
-        batch = propose_batch(state, batch_size=batch_n, seed=cfg.seed + len(history), xi=cfg.ei_xi)
+
+        if fitted:
+            batch = propose_batch(state, batch_size=batch_n, seed=cfg.seed + len(history), xi=cfg.ei_xi)
+        else:
+            # Not enough feasible observations yet to fit the LCOW GP --
+            # keep exploring blindly (this design space region's feasibility
+            # is still unknown) rather than proposing via a surrogate that
+            # can't exist yet.
+            batch = list(
+                latin_hypercube_design(batch_n, cfg.bounds, seed=cfg.seed + len(history), reject_gap_degenerate=True)
+            )
+
         new_results = _evaluate(batch)
         history.extend(new_results)
 
-        X_new, y_new = _to_xy(new_results)
-        state = fit(append_observations(state, X_new, y_new))
+        X_new, y_new, feasible_new = _to_xyf(new_results)
+        state = append_observations(state, X_new, y_new, feasible_new)
+        state, fitted = _try_fit(state, seed=cfg.seed)
 
         new_best = state.y_best
-        if math.isfinite(best_so_far) and best_so_far != 0.0:
+        if fitted and math.isfinite(best_so_far) and best_so_far != 0.0:
             rel_improve = (best_so_far - new_best) / abs(best_so_far)
         else:
+            # Still bootstrapping (or just became fittable this round) --
+            # don't let the stall counter fire off an undefined/meaningless
+            # comparison against the pre-fit y_best.
             rel_improve = 1.0
         stall_count = 0 if rel_improve >= cfg.stall_rel_tol else stall_count + 1
         best_so_far = new_best
 
-        if stall_count >= cfg.stall_rounds:
+        if fitted and stall_count >= cfg.stall_rounds:
             stopped_reason = "stalled"
             break
 
