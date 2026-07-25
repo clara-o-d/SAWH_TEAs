@@ -27,7 +27,7 @@ python3 -c "import jax; print('jax.devices():', jax.devices())"
 nvidia-smi
 
 python3 scripts/hp_sweep.py \
-  --sweep-id hp_sweep_smoke \
+  --sweep-id hp_sweep_smoke --resume \
   --ei-xi-values 0.02,0.1 --stall-rel-tol-values 0.005 --n-init-values 8 \
   --bo-budget 4 --batch-size 2 --sites cambridge --resolution single \
   --n-workers 2 --gpu-ids 0 \

@@ -119,6 +119,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--weather-cache-dir", type=str, default=str(_REPO / ".weather_cache"))
     p.add_argument("--n-workers", type=int, default=1)
     p.add_argument(
+        "--resume", action="store_true",
+        help="Skip any combination whose run_dir already has a report.json and "
+        "gp_regression_report.json (reconstructing its row from those files instead of "
+        "re-running it) -- lets a sweep that hit a SLURM time limit partway through be "
+        "resubmitted with the same --sweep-id and pick up where it left off, instead of "
+        "burning GPU time re-doing already-finished combinations.",
+    )
+    p.add_argument(
         "--gpu-ids", type=str, default="",
         help="Comma-separated GPU indices to round-robin combinations across (e.g. '0,1'). "
         "Empty (default) means don't touch CUDA_VISIBLE_DEVICES/XLA_PYTHON_CLIENT_MEM_FRACTION "
@@ -234,6 +242,51 @@ def _run_one_combo(task: dict) -> dict:
     return row
 
 
+def _load_completed_row(task: dict) -> dict | None:
+    """Reconstruct a combo's row from a prior run's on-disk outputs, if it
+    looks complete (report.json and gp_regression_report.json both present --
+    the two files _run_one_combo writes last, after everything else
+    succeeded). Returns None if either is missing/unreadable, so the caller
+    falls back to actually running the combination.
+    """
+    run_dir = Path(task["run_dir"])
+    report_path = run_dir / "report.json"
+    gp_report_path = run_dir / "diagnostics" / "gp_regression_report.json"
+    if not (report_path.is_file() and gp_report_path.is_file()):
+        return None
+    try:
+        report = json.loads(report_path.read_text())
+        gp_report = json.loads(gp_report_path.read_text())
+    except (json.JSONDecodeError, OSError):
+        return None
+
+    row: dict = {
+        "combo_tag": task["combo_tag"],
+        "ei_xi": task["ei_xi"],
+        "stall_rel_tol": task["stall_rel_tol"],
+        "n_init": task["n_init"],
+        "n_total": task["n_total"],
+        "run_dir": str(run_dir.relative_to(_REPO)),
+        "resumed_from_prior_run": True,
+        "n_evaluations": report.get("n_evaluations"),
+        "best_combined_lcow_usd_per_m3": report.get("recommended_combined_lcow_usd_per_m3"),
+        "stopped_reason": report.get("stopped_reason"),
+        "improvement_vs_baseline_frac": report.get("improvement_vs_baseline_frac"),
+    }
+    cv = gp_report.get("cross_validation", {})
+    row["cv_rmse"] = cv.get("cv_rmse")
+    row["standardized_residual_mean"] = cv.get("standardized_residual_mean")
+    row["standardized_residual_std"] = cv.get("standardized_residual_std")
+    row["msll_gp_minus_trivial"] = cv.get("msll_gp_minus_trivial")
+    row["n_hyperparameter_warnings"] = len(gp_report.get("hyperparameter_convergence_warnings", []))
+    de_summary = gp_report.get("de_diagnostics_summary")
+    if de_summary and de_summary.get("n_de_calls"):
+        row["n_de_calls"] = de_summary["n_de_calls"]
+        row["frac_de_hit_maxiter"] = de_summary["frac_hit_maxiter"]
+        row["frac_de_not_success"] = de_summary["frac_not_success"]
+    return row
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     sweep_dir = _REPO / "outputs" / "runs" / args.sweep_id
@@ -270,35 +323,63 @@ def main(argv: list[str] | None = None) -> int:
     import multiprocessing
 
     rows: list[dict] = []
+    to_run = tasks
+    if args.resume:
+        to_run = []
+        for t in tasks:
+            resumed = _load_completed_row(t)
+            if resumed is None:
+                to_run.append(t)
+                continue
+            rows.append(resumed)
+            print(
+                f"  [resumed] {t['combo_tag']}: best={resumed.get('best_combined_lcow_usd_per_m3', float('nan')):.4g} "
+                f"stopped={resumed.get('stopped_reason')} n_eval={resumed.get('n_evaluations')}",
+                flush=True,
+            )
+        if rows:
+            print(f"Resumed {len(rows)}/{len(tasks)} already-complete combination(s); running the remaining {len(to_run)}.", flush=True)
+
+    order = {t["combo_tag"]: i for i, t in enumerate(tasks)}
+    json_path = sweep_dir / "sweep_results.json"
+    csv_path = sweep_dir / "sweep_results.csv"
+
+    def _write_outputs() -> None:
+        """Re-writes both output files from *rows* so far -- called after every
+        single combination (resumed or freshly completed), not just once at
+        the end, so a sweep killed partway through (SLURM time limit, node
+        failure) still leaves an inspectable, up-to-date summary of whatever
+        finished, instead of nothing at all until the very last combination lands.
+        27 rows is small enough that a full rewrite each time is negligible cost.
+        """
+        ordered = sorted(rows, key=lambda r: order[r["combo_tag"]])
+        json_path.write_text(json.dumps(ordered, indent=2))
+        fieldnames: list[str] = []
+        for r in ordered:
+            for k in r:
+                if k not in fieldnames:
+                    fieldnames.append(k)
+        with csv_path.open("w", newline="") as f:
+            writer = csv.DictWriter(f, fieldnames=fieldnames)
+            writer.writeheader()
+            writer.writerows(ordered)
+
+    if rows:
+        _write_outputs()
+
     ctx = multiprocessing.get_context("spawn")
     with ProcessPoolExecutor(max_workers=args.n_workers, mp_context=ctx, max_tasks_per_child=1) as pool:
-        futures = {pool.submit(_run_one_combo, t): t["combo_tag"] for t in tasks}
+        futures = {pool.submit(_run_one_combo, t): t["combo_tag"] for t in to_run}
         for fut in as_completed(futures):
             tag = futures[fut]
             row = fut.result()
             rows.append(row)
+            _write_outputs()
             status = "ERROR: " + row["error"] if "error" in row else (
                 f"best={row.get('best_combined_lcow_usd_per_m3', float('nan')):.4g} "
                 f"stopped={row.get('stopped_reason')} n_eval={row.get('n_evaluations')}"
             )
             print(f"  [{len(rows)}/{len(tasks)}] {tag}: {status}", flush=True)
-
-    order = {t["combo_tag"]: i for i, t in enumerate(tasks)}
-    rows.sort(key=lambda r: order[r["combo_tag"]])
-
-    json_path = sweep_dir / "sweep_results.json"
-    json_path.write_text(json.dumps(rows, indent=2))
-
-    fieldnames: list[str] = []
-    for r in rows:
-        for k in r:
-            if k not in fieldnames:
-                fieldnames.append(k)
-    csv_path = sweep_dir / "sweep_results.csv"
-    with csv_path.open("w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=fieldnames)
-        writer.writeheader()
-        writer.writerows(rows)
 
     n_errors = sum(1 for r in rows if "error" in r)
     print(f"\nWrote {csv_path} and {json_path} ({len(rows)} rows, {n_errors} error(s)).", flush=True)
