@@ -238,6 +238,51 @@ def build_optimal_config(df: pd.DataFrame) -> pd.DataFrame:
     return df.loc[idx].reset_index(drop=True)
 
 
+def _interpolate_to_grid(
+    lons: np.ndarray,
+    lats: np.ndarray,
+    vals: np.ndarray,
+    *,
+    sample_step_deg: float,
+    fine_step_deg: float = 0.5,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Interpolate scattered (lon, lat, val) samples onto a fine regular grid.
+
+    Uses linear barycentric interpolation, filling remaining holes (concave
+    coastline gaps, small islands) with nearest-neighbor so there's no NaN
+    gaps between the original sample points. The scattered points sit on a
+    regular ``sample_step_deg`` land grid, so their convex hull spans oceans
+    between continents -- cells farther than one sample spacing from the
+    nearest real sample are masked out (NaN) to avoid smearing color across
+    open water that has no data underneath it.
+    """
+    from scipy.interpolate import griddata
+    from scipy.spatial import cKDTree
+
+    lon_vals = np.arange(lons.min(), lons.max() + fine_step_deg, fine_step_deg)
+    lat_vals = np.arange(lats.min(), lats.max() + fine_step_deg, fine_step_deg)
+    lon_grid, lat_grid = np.meshgrid(lon_vals, lat_vals)
+
+    points = np.column_stack([lons, lats])
+    grid = griddata(points, vals, (lon_grid, lat_grid), method="linear")
+    holes = np.isnan(grid)
+    if np.any(holes):
+        grid[holes] = griddata(points, vals, (lon_grid[holes], lat_grid[holes]), method="nearest")
+
+    tree = cKDTree(points)
+    query_pts = np.column_stack([lon_grid.ravel(), lat_grid.ravel()])
+    nearest_dist, _ = tree.query(query_pts)
+    far = (nearest_dist > sample_step_deg * 1.05).reshape(grid.shape)
+    grid[far] = np.nan
+    return lon_vals, lat_vals, grid
+
+
+def _infer_grid_step(coord: np.ndarray) -> float:
+    """Nominal spacing of a regular (but land-masked, so incomplete) coordinate grid."""
+    diffs = np.diff(np.sort(np.unique(np.round(coord, 6))))
+    return float(np.min(diffs[diffs > 1e-9])) if np.any(diffs > 1e-9) else 1.0
+
+
 def plot_optimal_lcow_map(winners: pd.DataFrame, lcow_dir: Path, label: str) -> None:
     ccrs, cfeature = _import_map_stack()
 
@@ -266,15 +311,20 @@ def plot_optimal_lcow_map(winners: pd.DataFrame, lcow_dir: Path, label: str) -> 
         alpha=0.45, linestyle="--",
     )
 
-    sc = ax.scatter(
-        winners["lon"], winners["lat"], c=lc, s=16, marker="o",
+    lons_arr, lats_arr = winners["lon"].to_numpy(), winners["lat"].to_numpy()
+    sample_step_deg = max(_infer_grid_step(lons_arr), _infer_grid_step(lats_arr))
+    lon_vals, lat_vals, grid = _interpolate_to_grid(
+        lons_arr, lats_arr, lc, sample_step_deg=sample_step_deg
+    )
+    sc = ax.pcolormesh(
+        lon_vals, lat_vals, grid, shading="gouraud",
         transform=ccrs.PlateCarree(), zorder=4, cmap="viridis", norm=norm,
     )
     cbar = fig.colorbar(sc, ax=ax, fraction=0.03, pad=0.04)
     cbar.set_label("Optimal-configuration LCOW (USD per m³ water, log scale)", fontsize=10)
     ax.set_title(
         f"{label}: best achievable LCOW per site — minimum over all swept device-parameter combos\n"
-        f"{len(winners)} GPU-sweep land grid sites (3° spacing)",
+        f"{len(winners)} GPU-sweep land grid sites (3° spacing, interpolated)",
         fontsize=12,
         pad=10,
     )

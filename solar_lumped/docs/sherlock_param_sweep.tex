@@ -225,7 +225,7 @@ mid-combo-2; resubmitting with \texttt{--resume} and more time completed it. Thi
 $2.66\times$ factor is what Section~\ref{sec:cost}'s cost estimate is actually calibrated on --
 a laptop benchmark alone would have understated the real job by the same factor.
 
-\section{Full sweep}
+\section{Full sweep}\label{sec:full-sweep}
 
 \subsection{Job structure}
 \textbf{One array task per site running all 135 combos serially does not work}: at the measured
@@ -235,46 +235,127 @@ instead split into 45 chunks of 3 combos (135 divides evenly), so each array tas
 chunk) pair costing roughly \SI{0.84}{}--\SI{2.93}{\hour} on Sherlock (see
 Section~\ref{sec:cost} for how that's calibrated). \texttt{--combo-offset}/\texttt{--combo-limit}
 (added to \texttt{grid\_param\_sweep.py} for this) slice the site's combo grid; the two
-array-index components are recovered from a single flattened SLURM index via integer div/mod:
+array-index components are recovered from a single flattened SLURM index via integer div/mod.
+$1405 \times 45 = 63{,}225$ total array tasks.
+
+\texttt{MaxArraySize} on this cluster was checked directly (\texttt{scontrol show config | grep
+-i MaxArraySize}) and is \textbf{1{,}000{,}000}, so 63,225 array elements is not the constraint.
+\textbf{The real, binding constraint is the \texttt{owners} QOS's per-user submission cap},
+found via \texttt{sacctmgr show qos format=name,MaxSubmitJobsPerUser}:
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lr@{}}
+\toprule
+\textbf{QOS} & \textbf{MaxSubmitJobsPerUser} \\
+\midrule
+normal & 2{,}000 \\
+dev & 2 \\
+long & 20 \\
+bigmem & 10 \\
+gpu & 100 \\
+owner / owners & \textbf{3{,}000} \\
+high\_p & 100 \\
+service & 4 \\
+system & 99{,}999 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\texttt{owners} caps a single user's \emph{outstanding} submitted jobs (pending + running, with
+each array task counted individually, not the array collapsed to one unit) at
+\textbf{3{,}000} -- an order of magnitude below the 63,225 tasks this sweep needs. A single
+\texttt{sbatch --array=0-63224\%N} is rejected outright regardless of throttle value \texttt{N}
+(\texttt{sbatch: error: Invalid job array specification}); this is unrelated to the much larger
+\texttt{MaxArraySize} above, and unrelated to the separate \texttt{dev} QOS's limit of 2 (which
+only governs \texttt{sh\_dev} interactive sessions, a different partition entirely).
+
+\textbf{Working design}: \texttt{topup\_sweep.sh}, run once under \texttt{nohup}+\texttt{disown}
+on the login node so it survives disconnects, submits the 63,225 tasks as 64 separate
+\texttt{sbatch} calls of up to 1,000 tasks each (staying under the 3,000 cap with headroom), and
+for each batch retries every 120 seconds until Slurm's own \texttt{sbatch} output confirms
+\texttt{"Submitted batch job ..."} -- rather than trying to predict headroom via a separate
+\texttt{squeue} count first, which proved unreliable (Slurm collapses pending array ranges to one
+display line by default, and remained unreliable even with the un-collapsing \texttt{-r} flag,
+apparently due to a propagation lag between \texttt{sbatch} returning and \texttt{squeue}
+reflecting it). Checking the real, authoritative result of each submission attempt instead of a
+separate query removes that race entirely.
 
 \begin{verbatim}
 #!/bin/bash
-#SBATCH --job-name=sawh-sweep
-#SBATCH --array=0-63224%300
+CHUNK_TOTAL=63225
+BATCH_SIZE=1000
+THROTTLE=32
+
+for (( batch_start=0; batch_start<CHUNK_TOTAL; batch_start+=BATCH_SIZE )); do
+  job_name="sawh-sweep-b${batch_start}"
+
+  if squeue -u "$USER" -h -o "%j" | grep -qx "$job_name"; then
+    echo "$(date): $job_name already queued, skipping"
+    continue
+  fi
+
+  batch_end=$(( batch_start + BATCH_SIZE - 1 ))
+  if (( batch_end >= CHUNK_TOTAL )); then batch_end=$(( CHUNK_TOTAL - 1 )); fi
+  arr_max=$(( batch_end - batch_start ))
+
+  while true; do
+    output=$(sbatch <<EOF2
+#!/bin/bash
+#SBATCH --job-name=${job_name}
+#SBATCH --array=0-${arr_max}%${THROTTLE}
 #SBATCH --time=05:00:00
 #SBATCH --cpus-per-task=1
 #SBATCH --mem-per-cpu=4G
 #SBATCH --partition=owners
-
+GLOBAL_INDEX=\$(( ${batch_start} + SLURM_ARRAY_TASK_ID ))
 N_CHUNKS_PER_SITE=45
 CHUNK_SIZE=3
-SITE_INDEX=$(( SLURM_ARRAY_TASK_ID / N_CHUNKS_PER_SITE ))
-CHUNK_INDEX=$(( SLURM_ARRAY_TASK_ID % N_CHUNKS_PER_SITE ))
-COMBO_OFFSET=$(( CHUNK_INDEX * CHUNK_SIZE ))
-
+SITE_INDEX=\$(( GLOBAL_INDEX / N_CHUNKS_PER_SITE ))
+CHUNK_INDEX=\$(( GLOBAL_INDEX % N_CHUNKS_PER_SITE ))
+COMBO_OFFSET=\$(( CHUNK_INDEX * CHUNK_SIZE ))
 source .venv/bin/activate
 export PYTHONUNBUFFERED=True
-python scripts/grid_param_sweep.py \
-  --site-index $SITE_INDEX --step 3 \
-  --combo-offset $COMBO_OFFSET --combo-limit $CHUNK_SIZE \
-  --output-csv outputs/grid_sweep/site_${SITE_INDEX}_chunk_${CHUNK_INDEX}.csv --resume
-EOF
+python scripts/grid_param_sweep.py --site-index \$SITE_INDEX --step 3 \
+  --combo-offset \$COMBO_OFFSET --combo-limit \$CHUNK_SIZE \
+  --output-csv outputs/grid_sweep/site_\${SITE_INDEX}_chunk_\${CHUNK_INDEX}.csv --resume
+EOF2
+    2>&1)
+    if echo "$output" | grep -q "^Submitted batch job"; then
+      echo "$(date): submitted $job_name -- $output"
+      break
+    else
+      echo "$(date): $job_name submission failed, retrying in 120s -- $output"
+      sleep 120
+    fi
+  done
+done
+echo "$(date): all 64 batches submitted"
 \end{verbatim}
 
-\texttt{\%300} throttles to 300 concurrent tasks regardless of how many are queued; raise or
-lower it based on how the partition responds. Each (site, chunk) gets its own output file --
-\emph{not} one shared file per site -- because multiple chunks of the same site can run
-concurrently on different nodes, and concurrent appends/header-writes to one shared file would
-race. \texttt{--resume} makes a preempted/resubmitted task skip combos already written in its
-own chunk file, so preemption on \texttt{owners} costs at most the in-progress combo, not the
-whole chunk. \texttt{--time=05:00:00} leaves nearly $1.7\times$ margin over the slowest measured
-chunk (\SI{2.93}{\hour}); the smaller 3-combo chunk (versus the originally-planned 9) trades more
-array tasks for a shorter preemption-exposure window per task, now that Sherlock's real per-combo
-cost is known to run higher than the local estimate.
+Launch with \texttt{nohup bash topup\_sweep.sh > topup\_sweep2.log 2>\&1 \& disown} so it survives
+SSH disconnects and a stray \texttt{Ctrl+C} on whatever's watching its log. Each batch's internal
+\texttt{\%32} throttles that batch to 32 concurrent tasks; with up to 64 batches eventually
+submitted, true concurrency across the whole sweep is bounded by
+$64 \times 32 = 2{,}048$ tasks at once even once every batch has cleared the QOS cap, subject to
+however many CPUs the \texttt{owners} partition actually has free for this account at any given
+moment (Section~\ref{sec:cost}). Each (site, chunk) gets its own output file -- \emph{not} one
+shared file per site -- because multiple chunks of the same site can run concurrently on
+different nodes, and concurrent appends/header-writes to one shared file would race.
+\texttt{--resume} makes a preempted/resubmitted task skip combos already written in its own chunk
+file, so preemption on \texttt{owners} costs at most the in-progress combo, not the whole chunk.
+\texttt{--time=05:00:00} leaves nearly $1.7\times$ margin over the slowest measured chunk
+(\SI{2.93}{\hour}); the smaller 3-combo chunk (versus the originally-planned 9) trades more array
+tasks for a shorter preemption-exposure window per task, now that Sherlock's real per-combo cost
+is known to run higher than the local estimate.
 
-\texttt{MaxArraySize} on this cluster was checked directly (\texttt{scontrol show config | grep
--i MaxArraySize}) and is \textbf{1{,}000{,}000} -- 63,225 array elements fits with enormous
-headroom, so no splitting across multiple \texttt{sbatch} calls is needed.
+To stop the submission loop deliberately (it does not stop on its own until all 64 batches have
+been confirmed submitted):
+\begin{verbatim}
+pkill -u $USER -f topup_sweep.sh
+squeue -u $USER -h -o "%A %j" | awk '$2 ~ /^sawh-sweep-b/ {print $1}' | xargs -r scancel
+\end{verbatim}
 
 \subsection{Weather prefetch}\label{sec:weather}
 Each site needs one Open-Meteo fetch (cached permanently now that \texttt{WeatherClient}'s cache
@@ -346,14 +427,25 @@ Slow (\SI{3518}{\second}/combo) & 185{,}324 & 370.6 h & 185.3 h & 92.7 h \\
 \end{tabular}
 \end{table}
 
-So: realistically \textbf{53{,}000--185{,}000 core-hours}, i.e. roughly 1--8 days at 1000
-concurrent cores. This is $\sim$2.66$\times$ the earlier Mac-only estimate -- the lesson being
-that a laptop benchmark is a starting point, not a substitute for measuring on the actual
-target hardware before sizing the real job. Dropping vapor gap from the sweep
-(Section~\ref{sec:swept}, $405\to135$ combos) and excluding northern Canada/Russia
-(Section~\ref{sec:fixed-above}, $1635\to1405$ sites) still meaningfully reduce this from what it
-would otherwise have been; monthly over single (Section~\ref{sec:resolution}) costs $12\times$
-more than the cheapest option, but buys the accuracy the map actually needs.
+So: realistically \textbf{53{,}000--185{,}000 core-hours}. This is $\sim$2.66$\times$ the earlier
+Mac-only estimate -- the lesson being that a laptop benchmark is a starting point, not a
+substitute for measuring on the actual target hardware before sizing the real job. Dropping
+vapor gap from the sweep (Section~\ref{sec:swept}, $405\to135$ combos) and excluding northern
+Canada/Russia (Section~\ref{sec:fixed-above}, $1635\to1405$ sites) still meaningfully reduce this
+from what it would otherwise have been; monthly over single (Section~\ref{sec:resolution}) costs
+$12\times$ more than the cheapest option, but buys the accuracy the map actually needs.
+
+\textbf{In practice, wall-clock is gated by the \texttt{owners} QOS submission cap
+(Section~\ref{sec:full-sweep}), not directly by a chosen core count.} There is no single
+\texttt{sbatch --array=... -\/-cpus-per-task=2000}-style knob to turn; the achievable concurrency
+is the smaller of (a) $64 \times 32 = 2{,}048$ tasks once \texttt{topup\_sweep.sh} has all 64
+batches past the 3,000-job cap, and (b) however much of the shared \texttt{owners} partition is
+actually free for this account at any moment, which fluctuates with other users' jobs and is not
+something this account controls. At the original target of roughly 2,000 concurrent cores,
+$53{,}000$--$185{,}000$ core-hours works out to \textbf{$\sim$1--4 days}, consistent with the
+original ``down in 4 days'' sizing target -- but the QOS cap means that figure is only reached if
+\texttt{owners} actually grants close to 2,000 concurrent slots to this account; if the partition
+is busier than that, the same core-hour total simply takes longer rather than failing.
 
 \subsection{No GPU}
 This code is scalar SciPy (\texttt{solve\_ivp}, Radau/BDF methods) -- single-threaded CPU work,
