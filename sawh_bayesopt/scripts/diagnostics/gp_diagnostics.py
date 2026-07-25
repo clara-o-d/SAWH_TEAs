@@ -139,6 +139,21 @@ def cross_validate(X: np.ndarray, y: np.ndarray, bounds: DesignBounds, *, k: int
     }
 
 
+def detect_outliers(y: np.ndarray, *, iqr_multiplier: float = 3.0) -> np.ndarray:
+    """Tukey's "far out" fence (Q3 + iqr_multiplier*IQR) on percentiles of *y*.
+
+    Order-statistics-based, so a couple of extreme points (e.g. infeasible
+    designs hitting the penalty LCOW, or landing near it) barely move Q1/Q3
+    themselves -- this catches outliers beyond the exact penalty sentinel too
+    (a design can be badly infeasible without landing exactly on
+    PENALTY_LCOW_USD_PER_M3), which the n_penalized_points count alone misses.
+    """
+    q1, q3 = np.percentile(y, [25, 75])
+    iqr = q3 - q1
+    threshold = q3 + iqr_multiplier * iqr
+    return y > threshold
+
+
 def final_fit_hyperparameters(
     X: np.ndarray, y: np.ndarray, bounds: DesignBounds, *, seed: int
 ) -> tuple[dict, SurrogateState]:
@@ -211,11 +226,34 @@ def main(argv: list[str] | None = None) -> int:
     for key in ("cv_mse", "cv_rmse", "standardized_residual_mean", "standardized_residual_std", "msll_gp_minus_trivial"):
         print(f"  {key}: {cv[key]:.4g}", flush=True)
 
+    outlier_mask = detect_outliers(y)
+    cv_no_outliers = None
+    if outlier_mask.sum() > 0 and (~outlier_mask).sum() >= 2:
+        print(
+            f"\n{outlier_mask.sum()} outlier(s) beyond Tukey's far-out fence (Q3 + 3*IQR): "
+            f"{sorted(y[outlier_mask].tolist())} -- re-running CV excluding them "
+            "(a couple of extreme values, penalized or not, can dominate cv_mse/standardized "
+            "residuals when n is small; this isolates outlier-driven miscalibration from the "
+            "surrogate's calibration on the well-behaved majority of points)",
+            flush=True,
+        )
+        cv_no_outliers = cross_validate(
+            X[~outlier_mask], y[~outlier_mask], bounds,
+            k=min(args.k_folds, int((~outlier_mask).sum())), seed=args.seed,
+        )
+        for key in ("cv_rmse", "standardized_residual_mean", "standardized_residual_std", "msll_gp_minus_trivial"):
+            print(f"  (excl. outliers) {key}: {cv_no_outliers[key]:.4g}", flush=True)
+
     print("Fitting final GP on all evaluated points...", flush=True)
     hyperparams, state = final_fit_hyperparameters(X, y, bounds, seed=args.seed)
     print(f"  kernel: {hyperparams['kernel_repr']}", flush=True)
 
-    report = {"cross_validation": cv, "final_fit_hyperparameters": hyperparams}
+    report = {
+        "cross_validation": cv,
+        "cross_validation_excluding_outliers": cv_no_outliers,
+        "outlier_values_excluded": sorted(y[outlier_mask].tolist()) if outlier_mask.sum() else [],
+        "final_fit_hyperparameters": hyperparams,
+    }
     report_path = out_dir / "gp_regression_report.json"
     report_path.write_text(json.dumps(report, indent=2))
     print(f"Report written to {report_path}", flush=True)
