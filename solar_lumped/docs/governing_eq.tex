@@ -100,9 +100,10 @@ where $A_r$ is the fin area ratio and $h_{conv,cond} = A_r\,h_{amb}$.
 
 \begin{equation}
 \frac{dH}{dt}
-= \frac{MW_{w}}{\rho_{sol}}\,\frac{P_{sat}(T_g)}{RT_g}\,(C_R - a_w)
+= g\,\frac{MW_{w}}{\rho_{sol}}\,\frac{P_{sat}(T_g)}{RT_g}\,(C_R - a_w)
 \label{eq:dH}
 \end{equation}
+Wilson's Eq.~6 as printed omits the $g$ prefactor, but the bare product $\frac{MW_w}{\rho_{sol}}\frac{P_{sat}}{RT_g}$ is dimensionless (m$^3$/mol $\times$ mol/m$^3$), so $dH/dt$ as printed cannot carry units of m/s. Including $g$ (same mass-transfer coefficient as Eq.~\eqref{eq:dcw}) is required both for dimensional consistency and to match the desorption mass-rate identity $\dot{m}_{des} = -\rho_{sol}A_c\,dH/dt$ used elsewhere in the paper against the flux-based $\dot{m}_{des} = MW_w\,g\,\frac{P_{sat}}{RT_g}(C_R-a_w)$. This implementation therefore keeps the $g$ factor.
 
 \textbf{Concentration ratio $C_R$:}
 \begin{align}

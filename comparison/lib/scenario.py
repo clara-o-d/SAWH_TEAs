@@ -12,7 +12,7 @@ from dataclasses import dataclass
 # --- Ambient conditions (identical across all four configs) ---
 T_AMB_C: float = 32.0
 RH_AMB: float = 0.45
-H_AMB_W_M2_K: float = 15.0
+H_AMB_W_M2_K: float = 10.0
 
 # --- Hydrogel / sorbent material (identical across all four configs) ---
 SALT_NAME: str = "LiCl"

@@ -52,7 +52,7 @@ K_P_PER_KG_S_M2: float = 5.0e3
 # Data-center process air
 T_AMB_C: float = 32.0
 RH_AMB: float = 0.45
-H_AMB_W_M2_K: float = 15.0
+H_AMB_W_M2_K: float = 10.0
 
 # Sorbent defaults
 DEFAULT_SORBENT: str = "hydrogel"
