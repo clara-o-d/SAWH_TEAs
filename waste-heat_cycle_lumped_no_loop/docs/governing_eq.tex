@@ -4,7 +4,7 @@
 \usepackage{booktabs}
 \usepackage{siunitx}
 
-\title{Governing Equations for a Waste-Heat-Driven, Two-Bed SAWH System}
+\title{Governing Equations for a Waste-Heat-Driven, Two-Bed SAWH System (No HTF Loop)}
 \author{}
 \date{}
 
@@ -13,9 +13,9 @@
 
 \section*{System picture and notation}
 
-Two adsorbent-coated contactors, $A$ and $B$, alternate roles every half-cycle (duration set by desorber RH threshold, capped at $\tau_{1/2,\max}$). During a half-cycle, contactor~$A$ adsorbs from ambient process air while contactor~$B$ desorbs under partial vacuum. Heat of adsorption on~$A$ is recovered via a heat-transfer-fluid (HTF) loop and delivered to the desorbing bed~$B$, supplemented by waste heat coupled through a liquid--liquid heat exchanger (HX). This generalizes Wilson et al.'s single-bed solar model: Eqs.~1--2 and 5--6 carry over in spirit, but the solar/absorber/glass stack is replaced by the coupling loop plus waste-heat HX, and a second bed enables continuous operation.
+Two adsorbent-coated contactors, $A$ and $B$, alternate roles every half-cycle (duration set by desorber RH threshold, capped at $\tau_{1/2,\max}$). During a half-cycle, contactor~$A$ adsorbs from ambient process air while contactor~$B$ desorbs under partial vacuum. This is the same two-bed cycling logic as the sibling \texttt{waste\_heat\_cycle\_lumped} package, but the pumped heat-transfer-fluid (HTF) loop that used to shuttle the heat of adsorption from~$A$ to the desorbing bed~$B$ has been removed. The desorbing bed now couples directly to the fixed waste-heat stream through a single equivalent UA (the series combination of the waste-heat-stream HX and the contactor-side UA that used to sandwich the loop on either end); the adsorbing bed rejects its heat of adsorption to ambient through a finned heat sink instead of having it extracted by the loop. This generalizes Wilson et al.'s single-bed solar model: Eqs.~1--2 and 5--6 carry over in spirit, but the solar/absorber/glass stack is replaced by the direct waste-heat coupling, and a second bed enables continuous operation.
 
-\textbf{Subscripts:} $a$ = adsorbing contactor; $d$ = desorbing contactor (identities swap each half-cycle); $f$ = HTF in the coupling loop; $wh$ = waste-heat stream; $cond$ = condenser; $amb$ = ambient process airstream.
+\textbf{Subscripts:} $a$ = adsorbing contactor; $d$ = desorbing contactor (identities swap each half-cycle); $wh$ = waste-heat stream (fixed inlet temperature and mass flow, coupled directly to $d$); $cond$ = condenser; $amb$ = ambient process airstream.
 
 \section{State variables}
 
@@ -23,66 +23,58 @@ Per unit footprint area (\si{\metre\squared}), unless noted.
 
 \textbf{Hydrogel sorbent (default):}
 \begin{equation}
-\mathbf{y} = \bigl[c_{w,a},\, H_a,\, c_{w,d},\, H_d,\, T_a,\, T_d,\, T_f,\, T_{cond}\bigr]
+\mathbf{y} = \bigl[c_{w,a},\, H_a,\, c_{w,d},\, H_d,\, T_a,\, T_d,\, T_{cond}\bigr]
 \end{equation}
 
 \textbf{MOF sorbent (optional):}
 \begin{equation}
-\mathbf{y} = \bigl[q_a,\, q_d,\, T_a,\, T_d,\, T_f,\, T_{cond}\bigr]
+\mathbf{y} = \bigl[q_a,\, q_d,\, T_a,\, T_d,\, T_{cond}\bigr]
 \end{equation}
 where $q$ is gravimetric loading (\si{\kilogram\water\per\kilogram\adsorbent}).
 
+There is no loop-fluid state $T_f$: with the pumped HTF loop removed, the only thermal states are the two contactor temperatures and the condenser temperature.
+
 \section{Contactor energy balances}
 
-\textbf{Desorbing contactor} (sealed, partial vacuum $P_{cond} \approx 20$--$60$~mbar):
+\textbf{Desorbing contactor} (sealed, partial vacuum $P_{cond} \approx 20$--$60$~mbar), coupled directly to the waste-heat stream:
 \begin{equation}
 (\rho c_p V)_{d}\,\frac{dT_d}{dt}
-= \dot{Q}_{f\to d}
+= \dot{Q}_{wh\to d}
 - \dot{m}_{des}\,h_{des}
 - h_{gap}\,A_d\,(T_d - T_{cond})
 - \varepsilon_d\sigma A_d\,(T_d^4 - T_{cond}^4)
 \label{eq:desorbing}
 \end{equation}
 
-\textbf{Adsorbing contactor} (open to process air, near-ambient pressure):
+\textbf{Adsorbing contactor} (open to process air, near-ambient pressure), rejecting the heat of adsorption to ambient through a finned heat sink rather than to a loop:
 \begin{equation}
 (\rho c_p V)_{a}\,\frac{dT_a}{dt}
 = \dot{m}_{ads}\,h_{ads}
-- h_{amb}\,A_a\,(T_a - T_{amb})
-- \dot{Q}_{a\to f}
+- h_{fin}\,A_a\,(T_a - T_{amb})
 \label{eq:adsorbing}
 \end{equation}
+\begin{equation}
+h_{fin} = \phi_{fin}\,h_{amb}
+\end{equation}
+The adsorbing-bed fin area ratio $\phi_{fin}$ is sized like the condenser's existing fin stack: plain ambient convection alone ($h_{amb}$ only) gives a cooldown time constant of $(\rho c_p V)_a / (h_{amb} A_a) \approx \SI{167}{\minute}$, far slower than a half-cycle, so without fins the bed cannot shed the heat of adsorption plus its residual heat from the prior desorbing role before it must swap roles again. Finning to $\phi_{fin} = 7.1$ cuts that time constant to $\approx \SI{23}{\minute}$.
 
 At partial vacuum, $h_{gap}$ uses a rarefied-gas conductance (Knudsen--continuum blend), not Hollands free convection.
 
-\section{Thermal-coupling loop}
+\section{Direct waste-heat coupling}
 
+The waste-heat stream couples to the desorbing bed through a single equivalent UA, $UA_{wh,d}$, formed by combining the waste-heat-stream HX conductance and the contactor-side conductance in series (the two conductances that used to sandwich the now-removed loop fluid):
 \begin{equation}
-(\rho c_p V)_{f}\,\frac{dT_f}{dt}
-= \dot{Q}_{a\to f} + \dot{Q}_{wh\to f} - \dot{Q}_{f\to d} - \dot{Q}_{f,loss}
-\label{eq:loop}
-\end{equation}
-
-Heat-exchanger NTU--$\varepsilon$ closures ($\dot{m}_f = \rho_f \dot{V}_f$ is the HTF control variable):
-\begin{equation}
-\dot{Q}_{a\to f} = \dot{m}_f c_{p,f}\,(T_a - T_f)\,\Bigl[1-\exp\!\Bigl(-\frac{UA_a}{\dot{m}_f c_{p,f}}\Bigr)\Bigr]
-\label{eq:Qaf}
-\end{equation}
-\begin{equation}
-\dot{Q}_{f\to d} = \dot{m}_f c_{p,f}\,(T_f - T_d)\,\Bigl[1-\exp\!\Bigl(-\frac{UA_d}{\dot{m}_f c_{p,f}}\Bigr)\Bigr]
-\label{eq:Qfd}
-\end{equation}
-\begin{equation}
-\dot{Q}_{wh\to f} = \dot{m}_{wh}\,c_{p,wh}\,(T_{wh,in} - T_{f})\,\Bigl[1-\exp\!\Bigl(-\frac{UA_{wh}}{\dot{m}_{wh}\,c_{p,wh}}\Bigr)\Bigr]
-\label{eq:Qwhf}
+UA_{wh,d} = \left(\frac{1}{UA_{wh}} + \frac{1}{UA_{d}}\right)^{-1} = \frac{UA_{wh}\,UA_d}{UA_{wh} + UA_d}
+\label{eq:uaeq}
 \end{equation}
 
-Waste heat enters the loop only through this HX coupling: $\dot{Q}_{wh\to f} = 0$ when $T_{wh,in} \le T_f$, and otherwise $T_{wh,in}$ sets the thermodynamic ceiling on $T_f$ (the approach temperature between the waste-heat stream and the loop fluid bounds the transfer). The waste-heat outlet follows from an energy balance on the stream:
+NTU--$\varepsilon$ closure ($\dot{m}_{wh}$ is a fixed waste-heat mass flow, not a control variable):
 \begin{equation}
-T_{wh,out} = T_{wh,in} - \frac{\dot{Q}_{wh\to f}}{\dot{m}_{wh}\,c_{p,wh}}
+\dot{Q}_{wh\to d} = \dot{m}_{wh}\,c_{p,wh}\,(T_{wh,in} - T_d)\,\Bigl[1-\exp\!\Bigl(-\frac{UA_{wh,d}}{\dot{m}_{wh}\,c_{p,wh}}\Bigr)\Bigr]
+\label{eq:Qwhd}
 \end{equation}
 
-Loop parasitic loss: $\dot{Q}_{f,loss} = \alpha_{loss}\bigl(|\dot{Q}_{a\to f}| + |\dot{Q}_{f\to d}|\bigr)$.
+Unlike the looped variant, there is no intermediate loop-fluid temperature and no pumped flow to modulate the coupling: $T_{wh,in}$ and $\dot{m}_{wh}$ are fixed boundary conditions, and $UA_{wh,d}$ is a fixed device parameter.
 
 \section{Condenser energy balance}
 
@@ -97,6 +89,8 @@ Loop parasitic loss: $\dot{Q}_{f,loss} = \alpha_{loss}\bigl(|\dot{Q}_{a\to f}| +
 
 \section{Mass transport}
 
+Unchanged from \texttt{waste\_heat\_cycle\_lumped}: only the thermal coupling to the desorbing bed changes, not the sorbent mass-transport model.
+
 \subsection{Hydrogel (PAM--LiCl, Wilson Eqs.~5--6)}
 
 \textbf{Adsorption (open bed):}
@@ -105,11 +99,12 @@ Loop parasitic loss: $\dot{Q}_{f,loss} = \alpha_{loss}\bigl(|\dot{Q}_{a\to f}| +
 \label{eq:massads}
 \end{equation}
 \begin{equation}
-\frac{dH_a}{dt} = \frac{MW_w}{\rho_{sol}}\,\frac{P_{sat}(T_a)}{RT_a}\,\bigl(RH_{amb} - a_w\bigr)
+\frac{dH_a}{dt} = g_{chamber}\,\frac{MW_w}{\rho_{sol}}\,\frac{P_{sat}(T_a)}{RT_a}\,\bigl(RH_{amb} - a_w\bigr)
 \end{equation}
 \begin{equation}
 \dot{m}_{ads} = MW_w\,\bigl(\dot{c}_{w,a}\,H_a + c_{w,a}\,\dot{H}_a\bigr), \qquad \dot{m}_{ads} \ge 0
 \end{equation}
+Wilson's printed Eq.~6 omits the mass-transfer coefficient, but $\frac{MW_w}{\rho_{sol}}\frac{P_{sat}}{RT}$ alone is dimensionless, so $dH/dt$ as printed has no units of m/s. The $g_{chamber}$ (or $g_{gap}$, desorption) factor is required for dimensional consistency and to match the desorption mass-rate identity $\dot{m}_{des} = -\rho_{sol}A_c\,dH/dt$ used elsewhere in Wilson et al.; this implementation includes it.
 
 \textbf{Desorption (vacuum-limited Wilson inventory):}
 
@@ -135,7 +130,7 @@ c_r(T_d, T_{cond}) = \frac{P_{sat}(T_{cond})}{P_{sat}(T_d)}\,\frac{T_d}{T_{cond}
 \end{equation}
 \begin{equation}
 \left.\frac{dH_d}{dt}\right|_{\mathrm{Wilson}}
-= \frac{MW_w}{\rho_{sol}}\,\frac{P_{sat}(T_d)}{RT_d}\,
+= g_{gap}(H_d)\,\frac{MW_w}{\rho_{sol}}\,\frac{P_{sat}(T_d)}{RT_d}\,
 \Bigl[c_r(T_d, T_{cond}) - a_w(c_{w,d}, H_d)\Bigr]
 \label{eq:massdes_H}
 \end{equation}
@@ -219,26 +214,23 @@ Roles then swap: the bed that adsorbed desorbs in the next half-cycle.
 
 \subsection{Feedback control}
 
-Temperature matching is handled by the HTF pump; vacuum conductance tracks the adsorption-limited desorption capacity (evaluated from natural, unequalized fluxes):
-\begin{align}
-\dot{m}_f &= \mathrm{clip}\!\Bigl(\dot{m}_{f,0}\,\bigl[1 + k_T\,(T_a - T_d)\bigr],\; \dot{m}_{f,\min},\; \dot{m}_{f,\max}\Bigr)
-\label{eq:ctrl_mf}
-\\
-C_{vac} &= \mathrm{clip}\!\Bigl(
+There is no HTF pump to control in this variant (no actuator drives temperature matching between beds): the only feedback control is the vacuum conductance, which tracks the adsorption-limited desorption capacity (evaluated from natural, unequalized fluxes):
+\begin{equation}
+C_{vac} = \mathrm{clip}\!\Bigl(
 C_{vac,0}\,\max\!\Bigl(0.1,\; \frac{\dot{m}_{ads,nat}}{\max(\dot{m}_{des,nat}, \epsilon)}\Bigr),\;
 C_{vac,\min},\; C_{vac,\max}\Bigr)
 \label{eq:ctrl_cvac}
-\end{align}
-Temperature tracking target: $T_a(t) \approx T_d(t)$ over the half-cycle.
+\end{equation}
+$T_a$ and $T_d$ are otherwise free-running outcomes of Eqs.~\eqref{eq:desorbing}--\eqref{eq:adsorbing}, not a controlled tracking target.
 
 \section{Constraints}
 
 \begin{itemize}
 \item Hydrogel: $H \ge H_0$; $c_w \ge c_{w,\min}$; desorption rates non-positive ($\dot{c}_w \le 0$, $\dot{H} \le 0$); $\dot{m}_{ads} = \dot{m}_{des}$ each step (Eq.~\eqref{eq:equal_mass}).
 \item MOF: $q \in [q_{\min}, q_{\max}]$.
-\item Control outputs clipped to physical pump/HX limits.
+\item Vacuum conductance clipped to physical pump limits.
 \item Roles swap after each half-cycle: loading, thickness, and temperature states exchange between beds.
-\item Thermal efficiency: $\eta_{th} = \dot{m}_{water}\,h_{fg} / \int \dot{Q}_{wh\to f}\,dt$ over daily operation.
+\item Thermal efficiency: $\eta_{th} = \dot{m}_{water}\,h_{fg} / \int \dot{Q}_{wh\to d}\,dt$ over daily operation.
 \end{itemize}
 
 \section{Default parameters (data-center baseline)}
@@ -256,38 +248,39 @@ Max depletion time & $\tau_{dep,\max}$ & \SI{600}{\second} \\
 Condenser pressure & $P_{cond}$ & \SI{30}{\milli\bar} \\
 Vacuum gap & --- & \SI{40}{\milli\metre} \\
 Contactor thermal mass & $(\rho c_p V)_d$ & \SI{1.5e5}{\joule\per\metre\squared\kelvin} \\
-HTF thermal mass & $(\rho c_p V)_f$ & \SI{2.0e4}{\joule\per\metre\squared\kelvin} \\
-HTF base flow & $\dot{m}_{f,0}$ & \SI{0.25}{\kilogram\per\metre\squared\per\second} \\
-Vacuum conductance base & $C_{vac,0}$ & \SI{8e-9}{\kilogram\per\second\per\pascal\per\metre\squared} \\
+Contactor-side UA & $UA_d$ & \SI{800}{\watt\per\kelvin\per\metre\squared} \\
 Waste-heat inlet & $T_{wh,in}$ & \SI{58}{\celsius} \\
 Waste-heat flow & $\dot{m}_{wh}$ & \SI{0.15}{\kilogram\per\metre\squared\per\second} \\
 Waste-heat HX conductance & $UA_{wh}$ & \SI{1200}{\watt\per\kelvin\per\metre\squared} \\
+Direct waste-heat-to-desorber equivalent UA & $UA_{wh,d}$ & \SI{480}{\watt\per\kelvin\per\metre\squared} (Eq.~\eqref{eq:uaeq}) \\
 Process air & $T_{amb}$, RH & \SI{32}{\celsius}, 45\% \\
-External convection & $h_{amb}$ & \SI{15}{\watt\per\metre\squared\kelvin} \\
+External convection & $h_{amb}$ & \SI{10}{\watt\per\metre\squared\kelvin} \\
+Adsorbing-bed fin area ratio & $\phi_{fin}$ & 7.1 \\
+Vacuum conductance base & $C_{vac,0}$ & \SI{8e-9}{\kilogram\per\second\per\pascal\per\metre\squared} \\
 Hydrogel $H_0$ & --- & \SI{4}{\milli\metre} \\
 Chamber $g$ (abs.) & $g_{chamber}$ & \SI{0.0085}{\metre\per\second} \\
 Condensation enthalpy & $h_{fg}$ & \SI{2.256e6}{\joule\per\kilogram} \\
-Fin area ratio & $A_r$ & 7.1 \\
-HTF temperature gain & $k_T$ & \SI{0.08}{\per\kelvin} \\
+Fin area ratio (condenser) & $A_r$ & 7.1 \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\section*{Summary: mapping from Wilson et al.\ (solar, 1-bed)}
+\section*{Summary: mapping from \texttt{waste\_heat\_cycle\_lumped} (looped, 2-bed)}
 
 \begin{table}[h]
 \centering
 \small
-\begin{tabular}{@{}p{0.30\textwidth}p{0.32\textwidth}p{0.32\textwidth}@{}}
+\begin{tabular}{@{}p{0.34\textwidth}p{0.30\textwidth}p{0.30\textwidth}@{}}
 \toprule
-\textbf{Wilson et al.\ (solar, 1-bed)} & \textbf{This system (waste-heat, 2-bed)} & \textbf{What changes} \\
+\textbf{Looped variant} & \textbf{This system (no loop)} & \textbf{What changes} \\
 \midrule
-Eq.\ 1 --- gel desorption balance & Desorbing-contactor balance & Absorber conduction $\to$ loop delivery $\dot{Q}_{f\to d}$ \\
-(absorption simplification) & Adsorbing-contactor balance & Heat of adsorption retained; extracted by $\dot{Q}_{a\to f}$ \\
-Eqs.\ 3--4 --- glass \& absorber & Coupling-loop balance & No solar stack; $\dot{Q}_{wh\to f}$ HX + bed-to-bed recovery \\
-Eq.\ 2 --- condenser balance & Condenser balance (same form) & Gap $h$ becomes rarefied/molecular at vacuum \\
-Eqs.\ 5--6 --- mass transport & Adsorption unchanged; desorption Wilson + vacuum scaling & Eqs.~\eqref{eq:massdes_cw}--\eqref{eq:mdesnat}; $C_{vac}(t)$ \\
-Fixed 12h/12h cycle & RH-threshold half-cycles + equal flux & $\dot{m}_{ads}=\dot{m}_{des}$; $\dot{m}_f(t)$, $C_{vac}(t)$ \\
+Loop-fluid state $T_f$ & Removed & One fewer ODE state \\
+$\dot{Q}_{f\to d}$ (loop $\to$ desorber) & $\dot{Q}_{wh\to d}$ (Eq.~\eqref{eq:Qwhd}) & Waste heat couples directly through $UA_{wh,d}$ \\
+$\dot{Q}_{a\to f}$ (adsorber $\to$ loop, heat recovery) & $h_{fin}A_a(T_a - T_{amb})$ & Heat of adsorption rejected to ambient, not recovered \\
+$\dot{Q}_{wh\to f}$ (waste heat $\to$ loop) & Folded into $UA_{wh,d}$ (Eq.~\eqref{eq:uaeq}) & Series-combined with the old loop-to-desorber UA \\
+HTF pump control ($\dot{m}_f$ tracks $T_a - T_d$) & Removed & No actuator; $T_a$, $T_d$ free-run \\
+Vacuum conductance control $C_{vac}$ & Unchanged (Eq.~\eqref{eq:ctrl_cvac}) & --- \\
+Sorbent mass transport (Eqs.~\eqref{eq:massads}--\eqref{eq:mdesnat}) & Unchanged & --- \\
 \bottomrule
 \end{tabular}
 \end{table}
