@@ -190,8 +190,11 @@ def main() -> None:
     p.add_argument(
         "--warmup-cycles",
         type=int,
-        default=0,
-        help="Full cycles to run before the reporting day/cycle (discarded; equilibrates state)",
+        default=2,
+        help=(
+            "Aitken-accelerated warmup rounds to reach the periodic steady state "
+            "before the reporting day/cycle (0 disables, starting cold)"
+        ),
     )
     p.add_argument("--water-inventory-csv", type=Path, default=None)
     p.add_argument("--water-inventory-plot", type=Path, default=None)

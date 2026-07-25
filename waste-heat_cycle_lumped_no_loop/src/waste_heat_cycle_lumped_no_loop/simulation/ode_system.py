@@ -441,6 +441,114 @@ def swap_roles(
     return loading_a, loading_d, h_a, h_d, t_a, t_d, t_cond
 
 
+def _state_to_vec(state: CycleState, config: DeviceConfig) -> np.ndarray:
+    """Drop the h_a/h_d slots for MOF configs, where they're always None."""
+    la, ld, ha, hd, ta, td, tc = state
+    if is_hydrogel(config):
+        return np.array([la, ld, ha, hd, ta, td, tc], dtype=float)
+    return np.array([la, ld, ta, td, tc], dtype=float)
+
+
+def _vec_to_state(vec: np.ndarray, config: DeviceConfig) -> CycleState:
+    if is_hydrogel(config):
+        la, ld, ha, hd, ta, td, tc = (float(v) for v in vec)
+        return la, ld, ha, hd, ta, td, tc
+    la, ld, ta, td, tc = (float(v) for v in vec)
+    return la, ld, None, None, ta, td, tc
+
+
+def find_cyclic_state(
+    profile: HalfCycleProfile,
+    config: DeviceConfig,
+    *,
+    initial_state: CycleState | None = None,
+    tol: float = 1e-6,
+    max_rounds: int = 10,
+    stall_ratio: float = 0.5,
+    stall_rounds: int = 2,
+    verbose: bool = True,
+) -> CycleState:
+    """Find the steady periodic post-cycle state for a profile repeated indefinitely,
+    without brute-force warmup cycling.
+
+    Plain fixed-point iteration (looping ``_run_one_cycle``) can need 100+ cycles
+    to converge at sites where the one-cycle map's slowest eigenvalue is close to
+    1. This instead accelerates convergence with restarted vector Aitken Δ²
+    extrapolation: each round applies the real map twice, then extrapolates the
+    fixed point from those two real evaluations, typically converging in ~3-6
+    rounds. Same algorithm as solar_lumped/waste_heat_lumped's find_cyclic_state,
+    generalized from the (c_w, H) pair to this device's 7-field cycle state
+    (5 fields for MOF, which has no hydrogel thickness).
+
+    Some (profile, config) pairs have no single fixed point: the one-cycle map
+    bifurcates into a stable period-2 orbit, so ``rel_step`` plateaus instead of
+    shrinking toward ``tol``. Detected as ``stall_rounds`` consecutive rounds
+    where ``rel_step`` fails to shrink by at least ``stall_ratio`` relative to
+    the previous round, handled by returning the average of the two most recent
+    extrapolated states (also the fallback if ``max_rounds`` is exhausted).
+    """
+    if initial_state is None:
+        initial_state = _initial_state(
+            config,
+            loading_a0=None,
+            loading_d0=None,
+            h_a0=None,
+            h_d0=None,
+            t_a0=None,
+            t_d0=None,
+        )
+    x = _state_to_vec(initial_state, config)
+
+    def step(vec: np.ndarray) -> np.ndarray:
+        _, state = _run_one_cycle(profile, config, _vec_to_state(vec, config))
+        return _state_to_vec(state, config)
+
+    prev_rel_step: float | None = None
+    prev_x_star: np.ndarray | None = None
+    stall_count = 0
+    for round_idx in range(1, max(1, max_rounds) + 1):
+        x1 = step(x)
+        x2 = step(x1)
+        d0 = x1 - x
+        d1 = x2 - x1
+        dd = d1 - d0
+        denom = float(np.dot(dd, dd))
+        x_star = x2 if denom < 1e-30 else x - d0 * (np.dot(d0, dd) / denom)
+        rel_step = float(np.linalg.norm(x_star - x2) / max(float(np.linalg.norm(x2)), 1e-12))
+        if rel_step < tol:
+            x = x_star
+            break
+        if prev_rel_step is not None and rel_step > stall_ratio * prev_rel_step:
+            stall_count += 1
+            if stall_count >= stall_rounds:
+                if verbose:
+                    print(
+                        f"    find_cyclic_state: rel_step stalled at {rel_step:.2e} "
+                        f"(round {round_idx}) -- not a single fixed point (likely a "
+                        "period-2 orbit); returning the average of the two "
+                        "alternating states instead.",
+                        flush=True,
+                    )
+                x = 0.5 * (x_star + x)
+                break
+        else:
+            stall_count = 0
+        prev_rel_step = rel_step
+        prev_x_star = x
+        x = x_star
+    else:
+        if prev_x_star is not None:
+            if verbose:
+                print(
+                    f"    find_cyclic_state: did not converge within {max_rounds} rounds "
+                    "(no stall detected either -- non-periodic drift); returning the "
+                    "average of the last two states.",
+                    flush=True,
+                )
+            x = 0.5 * (x + prev_x_star)
+    return _vec_to_state(x, config)
+
+
 def run_cycle(
     profile: HalfCycleProfile,
     config: DeviceConfig,
@@ -451,7 +559,7 @@ def run_cycle(
     h_d0: float | None = None,
     t_a0: float | None = None,
     t_d0: float | None = None,
-    warmup_cycles: int = 0,
+    warmup_cycles: int = 2,
 ) -> CycleResult:
     state = _initial_state(
         config,
@@ -462,8 +570,10 @@ def run_cycle(
         t_a0=t_a0,
         t_d0=t_d0,
     )
-    for _ in range(warmup_cycles):
-        _, state = _run_one_cycle(profile, config, state)
+    if warmup_cycles > 0:
+        state = find_cyclic_state(
+            profile, config, initial_state=state, max_rounds=max(3, warmup_cycles), verbose=False
+        )
     cyc, _ = _run_one_cycle(profile, config, state)
     return cyc
 
@@ -475,7 +585,7 @@ def run_daily_operation(
     n_cycles: int | None = None,
     loading_a0: float | None = None,
     loading_d0: float | None = None,
-    warmup_cycles: int = 0,
+    warmup_cycles: int = 2,
 ) -> tuple[float, float, list[CycleResult]]:
     state = _initial_state(
         config,
@@ -486,8 +596,10 @@ def run_daily_operation(
         t_a0=None,
         t_d0=None,
     )
-    for _ in range(warmup_cycles):
-        _, state = _run_one_cycle(profile, config, state)
+    if warmup_cycles > 0:
+        state = find_cyclic_state(
+            profile, config, initial_state=state, max_rounds=max(3, warmup_cycles), verbose=False
+        )
 
     results: list[CycleResult] = []
     total_water = 0.0

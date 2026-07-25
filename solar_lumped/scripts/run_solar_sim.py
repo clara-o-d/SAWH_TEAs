@@ -643,8 +643,7 @@ def run_solar_simulation(
         )
         if use_cycled:
             inventory_note = (
-                f" (cycled initial state; mean diurnal weather; "
-                f"{n_warmup} warmup + 1 report)"
+                f" (cycled initial state; mean diurnal weather; Aitken-converged steady state)"
             )
         else:
             inventory_note = f" (mean diurnal weather for {args.year})"
@@ -669,9 +668,7 @@ def run_solar_simulation(
             cyclic_warmup_cycles=n_warmup,
         )
         if use_cycled:
-            inventory_note = (
-                f" (cycled initial state after {n_warmup} warmup day(s))"
-            )
+            inventory_note = " (cycled initial state; Aitken-converged steady state)"
 
     lcow_kw = _lcow_kwargs(config)
     lcow = lcow_from_daily_yield(
