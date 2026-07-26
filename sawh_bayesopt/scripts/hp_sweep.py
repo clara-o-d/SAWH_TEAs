@@ -115,7 +115,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--combine-rule", choices=("mean", "worst_case"), default="mean")
     p.add_argument("--sites", choices=("both", "cambridge", "atacama"), default="both")
     p.add_argument("--resolution", choices=("monthly", "single"), default="monthly")
-    p.add_argument("--case", choices=("case1", "case2", "case3"), default="case1")
+    p.add_argument("--case", choices=("case1", "case2", "case3"), default="case2")
     p.add_argument("--weather-cache-dir", type=str, default=str(_REPO / ".weather_cache"))
     p.add_argument("--n-workers", type=int, default=1)
     p.add_argument(

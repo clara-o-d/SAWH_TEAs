@@ -74,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
     site_profiles = {s.name: fetch_monthly_profiles(s, cache_dir=args.weather_cache_dir) for s in sites}
     cache = EvalCache(run_dir / "cache.jsonl")
 
-    from solar_lumped.economics.params import LCOEconomicParams
+    from solar_lumped.economics import LCOEconomicParams
 
     econ = LCOEconomicParams()
 
@@ -87,7 +87,7 @@ def main(argv: list[str] | None = None) -> int:
         results = evaluate_batch(
             batch, cache=cache, sites=sites, site_profiles=site_profiles, econ=econ,
             combine_rule=bo_config["combine_rule"], resolution=bo_config["resolution"],
-            case=bo_config.get("case", "case1"),
+            case=bo_config.get("case", "case2"),
         )
         history.extend(results)
         print(f"  {len(history)}/{n_total} evaluated, best so far: {min(r.combined_lcow for r in history):.4f}", flush=True)

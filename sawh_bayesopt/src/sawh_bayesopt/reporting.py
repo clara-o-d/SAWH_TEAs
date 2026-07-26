@@ -117,8 +117,8 @@ def write_convergence_plot(history: list[DesignEvalResult], path: str | Path) ->
 def evaluate_baseline(cfg: BayesOptConfig, run_dir: str | Path) -> DesignEvalResult:
     """Wilson Table S3 baseline device (DeviceConfig.baseline()), run through
     the same two-site pipeline, for an apples-to-apples comparison."""
-    from solar_lumped.economics.params import LCOEconomicParams
-    from solar_lumped.simulation.device_config import DeviceConfig
+    from solar_lumped.economics import LCOEconomicParams
+    from solar_lumped.simulation import DeviceConfig
 
     run_dir = Path(run_dir)
     econ = LCOEconomicParams()

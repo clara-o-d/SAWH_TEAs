@@ -24,7 +24,7 @@ VAR_ORDER: tuple[str, ...] = (
 )
 
 # Wilson's ~7mm thermobuoyancy/transport floor on the *effective* vapor gap
-# (table_s3.VAPOR_GAP_TRANSPORT_MIN_M); used only to avoid wasting expensive
+# (VAPOR_GAP_TRANSPORT_MIN_M); used only to avoid wasting expensive
 # initial samples on designs the physics already handles gracefully as
 # near-zero yield.
 VAPOR_GAP_TRANSPORT_MIN_M: float = 0.007
@@ -33,14 +33,18 @@ VAPOR_GAP_TRANSPORT_MIN_M: float = 0.007
 # radiative-exchange term (device_balances.py::DeviceThermalParams.eps_abs_ir/
 # eps_glass_ir), matching gpu_sweep/run_gpu_sweep.py's --eps-abs-ir/
 # --eps-glass-ir CLI convention exactly (see gpu_sweep_handoff.md's Case
-# table): case1 (both None) reproduces the original blackbody/cavity
-# approximation; case2 is the "selective surface" variant; case3 is the
-# idealized optical-material-limits variant. case1 is deliberately encoded as
-# (None, None) rather than (1.0, 1.0) so to_device_config_kwargs(case="case1")
-# doesn't add a "thermal" kwarg at all -- see the case1 branch below --
-# keeping every existing (pre-case-aware) call and its cache keys unchanged.
+# table): case2 ("selective surface") is solar_lumped's base case as of
+# 2026-07 (DeviceConfig.thermal_params()'s own default); case1 (explicit
+# 1.0, 1.0) reproduces Wilson's original blackbody/cavity approximation
+# exactly; case3 is the idealized optical-material-limits variant. case1 is
+# encoded as explicit floats, not (None, None) -- device_balances.py's
+# `_residuals` treats explicit (1.0, 1.0) and (None, None) identically
+# (parallel_plate_emissivity(1.0, 1.0) == 1.0 == the blackbody branch's
+# eps_ag/eps_ga), so this is numerically a no-op vs. the pre-2026-07 (None,
+# None) encoding and does not invalidate historical case1 cache.jsonl
+# entries -- see evaluator.py::design_vector_hash.
 CASE_EPS_IR: dict[str, tuple[float | None, float | None]] = {
-    "case1": (None, None),
+    "case1": (1.0, 1.0),
     "case2": (0.05, 0.95),
     "case3": (0.0, 0.0),
 }
@@ -75,20 +79,18 @@ def bounds_array(bounds: DesignBounds) -> np.ndarray:
     return bounds.as_array()
 
 
-def to_device_config_kwargs(x: np.ndarray, *, case: str = "case1") -> dict[str, Any]:
+def to_device_config_kwargs(x: np.ndarray, *, case: str = "case2") -> dict[str, Any]:
     """Map an unnamed VAR_ORDER-ordered vector to DeviceConfig field names.
 
     ``case`` selects the absorber/glass IR emissivity pair (CASE_EPS_IR) for
-    solar_lumped's modified Eqs. 3/4 radiative exchange. "case1" (the
-    default, matching every pre-existing call site) leaves the returned dict
-    exactly as before -- no "thermal" key -- so DeviceConfig.thermal_params()
-    falls through to its own Case-1-reproducing default. "case2"/"case3" add
-    a "thermal" kwarg built the same way grid_param_sweep.py's
-    build_device_config does: DeviceThermalParams re-derived from this design
-    point's insulation_gap_m/vapor_gap_m/tilt_deg (all three are swept
-    VAR_ORDER dims, so they must be rebuilt per-point, not fixed once) plus
-    the fixed eps_abs/tau_glass table_s3 constants, with eps_abs_ir/
-    eps_glass_ir overridden to the requested case.
+    solar_lumped's modified Eqs. 3/4 radiative exchange; default "case2"
+    matches solar_lumped's own base case (DeviceConfig.thermal_params()).
+    Every case, including "case1", gets an explicit "thermal" kwarg built the
+    same way grid_param_sweep.py's build_device_config does: DeviceThermalParams
+    re-derived from this design point's insulation_gap_m/vapor_gap_m/tilt_deg
+    (all three are swept VAR_ORDER dims, so they must be rebuilt per-point, not
+    fixed once) plus the fixed eps_abs/tau_glass table_s3 constants, with
+    eps_abs_ir/eps_glass_ir set to the requested case's pair.
     """
     x = np.asarray(x, dtype=float).reshape(-1)
     if x.shape[0] != len(VAR_ORDER):
@@ -96,20 +98,19 @@ def to_device_config_kwargs(x: np.ndarray, *, case: str = "case1") -> dict[str, 
     if case not in CASE_EPS_IR:
         raise ValueError(f"Unknown case {case!r}, expected one of {sorted(CASE_EPS_IR)}")
     kwargs: dict[str, Any] = dict(zip(VAR_ORDER, (float(v) for v in x)))
-    if case != "case1":
-        from solar_lumped.physics import table_s3
-        from solar_lumped.physics.device_balances import DeviceThermalParams
+    from solar_lumped.physics import EPS_ABS, TAU_GLASS
+    from solar_lumped.physics import DeviceThermalParams
 
-        eps_abs_ir, eps_glass_ir = CASE_EPS_IR[case]
-        kwargs["thermal"] = DeviceThermalParams(
-            insulation_gap_m=kwargs["insulation_gap_m"],
-            vapor_gap_m=kwargs["vapor_gap_m"],
-            eps_abs=table_s3.EPS_ABS,
-            tau_glass=table_s3.TAU_GLASS,
-            tilt_deg=kwargs["tilt_deg"],
-            eps_abs_ir=eps_abs_ir,
-            eps_glass_ir=eps_glass_ir,
-        )
+    eps_abs_ir, eps_glass_ir = CASE_EPS_IR[case]
+    kwargs["thermal"] = DeviceThermalParams(
+        insulation_gap_m=kwargs["insulation_gap_m"],
+        vapor_gap_m=kwargs["vapor_gap_m"],
+        eps_abs=EPS_ABS,
+        tau_glass=TAU_GLASS,
+        tilt_deg=kwargs["tilt_deg"],
+        eps_abs_ir=eps_abs_ir,
+        eps_glass_ir=eps_glass_ir,
+    )
     return kwargs
 
 

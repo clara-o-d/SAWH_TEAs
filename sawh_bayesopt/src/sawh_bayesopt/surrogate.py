@@ -4,7 +4,7 @@ separate feasibility classifier.
 scikit-learn's GaussianProcessRegressor, not BoTorch/GPyTorch: the problem is
 6-D with a ~50-80 point evaluation budget, no GPU/multi-fidelity need, and
 scikit-learn+scipy are already shared, lightweight dependencies across every
-sibling solar_lumped/waste-heat_lumped package. BoTorch is the natural
+sibling solar_lumped / waste-heat/lumped package. BoTorch is the natural
 upgrade for principled batch qEI or a joint multi-output (both-sites) model
 if a future version needs it.
 

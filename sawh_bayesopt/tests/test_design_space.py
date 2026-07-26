@@ -24,7 +24,9 @@ def test_var_order_matches_bounds_fields():
 def test_to_device_config_kwargs_maps_in_order():
     x = np.arange(len(VAR_ORDER), dtype=float)
     kwargs = to_device_config_kwargs(x)
-    assert list(kwargs.keys()) == list(VAR_ORDER)
+    # Every case (including the default, "case2") now gets an explicit
+    # "thermal" override -- see design_space.py::CASE_EPS_IR.
+    assert list(kwargs.keys()) == [*VAR_ORDER, "thermal"]
     assert kwargs[VAR_ORDER[0]] == 0.0
     assert kwargs[VAR_ORDER[-1]] == len(VAR_ORDER) - 1
 

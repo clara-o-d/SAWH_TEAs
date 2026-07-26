@@ -46,7 +46,7 @@ def one_site():
 
 @pytest.fixture
 def econ():
-    from solar_lumped.economics.params import LCOEconomicParams
+    from solar_lumped.economics import LCOEconomicParams
 
     return LCOEconomicParams()
 
@@ -57,7 +57,7 @@ def _one_x():
 
 
 def test_evaluate_batch_penalizes_batched_call_failure(monkeypatch, tmp_path, one_site, econ):
-    from solar_lumped.economics.lcow import FAIL_LCO
+    from solar_lumped.economics import FAIL_LCO
 
     fake = _FakeJaxDailyCycle(raises=RuntimeError("solve_ivp did not converge"))
     monkeypatch.setattr(evaluator, "_load_jax_daily_cycle", lambda: fake)
@@ -75,7 +75,7 @@ def test_evaluate_batch_penalizes_batched_call_failure(monkeypatch, tmp_path, on
 
 
 def test_evaluate_batch_penalizes_zero_yield(monkeypatch, tmp_path, one_site, econ):
-    from solar_lumped.economics.lcow import FAIL_LCO
+    from solar_lumped.economics import FAIL_LCO
 
     fake = _FakeJaxDailyCycle(water=[0.0], eta=[0.0])
     monkeypatch.setattr(evaluator, "_load_jax_daily_cycle", lambda: fake)
@@ -111,7 +111,7 @@ def test_evaluate_batch_combined_lcow_uses_finite_penalty_not_fail_lco(
 
 
 def test_evaluate_batch_penalizes_missing_weather(tmp_path, one_site, econ):
-    from solar_lumped.economics.lcow import FAIL_LCO
+    from solar_lumped.economics import FAIL_LCO
 
     x = _one_x()
     site_profiles = {"dummy": []}  # no weather at all -> never touches jax

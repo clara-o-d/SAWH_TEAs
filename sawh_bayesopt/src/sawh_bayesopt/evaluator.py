@@ -101,11 +101,17 @@ def design_vector_hash(
     *,
     sites: tuple[str, ...],
     resolution: str = "monthly",
-    case: str = "case1",
+    case: str = "case2",
 ) -> str:
     """Stable cache key: sig-fig-rounded design vector + site set + resolution
     (+ case, when non-default), so float jitter from LHS/EI proposals doesn't
     create spurious cache misses for effectively-identical points.
+
+    Default matches evaluate_batch's own default ("case2") -- keep these two
+    in sync. A caller relying on this function's default while another caller
+    (or evaluate_batch itself) relies on a *different* default for the same
+    design vector/sites/resolution silently produces two different cache
+    keys for what's supposed to be the same evaluation.
 
     ``case`` is deliberately left out of the payload for the default
     "case1" -- every cache.jsonl written before case-awareness existed used
@@ -147,7 +153,7 @@ def combine_site_lcows(
     combine_rule: CombineRule = "mean",
     penalty: float = PENALTY_LCOW_USD_PER_M3,
 ) -> float:
-    from solar_lumped.economics.lcow import FAIL_LCO
+    from solar_lumped.economics import FAIL_LCO
 
     vals = [penalty if (not r.feasible or r.lcow >= 0.99 * FAIL_LCO) else r.lcow for r in site_results]
     if combine_rule == "mean":
@@ -260,7 +266,7 @@ def evaluate_batch(
     econ,
     combine_rule: CombineRule = "mean",
     resolution: str = "monthly",
-    case: str = "case1",
+    case: str = "case2",
 ) -> list[DesignEvalResult]:
     """Evaluate every x in *xs*, skipping any already present in *cache*.
 
@@ -271,12 +277,14 @@ def evaluate_batch(
     actually delivers the JAX path's speedup, not just a faster single call.
 
     ``case`` selects the absorber/glass IR emissivity variant (see
-    design_space.CASE_EPS_IR / to_device_config_kwargs) -- "case1" (default)
-    reproduces the physics every pre-existing run used.
+    design_space.CASE_EPS_IR / to_device_config_kwargs) -- "case2" (default)
+    matches solar_lumped's own base-case physics
+    (DeviceConfig.thermal_params()); pass "case1" to reproduce Wilson's
+    original blackbody/cavity approximation instead.
     """
-    from solar_lumped.economics.lcow import FAIL_LCO, lcow_from_daily_yield
-    from solar_lumped.physics.sorbent import initial_loading
-    from solar_lumped.simulation.device_config import DeviceConfig
+    from solar_lumped.economics import FAIL_LCO, lcow_from_daily_yield
+    from solar_lumped.physics import initial_loading
+    from solar_lumped.simulation import DeviceConfig
 
     site_names = tuple(s.name for s in sites)
     keys = [design_vector_hash(x, sites=site_names, resolution=resolution, case=case) for x in xs]

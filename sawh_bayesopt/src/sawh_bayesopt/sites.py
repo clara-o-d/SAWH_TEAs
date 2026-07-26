@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from solar_lumped.weather.client import WeatherClient
+from solar_lumped.weather import WeatherClient
 
 # Monthly-mean-day profiles: (month, DailyWeatherProfile, n_days_in_month).
 MonthlyProfiles = list[tuple[int, object, int]]
@@ -41,8 +41,8 @@ def monthly_mean_profiles(df) -> MonthlyProfiles:
     """
     import pandas as pd
 
-    from solar_lumped.weather.climate import representative_mean_day_df
-    from solar_lumped.weather.profiles import profile_from_day_df
+    from solar_lumped.weather import representative_mean_day_df
+    from solar_lumped.weather import profile_from_day_df
 
     out: MonthlyProfiles = []
     for m in sorted(set(df.index.month)):

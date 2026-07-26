@@ -40,7 +40,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--combine-rule", choices=("mean", "worst_case"), default="mean")
     p.add_argument("--sites", choices=("both", "cambridge", "atacama"), default="both")
     p.add_argument("--resolution", choices=("monthly", "single"), default="monthly")
-    p.add_argument("--case", choices=tuple(CASE_EPS_IR), default="case1")
+    p.add_argument("--case", choices=tuple(CASE_EPS_IR), default="case2")
     p.add_argument("--weather-cache-dir", type=str, default=str(_REPO / ".weather_cache"))
     p.add_argument("--run-id", type=str, default="run")
     p.add_argument("--n-verify-neighbors", type=int, default=5)

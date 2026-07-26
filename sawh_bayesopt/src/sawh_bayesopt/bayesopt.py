@@ -52,9 +52,10 @@ class BayesOptConfig:
     resolution: str = "monthly"
     weather_cache_dir: str = ".weather_cache"
     # Absorber/glass IR emissivity variant (design_space.CASE_EPS_IR) -- see
-    # to_device_config_kwargs. "case1" reproduces every pre-existing run's
-    # physics exactly.
-    case: str = "case1"
+    # to_device_config_kwargs. "case2" (default) matches solar_lumped's own
+    # base-case physics; "case1" reproduces Wilson's original blackbody/cavity
+    # approximation instead.
+    case: str = "case2"
 
 
 @dataclass
@@ -94,7 +95,7 @@ def _try_fit(state: SurrogateState, *, seed: int) -> tuple[SurrogateState, bool]
 
 
 def run_bayesopt(cfg: BayesOptConfig, run_dir: str | Path) -> BayesOptResult:
-    from solar_lumped.economics.params import LCOEconomicParams
+    from solar_lumped.economics import LCOEconomicParams
 
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)

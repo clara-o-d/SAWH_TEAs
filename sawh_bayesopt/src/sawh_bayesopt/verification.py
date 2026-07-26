@@ -60,7 +60,7 @@ def verify_optimum(
     seed: int = 0,
     artifact_tolerance: float = 0.02,
 ) -> VerificationReport:
-    from solar_lumped.economics.params import LCOEconomicParams
+    from solar_lumped.economics import LCOEconomicParams
 
     run_dir = Path(run_dir)
     econ = LCOEconomicParams()
