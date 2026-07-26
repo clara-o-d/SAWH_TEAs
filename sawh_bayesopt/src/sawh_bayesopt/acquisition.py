@@ -52,8 +52,8 @@ def propose_next(
     *,
     xi: float = 0.01,
     seed: int = 0,
-    maxiter: int = 200,
-    popsize: int = 20,
+    maxiter: int = 1000,
+    popsize: int = 40,
     record: list[dict] | None = None,
 ) -> np.ndarray:
     """Raw (denormalized) design vector maximizing constrained EI over the unit cube.
@@ -68,6 +68,23 @@ def propose_next(
     favors exploitation, or it could be DE not finding the true (possibly
     farther-out) maximizer in time. See scripts/diagnostics/gp_diagnostics.py
     for where this is surfaced.
+
+    maxiter/popsize/tol were previously 200/20/1e-8 -- outputs/runs/hp_sweep_1
+    (scripts/hp_sweep.py) showed 33-67% of DE calls hitting maxiter without
+    declaring success *regardless of ei_xi*, which is what actually explained
+    that sweep's ei_xi values producing near-identical proposals: an
+    under-converged inner optimizer, not real acquisition-function
+    insensitivity. tol=1e-8 in particular was 10,000x tighter than
+    differential_evolution's own default (0.01) -- DE declares "success" when
+    the population's fitness spread relative to its mean falls under
+    ``tol``, and demanding that much uniformity from a stochastic
+    population-based optimizer on a possibly-flat EI landscape rarely
+    happens no matter how many generations run. Raised maxiter 200->1000,
+    popsize 20->40 (actual population is popsize*n_dims, so 120->240), and
+    loosened tol 1e-8->1e-6 (still 100x tighter than scipy's default, not
+    fully reverting to it) -- cheap to do since each DE generation only costs
+    a GP predict() (milliseconds), nowhere near the ~160s/round the JAX
+    physics evaluate_batch() calls cost.
     """
     bounds_unit = [(0.0, 1.0)] * len(VAR_ORDER)
     y_best = state.y_best
@@ -79,7 +96,7 @@ def propose_next(
         maxiter=maxiter,
         popsize=popsize,
         polish=True,
-        tol=1e-8,
+        tol=1e-6,
     )
     if record is not None:
         record.append({
@@ -99,8 +116,8 @@ def propose_batch(
     batch_size: int,
     seed: int = 0,
     xi: float = 0.01,
-    maxiter: int = 200,
-    popsize: int = 20,
+    maxiter: int = 1000,
+    popsize: int = 40,
     record: list[dict] | None = None,
 ) -> list[np.ndarray]:
     """Kriging-Believer: propose_next, fantasize y=mu(x) there, refit a scratch
