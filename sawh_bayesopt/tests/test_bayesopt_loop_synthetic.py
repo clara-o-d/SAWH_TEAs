@@ -54,6 +54,8 @@ def test_run_bayesopt_best_so_far_is_monotone_and_respects_budget(tmp_path, monk
         seed=0,
         stall_rel_tol=0.5,
         stall_rounds=2,
+        de_maxiter=30,
+        de_popsize=8,
     )
     result = run_bayesopt(cfg, tmp_path / "run1")
 
@@ -74,6 +76,8 @@ def test_run_bayesopt_stops_early_when_stalled(tmp_path, monkeypatch):
         seed=0,
         stall_rel_tol=0.99,
         stall_rounds=1,
+        de_maxiter=30,
+        de_popsize=8,
     )
     result = run_bayesopt(cfg, tmp_path / "run2")
 
@@ -129,6 +133,8 @@ def test_run_bayesopt_handles_an_infeasible_region_without_crashing(tmp_path, mo
         seed=0,
         stall_rel_tol=0.5,
         stall_rounds=3,
+        de_maxiter=30,
+        de_popsize=8,
     )
     result = run_bayesopt(cfg, tmp_path / "run_infeasible")
 

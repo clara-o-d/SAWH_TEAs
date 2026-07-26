@@ -56,6 +56,13 @@ class BayesOptConfig:
     # base-case physics; "case1" reproduces Wilson's original blackbody/cavity
     # approximation instead.
     case: str = "case2"
+    # Inner differential_evolution search budget for each EI proposal (see
+    # acquisition.propose_next) -- defaults match acquisition.py's own
+    # (1000/40), overridable here so a cheap synthetic-objective test doesn't
+    # have to pay real-problem DE cost just to exercise the loop's control
+    # flow (see tests/test_bayesopt_loop_synthetic.py).
+    de_maxiter: int = 1000
+    de_popsize: int = 40
 
 
 @dataclass
@@ -140,6 +147,7 @@ def run_bayesopt(cfg: BayesOptConfig, run_dir: str | Path) -> BayesOptResult:
             round_record: list[dict] = []
             batch = propose_batch(
                 state, batch_size=batch_n, seed=cfg.seed + len(history), xi=cfg.ei_xi, record=round_record,
+                maxiter=cfg.de_maxiter, popsize=cfg.de_popsize,
             )
             for d in round_record:
                 d["round"] = round_idx
