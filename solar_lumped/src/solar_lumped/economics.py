@@ -1,95 +1,96 @@
-"""Levelized cost of water (LCOW), NPV, and payback economics for the solar SAWH device.
-
-Consolidated from the former economics/{params, lcow, npv}.py. Section headers below
-mark each former module's boundary for traceability.
-"""
+"""Levelized cost of water (LCOW), NPV, and payback economics for the solar SAWH device."""
 
 from __future__ import annotations
 
 import math
 from dataclasses import dataclass, fields
-from pathlib import Path
 from typing import Any
 
+from solar_lumped._parameters_xlsx import ECONOMICS as _ECON_XLSX
+from solar_lumped._parameters_xlsx import PHYSICS as _PHYS_XLSX
+from solar_lumped._parameters_xlsx import economics_value as _ev
+from solar_lumped._parameters_xlsx import physics_value as _pv
 from solar_lumped.physics import get_salt_price_usd_per_kg
 
-
 # =============================================================================
-# Levelized cost of water (LCOW) economics -- verbatim from electrolyte_optimization
+# Economic parameter loading and defaults -- read directly from
+# docs/parameters.xlsx (Economics + Physics sheets); no separate CSV.
 # =============================================================================
 
-_COL_PARAMETER = "parameter"
-_COL_VALUE = "value"
-_DEVICE_BOM_PREFIX = "device_bom_"
-_PHYSICAL_SCALAR_PARAMS: tuple[str, ...] = (
-    "hydrogel_thickness_m",
-    "hydrogel_thickness_min_m",
-    "hydrogel_thickness_max_m",
-    "hydrogel_density_kg_m3",
-    "water_density_kg_per_l",
-    "l_per_m3",
-    "mass_transfer_convection_coefficient_m_s",
-)
+_BOM_PREFIX = "BOM: "
+
+# LCOEconomicParams field name -> parameters.xlsx Economics-sheet row name.
+_ECON_FIELD_ROWS: dict[str, str] = {
+    "discount_rate": "Discount rate (i)",
+    "device_lifetime_years": "Device lifetime (L)",
+    "total_investment_factor": "Total investment factor (f_inv)",
+    "maintenance_cost_fraction": "Maintenance cost fraction (f_maint)",
+    "utilization_factor": "Utilization factor (f_util)",
+    "hydrogel_lifetime_years": "Hydrogel lifetime (L_gel)",
+    "energy_cost_usd_per_year": "Fixed annual energy cost (C_energy,fixed)",
+    "energy_cost_usd_per_extra_half_cycle_per_day": "Extra half-cycle energy cost",
+    "c_acrylamide_usd_per_kg": "Acrylamide price (c_acrylamide)",
+    "c_additives_usd_per_kg_composite": "Additives price, composite basis (c_additives)",
+    "electricity_price_usd_per_kwh": "Electricity price (p_elec)",
+    "desorption_hours_per_day": "Desorption hours per day (t_des)",
+    "max_electric_heat_w_per_m2": "Max electric heat, optimizer bound (Q_elec,max)",
+    "include_desorption_enthalpy": "Include desorption enthalpy in T_g solve (flag)",
+}
 
 
-def lcow_economic_params_csv_path() -> Path:
-    return (
-        Path(__file__).resolve().parent
-        / "data"
-        / "economics"
-        / "lcow_economic_params.csv"
+def _coerce_bool(raw: Any) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() in {"1", "true", "yes", "y", "t"}
+
+
+def _load_economic_data() -> tuple[dict[str, Any], tuple[tuple[str, float], ...]]:
+    scalars: dict[str, Any] = {}
+    for field_name, row_name in _ECON_FIELD_ROWS.items():
+        raw = _ev(row_name)
+        if field_name == "device_lifetime_years":
+            scalars[field_name] = int(round(float(raw)))
+        elif field_name == "include_desorption_enthalpy":
+            scalars[field_name] = _coerce_bool(raw)
+        else:
+            scalars[field_name] = float(raw)
+
+    # Hydrogel geometry/density and mass-transfer coefficient live on the
+    # Physics sheet (they're physical, not economic, quantities) but are
+    # needed here for the sorbent-replacement cost calculation.
+    h0_row = _PHYS_XLSX["Hydrogel reference thickness (H0)"]
+    scalars["hydrogel_thickness_m"] = float(h0_row["value"]) / 1000.0
+    scalars["hydrogel_thickness_min_m"] = float(h0_row["lower"]) / 1000.0
+    scalars["hydrogel_thickness_max_m"] = float(h0_row["upper"]) / 1000.0
+    scalars["hydrogel_density_kg_m3"] = _pv("Solution/brine density, LiCl (rho_sol)")
+    scalars["mass_transfer_convection_coefficient_m_s"] = _pv(
+        "Chamber convection coefficient, absorption (g_chamber)"
     )
 
-
-def _coerce_lcow_param(name: str, raw: Any) -> Any:
-    if name == "device_lifetime_years":
-        return int(round(float(raw)))
-    if name == "include_desorption_enthalpy":
-        if isinstance(raw, bool):
-            return raw
-        s = str(raw).strip().lower()
-        return s in {"1", "true", "yes", "y", "t"}
-    return float(raw)
-
-
-def _load_economic_data(
-    csv_path: Path | str | None = None,
-) -> tuple[dict[str, Any], tuple[tuple[str, float], ...]]:
-    path = Path(csv_path) if csv_path is not None else lcow_economic_params_csv_path()
-    if not path.is_file():
-        raise FileNotFoundError(f"LCOW economic params not found at {path}")
-    import pandas as pd
-
-    df = pd.read_csv(path)
-    if _COL_PARAMETER not in df.columns or _COL_VALUE not in df.columns:
-        raise ValueError(f"Expected parameter/value columns in {path}.")
-
-    scalars: dict[str, Any] = {}
-    bom_rows: list[tuple[str, float]] = []
-    for _, row in df.iterrows():
-        name = str(row[_COL_PARAMETER]).strip()
-        if not name:
-            continue
-        raw_val = row[_COL_VALUE]
-        value = _coerce_lcow_param(name, raw_val)
-        if name.startswith(_DEVICE_BOM_PREFIX):
-            notes = row.get("notes")
-            label = str(notes).strip() if notes == notes and str(notes).strip() else name
-            bom_rows.append((label, float(value)))
-        else:
-            scalars[name] = value
+    bom_rows = tuple(
+        (name[len(_BOM_PREFIX) :], float(row["value"]))
+        for name, row in _ECON_XLSX.items()
+        if name.startswith(_BOM_PREFIX)
+    )
 
     lcow_field_names = {f.name for f in fields(LCOEconomicParams)}
+    physical_scalar_params = (
+        "hydrogel_thickness_m",
+        "hydrogel_thickness_min_m",
+        "hydrogel_thickness_max_m",
+        "hydrogel_density_kg_m3",
+        "mass_transfer_convection_coefficient_m_s",
+    )
     missing = [
         name
-        for name in (*_PHYSICAL_SCALAR_PARAMS, *sorted(lcow_field_names))
+        for name in (*physical_scalar_params, *sorted(lcow_field_names))
         if name not in scalars
     ]
     if not bom_rows:
-        missing.append("device_bom_*")
+        missing.append("BOM: *")
     if missing:
-        raise ValueError(f"Missing required parameters in {path}: {', '.join(missing)}")
-    return scalars, tuple(bom_rows)
+        raise ValueError(f"Missing required parameters in parameters.xlsx: {', '.join(missing)}")
+    return scalars, bom_rows
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -138,68 +139,16 @@ HYDROGEL_DENSITY_KG_M3: float = float(_SCALARS["hydrogel_density_kg_m3"])
 MASS_TRANSFER_CONVECTION_COEFFICIENT_M_S: float = float(
     _SCALARS["mass_transfer_convection_coefficient_m_s"]
 )
-WATER_DENSITY_KG_PER_L: float = float(_SCALARS["water_density_kg_per_l"])
-L_PER_M3: float = float(_SCALARS["l_per_m3"])
-KG_WATER_PER_M3: float = WATER_DENSITY_KG_PER_L * L_PER_M3
+KG_WATER_PER_M3: float = _ev("Water density (rho_w)")
 DEVICE_BOM_USD_PER_M2: tuple[tuple[str, float], ...] = _DEVICE_BOM_ROWS
 C_DEVICE_USD: float = sum(cost for _, cost in DEVICE_BOM_USD_PER_M2)
 _LCOW_DEFAULTS: dict[str, Any] = {f.name: _SCALARS[f.name] for f in fields(LCOEconomicParams)}
 
-
-def dry_composite_mass_kg(hydrogel_thickness_m: float) -> float:
-    return float(hydrogel_thickness_m) * HYDROGEL_DENSITY_KG_M3
-
 # =============================================================================
-# LCOW from Wilson simulation daily yield -- same equation as electrolyte_optimization lcow_zsr_at_sl
+# Levelized cost of water (LCOW)
 # =============================================================================
 
 FAIL_LCO: float = 1e30
-
-
-@dataclass(frozen=True, slots=True)
-class LcowCostBreakdown:
-    items: tuple[tuple[str, float], ...]
-
-    @property
-    def total_usd_per_m3(self) -> float:
-        return float(sum(v for _, v in self.items))
-
-
-def _hydrogel_cost_per_kg(
-    salt_price_usd_per_kg: float,
-    salt_to_polymer_ratio: float,
-    econ: LCOEconomicParams,
-) -> float:
-    sl = salt_to_polymer_ratio
-    return (
-        (salt_price_usd_per_kg * sl + econ.c_acrylamide_usd_per_kg) / (1.0 + sl)
-        + econ.c_additives_usd_per_kg_composite
-    )
-
-
-def _sorbent_replacement_annual_usd(
-    *,
-    sorbent: str,
-    salt_name: str,
-    salt_to_polymer_ratio: float,
-    hydrogel_thickness_m: float,
-    mof_mass_kg_m2: float,
-    mof_price_usd_per_kg: float,
-    econ: LCOEconomicParams,
-    salt_price_usd_per_kg: float | None = None,
-) -> float:
-    gel_lifetime = econ.hydrogel_lifetime_years
-    if sorbent == "mof":
-        return mof_mass_kg_m2 * mof_price_usd_per_kg / gel_lifetime
-    sl = salt_to_polymer_ratio
-    dry_mass = dry_composite_mass_kg(hydrogel_thickness_m)
-    salt_price = (
-        salt_price_usd_per_kg
-        if salt_price_usd_per_kg is not None
-        else get_salt_price_usd_per_kg(salt_name)
-    )
-    hydrogel_cost_per_kg = _hydrogel_cost_per_kg(salt_price, sl, econ)
-    return hydrogel_cost_per_kg * dry_mass / gel_lifetime
 
 
 def lcow_from_daily_yield(
@@ -259,6 +208,47 @@ def lcow_from_daily_yield(
         annual_cost_usd
         / (econ.utilization_factor * (annual_water_yield_kg / KG_WATER_PER_M3 + 1e-9))
     )
+
+
+def _sorbent_replacement_annual_usd(
+    *,
+    sorbent: str,
+    salt_name: str,
+    salt_to_polymer_ratio: float,
+    hydrogel_thickness_m: float,
+    mof_mass_kg_m2: float,
+    mof_price_usd_per_kg: float,
+    econ: LCOEconomicParams,
+    salt_price_usd_per_kg: float | None = None,
+) -> float:
+    gel_lifetime = econ.hydrogel_lifetime_years
+    if sorbent == "mof":
+        return mof_mass_kg_m2 * mof_price_usd_per_kg / gel_lifetime
+    sl = salt_to_polymer_ratio
+    dry_mass = dry_composite_mass_kg(hydrogel_thickness_m)
+    salt_price = (
+        salt_price_usd_per_kg
+        if salt_price_usd_per_kg is not None
+        else get_salt_price_usd_per_kg(salt_name)
+    )
+    hydrogel_cost_per_kg = (
+        (salt_price * sl + econ.c_acrylamide_usd_per_kg) / (1.0 + sl)
+        + econ.c_additives_usd_per_kg_composite
+    )
+    return hydrogel_cost_per_kg * dry_mass / gel_lifetime
+
+
+def dry_composite_mass_kg(hydrogel_thickness_m: float) -> float:
+    return float(hydrogel_thickness_m) * HYDROGEL_DENSITY_KG_M3
+
+
+@dataclass(frozen=True, slots=True)
+class LcowCostBreakdown:
+    items: tuple[tuple[str, float], ...]
+
+    @property
+    def total_usd_per_m3(self) -> float:
+        return float(sum(v for _, v in self.items))
 
 
 def lcow_cost_breakdown_from_daily_yield(
@@ -346,8 +336,9 @@ def lcow_cost_breakdown_from_daily_yield(
     return LcowCostBreakdown(items=tuple(segments))
 
 # =============================================================================
-# Net present value (NPV) and payback period for the Wilson lumped SAWH device
+# Net present value (NPV) and payback period
 # =============================================================================
+
 
 @dataclass(frozen=True, slots=True)
 class NpvResult:
@@ -358,13 +349,6 @@ class NpvResult:
     npv_usd_per_m2: float
     payback_years_simple: float
     payback_years_discounted: float
-
-
-def _present_value_annuity_factor(discount_rate: float, years: float) -> float:
-    i = discount_rate
-    if i <= 0.0:
-        return years
-    return (1.0 - (1.0 + i) ** (-years)) / i
 
 
 def npv_from_daily_yield(
@@ -428,7 +412,7 @@ def npv_from_daily_yield(
 
     lifetime_years = float(econ.device_lifetime_years)
     i = econ.discount_rate
-    pvaf = _present_value_annuity_factor(i, lifetime_years)
+    pvaf = lifetime_years if i <= 0.0 else (1.0 - (1.0 + i) ** (-lifetime_years)) / i
     npv = -capex + annual_net_cash_flow * pvaf
 
     payback_simple = capex / annual_net_cash_flow if annual_net_cash_flow > 0.0 else float("inf")

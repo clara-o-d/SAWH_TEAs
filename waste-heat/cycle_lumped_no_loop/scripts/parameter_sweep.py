@@ -221,10 +221,10 @@ def make_sweep_params() -> list[SweepParam]:
             UA_WH_DESORBER_W_K,
         ),
         SweepParam("h_amb_w_m2_k", "h_amb (W/m²K)", 5.0, 25.0, 15.0),
-        SweepParam("discount_rate", "Discount rate", 0.04, 0.12, 0.08),
+        SweepParam("discount_rate", "Discount rate", 0.04, 0.12, 0.03),
         SweepParam("device_lifetime_years", "Device lifetime (yr)", 10, 30, 20, is_int=True),
         SweepParam("hydrogel_lifetime_years", "Hydrogel lifetime (yr)", 0.5, 2.0, 1.0),
-        SweepParam("utilization_factor", "Utilization factor", 0.7, 1.0, 0.9),
+        SweepParam("utilization_factor", "Utilization factor", 0.7, 1.0, 0.99),
         SweepParam(
             "water_price_usd_per_m3",
             "Water price (USD/m³)",

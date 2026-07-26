@@ -7,16 +7,16 @@ water_density_kg_per_l,1.0,Produced water density at condenser (kg/L)
 l_per_m3,1000.0,Liters per cubic meter
 device_bom_loop_heat_exchanger,250.0,Liquid-to-gel heat exchanger (UA_gel coupling)
 device_bom_transfer_pump,550.0,Transfer pump
-device_bom_condenser,28.455,Condenser
+device_bom_condenser,29.87,Condenser
 device_bom_acrylic_enclosure,5.95,Acrylic enclosure
 device_bom_insulation,2.0,Insulation
-device_bom_clamps,3.474,Clamps
+device_bom_clamps,3.47,Clamps
 device_bom_fixtures,1.0,Fixtures
-discount_rate,0.08,Capital discount rate
+discount_rate,0.03,Capital discount rate
 device_lifetime_years,20,Passive SAWH device lifetime (years)
 total_investment_factor,1.0,Multiplier on installed CAPEX
 maintenance_cost_fraction,0.05,Annual O&M as fraction of CAPEX
-utilization_factor,0.9,Effective annual operating fraction (LCOW denominator)
+utilization_factor,0.99,Effective annual operating fraction (LCOW denominator)
 hydrogel_lifetime_years,1.0,Hydrogel replacement interval (years)
 energy_cost_usd_per_year,0.0,Fixed annual energy cost (USD/m²)
 energy_cost_usd_per_extra_half_cycle_per_day,0.0,Daily energy cost (USD/m²) per half-cycle above 1/day

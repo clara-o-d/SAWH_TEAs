@@ -21,7 +21,7 @@ HYDROGEL_THICKNESS_M: float = 0.004
 
 # --- Economics ---
 DEVICE_LIFETIME_YEARS: int = 20
-DISCOUNT_RATE: float = 0.08
+DISCOUNT_RATE: float = 0.03
 ELECTRICITY_PRICE_USD_PER_KWH: float = 0.10
 
 # Water price baseline: $5.00/m3, matching the baseline already used by every

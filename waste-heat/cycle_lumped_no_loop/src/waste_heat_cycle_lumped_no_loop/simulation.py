@@ -160,20 +160,6 @@ def compute_controls(
     return ControlOutputs(c_vac_kg_s_pa_m2=c_vac)
 
 
-def advance_controller_integrals(
-    state: ControllerState,
-    *,
-    m_ads_kg_s_m2: float,
-    m_des_kg_s_m2: float,
-    dt_s: float,
-) -> None:
-    state.integral_ads_kg_m2 += max(0.0, m_ads_kg_s_m2) * dt_s
-    state.integral_des_kg_m2 += max(0.0, m_des_kg_s_m2) * dt_s
-
-
-def reset_controller_state(state: ControllerState) -> None:
-    state.integral_ads_kg_m2 = 0.0
-    state.integral_des_kg_m2 = 0.0
 @dataclass(frozen=True, slots=True)
 class CoupledRates:
     dy_mass: np.ndarray
@@ -363,63 +349,6 @@ def _pack_y0(
     return np.array([loading_a, loading_d, t_a, t_d, t_cond], dtype=float)
 
 
-def _initial_state(
-    config: DeviceConfig,
-    *,
-    loading_a0: float | None,
-    loading_d0: float | None,
-    h_a0: float | None,
-    h_d0: float | None,
-    t_a0: float | None,
-    t_d0: float | None,
-) -> tuple[float, float, float, float, float, float, float]:
-    bed_a, bed_d = initial_bed_states(config)
-    loading_a = loading_a0 if loading_a0 is not None else bed_a.loading
-    loading_d = loading_d0 if loading_d0 is not None else bed_d.loading
-    h_a = h_a0 if h_a0 is not None else (bed_a.h_m or config.hydrogel_thickness_m)
-    h_d = h_d0 if h_d0 is not None else (bed_d.h_m or config.hydrogel_thickness_m)
-    t_amb = T_AMB_C
-    t_a = t_a0 if t_a0 is not None else t_amb
-    t_d = t_d0 if t_d0 is not None else t_amb + 5.0
-    t_cond = t_amb
-    return loading_a, loading_d, h_a, h_d, t_a, t_d, t_cond
-
-
-def _run_one_cycle(
-    profile: HalfCycleProfile,
-    config: DeviceConfig,
-    state: CycleState,
-) -> tuple[CycleResult, CycleState]:
-    la, ld, ha, hd, ta, td, tc = state
-    half_a = run_half_cycle(
-        profile,
-        config,
-        loading_a0=la,
-        loading_d0=ld,
-        h_a0=ha,
-        h_d0=hd,
-        t_a0=ta,
-        t_d0=td,
-        t_cond0=tc,
-    )
-    la, ld, ha, hd, ta, td, tc = swap_roles(half_a, config)
-    half_b = run_half_cycle(
-        profile,
-        config,
-        loading_a0=la,
-        loading_d0=ld,
-        h_a0=ha,
-        h_d0=hd,
-        t_a0=ta,
-        t_d0=td,
-        t_cond0=tc,
-    )
-    water = half_a.water_collected_kg_m2 + half_b.water_collected_kg_m2
-    cyc = CycleResult(half_a=half_a, half_b=half_b, water_collected_kg_m2=water)
-    la, ld, ha, hd, ta, td, tc = swap_roles(half_b, config)
-    return cyc, (la, ld, ha, hd, ta, td, tc)
-
-
 def _clip_mass_state(y: np.ndarray, config: DeviceConfig) -> np.ndarray:
     out = y.copy()
     if is_hydrogel(config):
@@ -455,19 +384,10 @@ def _unpack_half_result(y_stack: np.ndarray, config: DeviceConfig) -> dict:
     }
 
 
-def _mass_offset(config: DeviceConfig) -> int:
-    return mass_state_size(config)
-
-
-def _desorber_rh_from_state(y: np.ndarray, config: DeviceConfig) -> float:
-    n_mass = _mass_offset(config)
-    t_d_c = float(y[n_mass + 1])
-    t_cond_c = float(y[n_mass + 2])
-    return rh_outside_desorber(t_d_c, t_cond_c)
-
-
 def _half_cycle_complete(y: np.ndarray, config: DeviceConfig) -> bool:
-    return _desorber_rh_from_state(y, config) <= config.rh_desorber_switch
+    n_mass = mass_state_size(config)
+    rh = rh_outside_desorber(float(y[n_mass + 1]), float(y[n_mass + 2]))
+    return rh <= config.rh_desorber_switch
 
 
 def _step_t_eval(t0: float, t1: float) -> np.ndarray:
@@ -541,7 +461,8 @@ def run_half_cycle(
     n = len(profile.temperature_c)
     dt = profile.dt_s
     ctrl = controller_state if controller_state is not None else ControllerState()
-    reset_controller_state(ctrl)
+    ctrl.integral_ads_kg_m2 = 0.0
+    ctrl.integral_des_kg_m2 = 0.0
     h_a = h_a0 if h_a0 is not None else config.hydrogel_thickness_m
     h_d = h_d0 if h_d0 is not None else config.hydrogel_thickness_m
 
@@ -559,7 +480,7 @@ def run_half_cycle(
     ys: list[np.ndarray] = []
     m_ads_series: list[float] = []
     m_des_series: list[float] = []
-    n_mass = _mass_offset(config)
+    n_mass = mass_state_size(config)
     env0 = _env_at(profile, 0)
     _record_half_cycle_state(
         t_s=0.0,
@@ -677,12 +598,8 @@ def run_half_cycle(
             config=config,
             controls=controls1,
         )
-        advance_controller_integrals(
-            ctrl,
-            m_ads_kg_s_m2=0.5 * (rates0.m_ads_kg_s_m2 + rates1.m_ads_kg_s_m2),
-            m_des_kg_s_m2=0.5 * (rates0.m_des_kg_s_m2 + rates1.m_des_kg_s_m2),
-            dt_s=dt,
-        )
+        ctrl.integral_ads_kg_m2 += max(0.0, 0.5 * (rates0.m_ads_kg_s_m2 + rates1.m_ads_kg_s_m2)) * dt
+        ctrl.integral_des_kg_m2 += max(0.0, 0.5 * (rates0.m_des_kg_s_m2 + rates1.m_des_kg_s_m2)) * dt
         if _half_cycle_complete(y, config):
             break
 
@@ -731,6 +648,63 @@ def _vec_to_state(vec: np.ndarray, config: DeviceConfig) -> CycleState:
         return la, ld, ha, hd, ta, td, tc
     la, ld, ta, td, tc = (float(v) for v in vec)
     return la, ld, None, None, ta, td, tc
+
+
+def _initial_state(
+    config: DeviceConfig,
+    *,
+    loading_a0: float | None,
+    loading_d0: float | None,
+    h_a0: float | None,
+    h_d0: float | None,
+    t_a0: float | None,
+    t_d0: float | None,
+) -> tuple[float, float, float, float, float, float, float]:
+    bed_a, bed_d = initial_bed_states(config)
+    loading_a = loading_a0 if loading_a0 is not None else bed_a.loading
+    loading_d = loading_d0 if loading_d0 is not None else bed_d.loading
+    h_a = h_a0 if h_a0 is not None else (bed_a.h_m or config.hydrogel_thickness_m)
+    h_d = h_d0 if h_d0 is not None else (bed_d.h_m or config.hydrogel_thickness_m)
+    t_amb = T_AMB_C
+    t_a = t_a0 if t_a0 is not None else t_amb
+    t_d = t_d0 if t_d0 is not None else t_amb + 5.0
+    t_cond = t_amb
+    return loading_a, loading_d, h_a, h_d, t_a, t_d, t_cond
+
+
+def _run_one_cycle(
+    profile: HalfCycleProfile,
+    config: DeviceConfig,
+    state: CycleState,
+) -> tuple[CycleResult, CycleState]:
+    la, ld, ha, hd, ta, td, tc = state
+    half_a = run_half_cycle(
+        profile,
+        config,
+        loading_a0=la,
+        loading_d0=ld,
+        h_a0=ha,
+        h_d0=hd,
+        t_a0=ta,
+        t_d0=td,
+        t_cond0=tc,
+    )
+    la, ld, ha, hd, ta, td, tc = swap_roles(half_a, config)
+    half_b = run_half_cycle(
+        profile,
+        config,
+        loading_a0=la,
+        loading_d0=ld,
+        h_a0=ha,
+        h_d0=hd,
+        t_a0=ta,
+        t_d0=td,
+        t_cond0=tc,
+    )
+    water = half_a.water_collected_kg_m2 + half_b.water_collected_kg_m2
+    cyc = CycleResult(half_a=half_a, half_b=half_b, water_collected_kg_m2=water)
+    la, ld, ha, hd, ta, td, tc = swap_roles(half_b, config)
+    return cyc, (la, ld, ha, hd, ta, td, tc)
 
 
 def find_cyclic_state(
@@ -959,19 +933,15 @@ def cumulative_desorption_yield_l_m2(
     return out
 
 
-def _default_env() -> ThermalEnvironment:
-    return ThermalEnvironment(
-        t_amb_c=T_AMB_C,
-        rh_amb=RH_AMB,
-        h_amb_w_m2_k=H_AMB_W_M2_K,
-        t_wh_in_c=T_WH_IN_C,
-        m_dot_wh_kg_s_m2=M_WH_KG_S_M2,
-    )
-
-
 def _env_at_time(t_s: float, profile: HalfCycleProfile | None) -> ThermalEnvironment:
     if profile is None:
-        return _default_env()
+        return ThermalEnvironment(
+            t_amb_c=T_AMB_C,
+            rh_amb=RH_AMB,
+            h_amb_w_m2_k=H_AMB_W_M2_K,
+            t_wh_in_c=T_WH_IN_C,
+            m_dot_wh_kg_s_m2=M_WH_KG_S_M2,
+        )
     dt = profile.dt_s
     i = min(max(int(t_s / dt), 0), len(profile.temperature_c) - 1)
     return ThermalEnvironment(
@@ -981,31 +951,6 @@ def _env_at_time(t_s: float, profile: HalfCycleProfile | None) -> ThermalEnviron
         t_wh_in_c=profile.t_wh_in_c[i],
         m_dot_wh_kg_s_m2=profile.m_dot_wh_kg_s_m2[i],
     )
-
-
-def _mass_transfer_limit(nat_ads: float, nat_des: float) -> MassTransferLimit:
-    if nat_des < 0.99 * nat_ads:
-        return "desorption"
-    if nat_ads < 0.99 * nat_des:
-        return "absorption"
-    return "balanced"
-
-
-def _bed_water_l_m2(
-    loading: np.ndarray,
-    h_m: np.ndarray | None,
-    *,
-    config: DeviceConfig,
-) -> np.ndarray:
-    if is_hydrogel(config):
-        assert h_m is not None
-        return np.array(
-            [
-                water_in_gel_l_m2(float(q), float(h), config=config)
-                for q, h in zip(loading, h_m)
-            ]
-        )
-    return np.array([water_kg_m2_bed(float(q), config=config) for q in loading])
 
 
 def _tracked_half_series(
@@ -1032,7 +977,13 @@ def _tracked_half_series(
         t_partner = half.t_a_c
 
     ctrl_p = config.controller_params()
-    water = _bed_water_l_m2(q, h, config=config)
+    if is_hydrogel(config):
+        assert h is not None
+        water = np.array(
+            [water_in_gel_l_m2(float(q_k), float(h_k), config=config) for q_k, h_k in zip(q, h)]
+        )
+    else:
+        water = np.array([water_kg_m2_bed(float(q_k), config=config) for q_k in q])
 
     m_ads = np.asarray(half.m_ads_kg_s_m2, dtype=float)
     m_des = np.asarray(half.m_des_kg_s_m2, dtype=float)
@@ -1084,7 +1035,12 @@ def _tracked_half_series(
         )
         m_ads_nat[k] = nat.m_ads_kg_s_m2
         m_des_nat[k] = nat.m_des_kg_s_m2
-        limits.append(_mass_transfer_limit(nat.m_ads_kg_s_m2, nat.m_des_kg_s_m2))
+        if nat.m_des_kg_s_m2 < 0.99 * nat.m_ads_kg_s_m2:
+            limits.append("desorption")
+        elif nat.m_ads_kg_s_m2 < 0.99 * nat.m_des_kg_s_m2:
+            limits.append("absorption")
+        else:
+            limits.append("balanced")
         c_vac[k] = controls.c_vac_kg_s_pa_m2
         rh_gap[k] = rh_outside_desorber(float(half.t_d_c[k]), float(half.t_cond_c[k]))
 
@@ -1269,7 +1225,8 @@ def water_inventory_daily_series(
     return out
 
 
-def _inventory_csv_fieldnames(config: DeviceConfig) -> list[str]:
+def write_water_inventory_csv(path: Path, series: WaterInventorySeries, *, config: DeviceConfig) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
     col = inventory_column(config)
     fields = [
         "time_s",
@@ -1296,13 +1253,6 @@ def _inventory_csv_fieldnames(config: DeviceConfig) -> list[str]:
     ]
     if not is_hydrogel(config):
         fields = [f for f in fields if f not in ("c_w_mol_m3", "h_m")]
-    return fields
-
-
-def write_water_inventory_csv(path: Path, series: WaterInventorySeries, *, config: DeviceConfig) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    col = inventory_column(config)
-    fields = _inventory_csv_fieldnames(config)
     with path.open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(fields)

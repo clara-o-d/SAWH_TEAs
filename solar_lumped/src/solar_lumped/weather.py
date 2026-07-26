@@ -1,9 +1,5 @@
 """Weather: Open-Meteo client, real/replay/baseline profile builders, land-grid
 sampling, and the Note S1 Fig. S1D / Atacama Fig. 4 validation profiles.
-
-Consolidated from the former weather/{client, climate, land_grid, profiles, fig_s1,
-atacama_figure}.py. Section headers below mark each former module's boundary for
-traceability.
 """
 
 from __future__ import annotations
@@ -21,11 +17,21 @@ import pandas as pd
 import requests
 import retry_requests
 
+from solar_lumped._parameters_xlsx import physics_value as _pv
 from solar_lumped.physics import (
     FABRICATION_EQUILIBRIUM_RH,
+    H0_M,
+    H_AMB_W_M2_K,
     c_w_from_water_in_gel_l_m2,
     equilibrium_c_w_from_dvs_at_rh,
 )
+
+# Wilson et al. (2025) Methods baseline scenario (docs/parameters.xlsx Physics
+# sheet) -- used as the ``baseline_profile()`` synthetic-weather defaults below.
+BASELINE_T_AMB_C: float = _pv("Ambient temperature (T_amb)")
+BASELINE_RH_AMB: float = _pv("Uptake RH / ambient RH (RH_amb)")
+BASELINE_Q_SOLAR_W_M2: float = _pv("Solar irradiance (Q_solar)")
+BASELINE_H_AMB_W_M2_K: float = H_AMB_W_M2_K
 
 
 # =============================================================================
@@ -53,8 +59,36 @@ class WeatherClient:
         retry_backoff_factor: float = 2.0,
     ) -> None:
         self._timeout = session_timeout
-        self._session = self._build_session(
-            cache_dir, max_retries=max_retries, retry_backoff_factor=retry_backoff_factor
+        if cache_dir is not None:
+            try:
+                import requests_cache
+
+                session = requests_cache.CachedSession(
+                    cache_name=str(Path(cache_dir) / "openmeteo_cache"),
+                    backend="sqlite",
+                    # Requests are always for a fixed, already-elapsed date range
+                    # (a past calendar year), so the archive response never changes.
+                    expire_after=requests_cache.NEVER_EXPIRE,
+                    # WAL mode lets concurrent readers/writers not block each other
+                    # (vs. SQLite's default rollback-journal mode, which serializes
+                    # all writes); busy_timeout (ms) is how long a writer waits on a
+                    # lock before raising "database is locked" instead of the
+                    # 5s sqlite3 default -- both needed once many GPU-sweep array
+                    # tasks share this one cache file concurrently (see
+                    # gpu_sweep/FINDINGS.md/docs/gpu_sweep_handoff.md).
+                    wal=True,
+                    busy_timeout=60_000,
+                )
+            except ImportError:
+                warnings.warn("requests-cache not installed; caching disabled.", stacklevel=2)
+                session = requests.Session()
+        else:
+            session = requests.Session()
+        self._session = retry_requests.retry(
+            session,
+            retries=max_retries,
+            backoff_factor=retry_backoff_factor,
+            status_to_retry=(429, 500, 502, 503, 504),
         )
 
     def get_historical(
@@ -75,7 +109,10 @@ class WeatherClient:
             "timezone": timezone,
             "hourly": ",".join(DEFAULT_VARIABLES),
         }
-        return self._fetch(_ARCHIVE_URL, params, latitude, longitude)
+        response = self._session.get(_ARCHIVE_URL, params=params, timeout=self._timeout)
+        _raise_for_openmeteo_error(response)
+        data = response.json()
+        return self._series_to_dataframe(data, "hourly", latitude, longitude)
 
     def get_historical_forecast_site_weather(
         self,
@@ -104,57 +141,6 @@ class WeatherClient:
         df_hourly = self._series_to_dataframe(data, "hourly", latitude, longitude)
         df_min15 = self._series_to_dataframe(data, "minutely_15", latitude, longitude)
         return df_hourly, df_min15
-
-    def _build_session(
-        self,
-        cache_dir: str | Path | None,
-        *,
-        max_retries: int,
-        retry_backoff_factor: float,
-    ) -> requests.Session:
-        if cache_dir is not None:
-            try:
-                import requests_cache
-
-                session = requests_cache.CachedSession(
-                    cache_name=str(Path(cache_dir) / "openmeteo_cache"),
-                    backend="sqlite",
-                    # Requests are always for a fixed, already-elapsed date range
-                    # (a past calendar year), so the archive response never changes.
-                    expire_after=requests_cache.NEVER_EXPIRE,
-                    # WAL mode lets concurrent readers/writers not block each other
-                    # (vs. SQLite's default rollback-journal mode, which serializes
-                    # all writes); busy_timeout (ms) is how long a writer waits on a
-                    # lock before raising "database is locked" instead of the
-                    # 5s sqlite3 default -- both needed once many GPU-sweep array
-                    # tasks share this one cache file concurrently (see
-                    # gpu_sweep/FINDINGS.md/docs/gpu_sweep_handoff.md).
-                    wal=True,
-                    busy_timeout=60_000,
-                )
-            except ImportError:
-                warnings.warn("requests-cache not installed; caching disabled.", stacklevel=2)
-                session = requests.Session()
-        else:
-            session = requests.Session()
-        return retry_requests.retry(
-            session,
-            retries=max_retries,
-            backoff_factor=retry_backoff_factor,
-            status_to_retry=(429, 500, 502, 503, 504),
-        )
-
-    def _fetch(
-        self,
-        url: str,
-        params: dict,
-        latitude: float,
-        longitude: float,
-    ) -> pd.DataFrame:
-        response = self._session.get(url, params=params, timeout=self._timeout)
-        _raise_for_openmeteo_error(response)
-        data = response.json()
-        return self._series_to_dataframe(data, "hourly", latitude, longitude)
 
     @staticmethod
     def _series_to_dataframe(
@@ -200,15 +186,58 @@ STEPS_PER_HOUR = 4
 STEPS_PER_DAY = 24 * STEPS_PER_HOUR
 
 
-def _slot_index(index: pd.DatetimeIndex) -> pd.Series:
-    """Map each timestamp to its 15-min slot within the calendar day (0..95)."""
-    return index.hour * STEPS_PER_HOUR + index.minute // 15
+def representative_mean_day_df(
+    df: pd.DataFrame,
+    *,
+    reference_day: date | None = None,
+) -> pd.DataFrame:
+    """Build one synthetic calendar day from mean slot values across *df*.
 
+    Uses native 15-min resolution when timestamps are 15-min spaced; otherwise
+    falls back to hourly means expanded to 96 slots.
+    """
+    if df.empty:
+        raise ValueError("Cannot build representative mean day from empty weather data.")
 
-def _mean_by_slot(df: pd.DataFrame, col: str) -> tuple[float, ...]:
-    grouped = df[col].groupby(_slot_index(df.index)).mean()
-    fallback = float(grouped.mean()) if len(grouped) else 0.0
-    return tuple(float(grouped.get(s, fallback)) for s in range(STEPS_PER_DAY))
+    ref = reference_day or date(2024, 1, 1)
+    base = pd.Timestamp(ref)
+    if df.index.tz is not None:
+        base = base.tz_localize(df.index.tz)
+
+    median_delta_min = float(df.index.to_series().diff().dropna().dt.total_seconds().median() / 60.0)
+    if median_delta_min <= 20.0:
+        rh = representative_kinetics_rh_from_minutely_15(df)
+        temp = representative_kinetics_temperature_from_minutely_15(df)
+        solar = representative_kinetics_solar_from_minutely_15(df)
+        wind = representative_kinetics_wind_from_minutely_15(df)
+        freq = "15min"
+    else:
+        rh_h = representative_hourly_rh_from_hourly(df)
+        temp_h = representative_hourly_temperature_from_hourly(df)
+        solar_h = representative_hourly_solar_from_hourly(df)
+        wind_h = representative_hourly_wind_from_hourly(df)
+        rh = _expand_hourly_to_15min(rh_h)
+        temp = _expand_hourly_to_15min(temp_h)
+        solar = _expand_hourly_to_15min(solar_h)
+        wind = _expand_hourly_to_15min(wind_h)
+        freq = "15min"
+
+    index = pd.date_range(base, periods=STEPS_PER_DAY, freq=freq)
+    out = pd.DataFrame(
+        {
+            "relative_humidity_2m": [r * 100.0 for r in rh],
+            "temperature_2m": temp,
+            "shortwave_radiation": solar,
+            "wind_speed_10m": wind,
+        },
+        index=index,
+    )
+    out.index.name = "time"
+    if "latitude" in df.columns:
+        out["latitude"] = float(df["latitude"].iloc[0])
+    if "longitude" in df.columns:
+        out["longitude"] = float(df["longitude"].iloc[0])
+    return out
 
 
 def representative_kinetics_rh_from_minutely_15(df: pd.DataFrame) -> tuple[float, ...]:
@@ -217,6 +246,13 @@ def representative_kinetics_rh_from_minutely_15(df: pd.DataFrame) -> tuple[float
         raise KeyError("DataFrame must contain column 'relative_humidity_2m'")
     rh_pct = _mean_by_slot(df, "relative_humidity_2m")
     return tuple(r / 100.0 for r in rh_pct)
+
+
+def _mean_by_slot(df: pd.DataFrame, col: str) -> tuple[float, ...]:
+    slot = df.index.hour * STEPS_PER_HOUR + df.index.minute // 15  # 15-min slot 0..95
+    grouped = df[col].groupby(slot).mean()
+    fallback = float(grouped.mean()) if len(grouped) else 0.0
+    return tuple(float(grouped.get(s, fallback)) for s in range(STEPS_PER_DAY))
 
 
 def representative_kinetics_temperature_from_minutely_15(df: pd.DataFrame) -> tuple[float, ...]:
@@ -286,58 +322,22 @@ def _expand_hourly_to_15min(hourly: tuple[float, ...]) -> tuple[float, ...]:
     return tuple(out[:STEPS_PER_DAY])
 
 
-def representative_mean_day_df(
-    df: pd.DataFrame,
-    *,
-    reference_day: date | None = None,
-) -> pd.DataFrame:
-    """Build one synthetic calendar day from mean slot values across *df*.
-
-    Uses native 15-min resolution when timestamps are 15-min spaced; otherwise
-    falls back to hourly means expanded to 96 slots.
-    """
-    if df.empty:
-        raise ValueError("Cannot build representative mean day from empty weather data.")
-
-    ref = reference_day or date(2024, 1, 1)
-    base = pd.Timestamp(ref)
-    if df.index.tz is not None:
-        base = base.tz_localize(df.index.tz)
-
-    median_delta_min = float(df.index.to_series().diff().dropna().dt.total_seconds().median() / 60.0)
-    if median_delta_min <= 20.0:
-        rh = representative_kinetics_rh_from_minutely_15(df)
-        temp = representative_kinetics_temperature_from_minutely_15(df)
-        solar = representative_kinetics_solar_from_minutely_15(df)
-        wind = representative_kinetics_wind_from_minutely_15(df)
-        freq = "15min"
-    else:
-        rh_h = representative_hourly_rh_from_hourly(df)
-        temp_h = representative_hourly_temperature_from_hourly(df)
-        solar_h = representative_hourly_solar_from_hourly(df)
-        wind_h = representative_hourly_wind_from_hourly(df)
-        rh = _expand_hourly_to_15min(rh_h)
-        temp = _expand_hourly_to_15min(temp_h)
-        solar = _expand_hourly_to_15min(solar_h)
-        wind = _expand_hourly_to_15min(wind_h)
-        freq = "15min"
-
-    index = pd.date_range(base, periods=STEPS_PER_DAY, freq=freq)
-    out = pd.DataFrame(
-        {
-            "relative_humidity_2m": [r * 100.0 for r in rh],
-            "temperature_2m": temp,
-            "shortwave_radiation": solar,
-            "wind_speed_10m": wind,
-        },
-        index=index,
-    )
-    out.index.name = "time"
-    if "latitude" in df.columns:
-        out["latitude"] = float(df["latitude"].iloc[0])
-    if "longitude" in df.columns:
-        out["longitude"] = float(df["longitude"].iloc[0])
+def site_row_from_hourly(df: pd.DataFrame) -> dict[str, float]:
+    """Mean daily diurnal extrema for SAWH site diagnostics."""
+    rh_high, rh_low = diurnal_rh_from_hourly(df)
+    out: dict[str, float] = {"rh_high_frac": rh_high, "rh_low_frac": rh_low}
+    if "temperature_2m" in df.columns:
+        t_high, t_low = diurnal_temperature_from_hourly(df)
+        out["temperature_high_c"] = t_high
+        out["temperature_low_c"] = t_low
+    if "shortwave_radiation" in df.columns:
+        out["solar_irradiance_w_per_m2"] = mean_daily_max_irradiance_from_hourly(df)
     return out
+
+
+def diurnal_rh_from_hourly(df: pd.DataFrame) -> tuple[float, float]:
+    """Mean of daily max RH and mean of daily min RH (fractions 0-1)."""
+    return _diurnal_extrema(df, "relative_humidity_2m", scale=1.0 / 100.0)
 
 
 def _diurnal_extrema(df: pd.DataFrame, col: str, scale: float = 1.0) -> tuple[float, float]:
@@ -346,11 +346,6 @@ def _diurnal_extrema(df: pd.DataFrame, col: str, scale: float = 1.0) -> tuple[fl
         raise KeyError(f"DataFrame must contain column {col!r}")
     r = df[col].resample("D")
     return (float(r.max().mean() * scale), float(r.min().mean() * scale))
-
-
-def diurnal_rh_from_hourly(df: pd.DataFrame) -> tuple[float, float]:
-    """Mean of daily max RH and mean of daily min RH (fractions 0-1)."""
-    return _diurnal_extrema(df, "relative_humidity_2m", scale=1.0 / 100.0)
 
 
 def diurnal_temperature_from_hourly(df: pd.DataFrame) -> tuple[float, float]:
@@ -385,47 +380,9 @@ def day_weather_stats(day_df: pd.DataFrame) -> dict[str, float]:
         out["solar_peak_w_m2"] = float(solar.max())
     return out
 
-
-def site_row_from_hourly(df: pd.DataFrame) -> dict[str, float]:
-    """Mean daily diurnal extrema for SAWH site diagnostics."""
-    rh_high, rh_low = diurnal_rh_from_hourly(df)
-    out: dict[str, float] = {"rh_high_frac": rh_high, "rh_low_frac": rh_low}
-    if "temperature_2m" in df.columns:
-        t_high, t_low = diurnal_temperature_from_hourly(df)
-        out["temperature_high_c"] = t_high
-        out["temperature_low_c"] = t_low
-    if "shortwave_radiation" in df.columns:
-        out["solar_irradiance_w_per_m2"] = mean_daily_max_irradiance_from_hourly(df)
-    return out
-
 # =============================================================================
 # Land-grid site sampling for global maps
 # =============================================================================
-
-def _prepared_land_union():
-    from shapely import geometry as sh_geom
-    from shapely.ops import unary_union
-    from shapely.prepared import prep
-
-    import cartopy.io.shapereader as shpreader
-
-    path = shpreader.natural_earth(resolution="110m", category="physical", name="land")
-    geoms = list(shpreader.Reader(path).geometries())
-    u = prep(unary_union(geoms))
-    return u, sh_geom
-
-
-def _prepared_country_union(names: set[str]):
-    """Prepared union of country polygons matching ADMIN in *names* (Natural Earth)."""
-    from shapely.ops import unary_union
-    from shapely.prepared import prep
-
-    import cartopy.io.shapereader as shpreader
-
-    path = shpreader.natural_earth(resolution="110m", category="cultural", name="admin_0_countries")
-    geoms = [r.geometry for r in shpreader.Reader(path).records() if r.attributes.get("ADMIN") in names]
-    return prep(unary_union(geoms))
-
 
 # Land above this latitude within these countries is excluded by default: no realistic
 # deployment demand, and it's mostly the same polar-day/night territory the lat_hi cutoff
@@ -448,17 +405,39 @@ def grid_land_points(
     (Canada/Russia extend well south of 72°N at those longitudes). Pass ``{}`` or ``None``
     to disable.
     """
+    from shapely import geometry as sh_geom
+    from shapely.ops import unary_union
+    from shapely.prepared import prep
+
+    import cartopy.io.shapereader as shpreader
+
     print(
         "  Loading Natural Earth land polygons (first run may download shapefiles)…",
         flush=True,
     )
     t0 = time.perf_counter()
-    land, sh_geom = _prepared_land_union()
+    land_path = shpreader.natural_earth(resolution="110m", category="physical", name="land")
+    land = prep(unary_union(list(shpreader.Reader(land_path).geometries())))
     print(f"  Land geometry ready in {time.perf_counter() - t0:.2f}s.", flush=True)
 
     exclude_country_above_lat = exclude_country_above_lat or {}
+    country_path = shpreader.natural_earth(
+        resolution="110m", category="cultural", name="admin_0_countries"
+    )
     exclude_masks = [
-        (_prepared_country_union({name}), thresh) for name, thresh in exclude_country_above_lat.items()
+        (
+            prep(
+                unary_union(
+                    [
+                        r.geometry
+                        for r in shpreader.Reader(country_path).records()
+                        if r.attributes.get("ADMIN") == name
+                    ]
+                )
+            ),
+            thresh,
+        )
+        for name, thresh in exclude_country_above_lat.items()
     ]
 
     lat_start = math.ceil(lat_lo / step_deg) * step_deg
@@ -519,12 +498,57 @@ class DailyWeatherProfile:
     cooling: PhaseProfile | None = None
 
 
-FIXED_H_AMB_W_M2_K = 10.0
+FIXED_H_AMB_W_M2_K = BASELINE_H_AMB_W_M2_K
 
 
-def _wind_series(_df: pd.DataFrame, n: int) -> tuple[float, ...]:
-    """Ambient convection coefficient per timestep -- fixed, not wind-derived."""
-    return (FIXED_H_AMB_W_M2_K,) * n
+def profile_from_day_df(day_df: pd.DataFrame) -> DailyWeatherProfile:
+    """Split one calendar day into absorption (night) + desorption (day).
+
+    The two halves run for their true real-time duration (via each phase's own
+    step count at PHASE_DT_S resolution), not a fixed 12 h/12 h split.
+    """
+    deltas = day_df.index.to_series().diff().dropna().dt.total_seconds()
+    native_dt_s = float(deltas.median()) if len(deltas) else PHASE_DT_S
+    solar = day_df.get("shortwave_radiation", pd.Series(0.0, index=day_df.index)).astype(float)
+    night = day_df[solar < SOLAR_NIGHT_THRESHOLD_W_M2]
+    day = day_df[solar >= SOLAR_NIGHT_THRESHOLD_W_M2]
+    if len(night) < 4:
+        night = day_df.nsmallest(max(STEPS_PER_PHASE, len(day_df) // 2), "shortwave_radiation")
+    if len(day) < 4:
+        day = day_df.nlargest(max(STEPS_PER_PHASE, len(day_df) // 2), "shortwave_radiation")
+    night = _rotate_chronological(night, pivot_hour=12.0)
+    day = _rotate_chronological(day, pivot_hour=0.0)
+    return DailyWeatherProfile(
+        absorption=_resample_phase(night, _steps_for(len(night), native_dt_s)),
+        desorption=_resample_phase(day, _steps_for(len(day), native_dt_s)),
+    )
+
+
+def _rotate_chronological(df: pd.DataFrame, *, pivot_hour: float) -> pd.DataFrame:
+    """Reorder rows into real elapsed-time order for a slice that may wrap around pivot_hour.
+
+    A boolean mask (e.g. solar < threshold) preserves calendar-day row order --
+    00:00 first, then whatever comes after sunset appended at the end -- not real
+    elapsed time within the night, which actually runs sunset -> midnight ->
+    sunrise. ``pivot_hour`` must be an hour the slice never contains (noon for
+    night, midnight for day), so rotating the axis to start there never splits
+    the slice's one real contiguous span in two.
+    """
+    hour_frac = df.index.hour + df.index.minute / 60.0
+    rel_hour = (hour_frac - pivot_hour) % 24
+    order = np.argsort(rel_hour, kind="stable")
+    return df.iloc[order]
+
+
+def _steps_for(n_rows: int, native_dt_s: float) -> int:
+    """Step count at PHASE_DT_S resolution matching a slice's real elapsed duration.
+
+    Absorption and desorption aren't equal-length in real time (day/night varies by
+    latitude and season), so each phase gets its own step count rather than being
+    forced onto a fixed 12 h grid -- that would silently speed up or slow down real
+    time within the ODE integration.
+    """
+    return max(4, int(round(n_rows * native_dt_s / PHASE_DT_S)))
 
 
 def _resample_phase(df: pd.DataFrame, n: int = STEPS_PER_PHASE) -> PhaseProfile:
@@ -549,7 +573,7 @@ def _resample_phase(df: pd.DataFrame, n: int = STEPS_PER_PHASE) -> PhaseProfile:
         solar_src = df.get("shortwave_radiation", pd.Series(0.0, index=df.index))
         solar = np.interp(x_tgt, x_src, solar_src.astype(float).values)
     solar = np.maximum(0.0, solar)
-    h_amb = _wind_series(df, n)
+    h_amb = (FIXED_H_AMB_W_M2_K,) * n  # ambient convection coefficient -- fixed, not wind-derived
     return PhaseProfile(
         temperature_c=tuple(float(x) for x in temp),
         relative_humidity=tuple(float(x) for x in rh),
@@ -558,66 +582,12 @@ def _resample_phase(df: pd.DataFrame, n: int = STEPS_PER_PHASE) -> PhaseProfile:
     )
 
 
-def _native_dt_s(df: pd.DataFrame) -> float:
-    deltas = df.index.to_series().diff().dropna().dt.total_seconds()
-    return float(deltas.median()) if len(deltas) else PHASE_DT_S
-
-
-def _steps_for(n_rows: int, native_dt_s: float) -> int:
-    """Step count at PHASE_DT_S resolution matching a slice's real elapsed duration.
-
-    Absorption and desorption aren't equal-length in real time (day/night varies by
-    latitude and season), so each phase gets its own step count rather than being
-    forced onto a fixed 12 h grid -- that would silently speed up or slow down real
-    time within the ODE integration.
-    """
-    return max(4, int(round(n_rows * native_dt_s / PHASE_DT_S)))
-
-
-def _rotate_chronological(df: pd.DataFrame, *, pivot_hour: float) -> pd.DataFrame:
-    """Reorder rows into real elapsed-time order for a slice that may wrap around pivot_hour.
-
-    A boolean mask (e.g. solar < threshold) preserves calendar-day row order --
-    00:00 first, then whatever comes after sunset appended at the end -- not real
-    elapsed time within the night, which actually runs sunset -> midnight ->
-    sunrise. ``pivot_hour`` must be an hour the slice never contains (noon for
-    night, midnight for day), so rotating the axis to start there never splits
-    the slice's one real contiguous span in two.
-    """
-    hour_frac = df.index.hour + df.index.minute / 60.0
-    rel_hour = (hour_frac - pivot_hour) % 24
-    order = np.argsort(rel_hour, kind="stable")
-    return df.iloc[order]
-
-
-def profile_from_day_df(day_df: pd.DataFrame) -> DailyWeatherProfile:
-    """Split one calendar day into absorption (night) + desorption (day).
-
-    The two halves run for their true real-time duration (via each phase's own
-    step count at PHASE_DT_S resolution), not a fixed 12 h/12 h split.
-    """
-    native_dt_s = _native_dt_s(day_df)
-    solar = day_df.get("shortwave_radiation", pd.Series(0.0, index=day_df.index)).astype(float)
-    night = day_df[solar < SOLAR_NIGHT_THRESHOLD_W_M2]
-    day = day_df[solar >= SOLAR_NIGHT_THRESHOLD_W_M2]
-    if len(night) < 4:
-        night = day_df.nsmallest(max(STEPS_PER_PHASE, len(day_df) // 2), "shortwave_radiation")
-    if len(day) < 4:
-        day = day_df.nlargest(max(STEPS_PER_PHASE, len(day_df) // 2), "shortwave_radiation")
-    night = _rotate_chronological(night, pivot_hour=12.0)
-    day = _rotate_chronological(day, pivot_hour=0.0)
-    return DailyWeatherProfile(
-        absorption=_resample_phase(night, _steps_for(len(night), native_dt_s)),
-        desorption=_resample_phase(day, _steps_for(len(day), native_dt_s)),
-    )
-
-
 def baseline_profile(
     *,
-    temperature_c: float = 25.0,
-    relative_humidity: float = 0.5,
-    solar_w_m2: float = 600.0,
-    h_amb_w_m2_k: float = 10.0,
+    temperature_c: float = BASELINE_T_AMB_C,
+    relative_humidity: float = BASELINE_RH_AMB,
+    solar_w_m2: float = BASELINE_Q_SOLAR_W_M2,
+    h_amb_w_m2_k: float = BASELINE_H_AMB_W_M2_K,
 ) -> DailyWeatherProfile:
     abs_prof = PhaseProfile(
         temperature_c=(temperature_c,) * STEPS_PER_PHASE,
@@ -638,24 +608,13 @@ def baseline_profile(
 BASELINE_INITIAL_EQUILIBRIUM_RH = FABRICATION_EQUILIBRIUM_RH
 
 
-def baseline_initial_c_w(*, h_m: float = 0.004) -> float:
+def baseline_initial_c_w(*, h_m: float = H0_M) -> float:
     """Initial brine state for baseline / Fig. 2 replay (fabrication at ~20% RH)."""
     return equilibrium_c_w_from_dvs_at_rh(
         BASELINE_INITIAL_EQUILIBRIUM_RH,
         h_m=h_m,
         h0_ref_m=h_m,
     )
-
-
-def _single_day_df(
-    df: pd.DataFrame,
-    day: date,
-) -> pd.DataFrame:
-    if df.index.tz is not None:
-        mask = df.index.date == day
-    else:
-        mask = df.index.normalize() == pd.Timestamp(day)
-    return df.loc[mask].copy()
 
 
 def replay_profile(
@@ -684,6 +643,17 @@ def replay_profile(
     return profile_from_day_df(day_df)
 
 
+def _single_day_df(
+    df: pd.DataFrame,
+    day: date,
+) -> pd.DataFrame:
+    if df.index.tz is not None:
+        mask = df.index.date == day
+    else:
+        mask = df.index.normalize() == pd.Timestamp(day)
+    return df.loc[mask].copy()
+
+
 def representative_mean_day_profile(
     lat: float,
     lon: float,
@@ -702,24 +672,6 @@ def representative_mean_day_profile(
         df = client.get_historical(lat, lon, start, end)
     mean_day = representative_mean_day_df(df, reference_day=date(year, 6, 15))
     return profile_from_day_df(mean_day)
-
-
-def real_weather_days_from_df(
-    df: pd.DataFrame,
-    *,
-    stride: int = 1,
-) -> list[tuple[date, DailyWeatherProfile, pd.DataFrame]]:
-    """Build per-day profiles from a pre-fetched year of Open-Meteo data."""
-    days_out: list[tuple[date, DailyWeatherProfile, pd.DataFrame]] = []
-    for idx, (day_key, group) in enumerate(df.groupby(df.index.date)):
-        if stride > 1 and idx % stride != 0:
-            continue
-        try:
-            prof = profile_from_day_df(group)
-            days_out.append((day_key, prof, group))
-        except (ValueError, KeyError):
-            continue
-    return days_out
 
 
 def real_weather_days(
@@ -744,6 +696,24 @@ def real_weather_days(
 
     return [(day_key, prof) for day_key, prof, _ in real_weather_days_from_df(df, stride=stride)]
 
+
+def real_weather_days_from_df(
+    df: pd.DataFrame,
+    *,
+    stride: int = 1,
+) -> list[tuple[date, DailyWeatherProfile, pd.DataFrame]]:
+    """Build per-day profiles from a pre-fetched year of Open-Meteo data."""
+    days_out: list[tuple[date, DailyWeatherProfile, pd.DataFrame]] = []
+    for idx, (day_key, group) in enumerate(df.groupby(df.index.date)):
+        if stride > 1 and idx % stride != 0:
+            continue
+        try:
+            prof = profile_from_day_df(group)
+            days_out.append((day_key, prof, group))
+        except (ValueError, KeyError):
+            continue
+    return days_out
+
 # =============================================================================
 # Wilson Note S1 Fig. S1D mass-transfer validation profile (24 h cycle)
 # =============================================================================
@@ -762,11 +732,6 @@ FIG_S1_DESORPTION_STEPS = int(round(FIG_S1_DESORPTION_HOURS * 3600.0 / PHASE_DT_
 FIG_S1_INITIAL_WATER_L_M2 = 1.2
 FIG_S1_PEAK_WATER_L_M2 = 2.2
 FIG_S1_FINAL_WATER_L_M2 = 1.2
-
-
-def fig_s1_initial_c_w(*, h_m: float = 0.004) -> float:
-    """Initial brine state matching Fig. S1D start (~1.2 L/m² at H₀)."""
-    return c_w_from_water_in_gel_l_m2(FIG_S1_INITIAL_WATER_L_M2, h_m)
 
 
 def fig_s1_profile() -> DailyWeatherProfile:
@@ -790,6 +755,11 @@ def fig_s1_profile() -> DailyWeatherProfile:
             dt_s=FIG_S1_DT_S,
         ),
     )
+
+
+def fig_s1_initial_c_w(*, h_m: float = H0_M) -> float:
+    """Initial brine state matching Fig. S1D start (~1.2 L/m² at H₀)."""
+    return c_w_from_water_in_gel_l_m2(FIG_S1_INITIAL_WATER_L_M2, h_m)
 
 # =============================================================================
 # Wilson Fig. 4 Atacama field-test weather (24 h from 18:00)
@@ -820,6 +790,75 @@ ATACAMA_FIELD_DESORPTION_STEPS = int(
 # Wilson Fig. S2: fan-forced condenser cooling ≈ 0.5 m/s → h ≈ 10 W/m²K, decoupled
 # from the variable ambient wind that drives the absorber/glass h_amb schedule.
 ATACAMA_CONDENSER_FAN_H_AMB_W_M2_K = 10.0
+
+
+def atacama_field_profile() -> DailyWeatherProfile:
+    """Atacama field validation: 12 h open absorption, desorption from ~8:09 a.m.
+
+    Desorption begins where the digitized Fig. 4 curves start (≈0.15 h after
+    8 a.m.) and runs through 4 p.m.
+    """
+    return _build_atacama_profile(
+        desorption_start_h=(
+            ATACAMA_INSTALL_HOUR_FROM_ORIGIN + ATACAMA_DESORPTION_START_OFFSET_H
+        ),
+        desorption_hours=ATACAMA_FIELD_DESORPTION_HOURS,
+        desorption_steps=ATACAMA_FIELD_DESORPTION_STEPS,
+    )
+
+
+def atacama_figure_profile() -> DailyWeatherProfile:
+    """Fig. 4 symmetric 12 h + 12 h replay (legacy)."""
+    return _build_atacama_profile(
+        desorption_start_h=ABSORPTION_HOURS,
+        desorption_hours=DESORPTION_HOURS,
+        desorption_steps=STEPS_PER_PHASE,
+    )
+
+
+def _build_atacama_profile(
+    *,
+    desorption_start_h: float,
+    desorption_hours: float,
+    desorption_steps: int,
+) -> DailyWeatherProfile:
+    h_rh, rh = _load_figure_csv(ATACAMA_RH_CSV)
+    h_t, temp_c = _load_figure_csv(ATACAMA_TEMP_CSV)
+    h_amb_fig, amb_c = _load_figure_csv(ATACAMA_AMB_CSV)
+    h_s, solar_kw = _load_figure_csv(ATACAMA_SOLAR_CSV)
+
+    abs_h = _phase_hour_grid(0.0, ABSORPTION_HOURS, STEPS_PER_PHASE)
+    des_h = _phase_hour_grid(desorption_start_h, desorption_hours, desorption_steps)
+    # Fig. 4 ambient curve is digitized on hours from 8 a.m. install (0–8 h).
+    des_h_from_install = des_h - ATACAMA_INSTALL_HOUR_FROM_ORIGIN
+
+    abs_rh = _interp_clamped(h_rh, rh, abs_h)
+    des_rh = _interp_clamped(h_rh, rh, des_h)
+    abs_t = _interp_clamped(h_t, temp_c, abs_h)
+    des_t = _interp_clamped(h_amb_fig, amb_c, des_h_from_install)
+    des_solar = _interp_clamped(h_s, solar_kw, des_h) * 1000.0  # kW/m² → W/m²
+
+    abs_hamb = tuple(_atacama_h_amb_w_m2_k(float(h)) for h in abs_h)
+    des_hamb = tuple(_atacama_h_amb_w_m2_k(float(h)) for h in des_h)
+    des_hcond = (ATACAMA_CONDENSER_FAN_H_AMB_W_M2_K,) * desorption_steps
+
+    return DailyWeatherProfile(
+        absorption=PhaseProfile(
+            temperature_c=tuple(float(x) for x in abs_t),
+            relative_humidity=tuple(float(x) for x in abs_rh),
+            solar_w_m2=(0.0,) * STEPS_PER_PHASE,
+            h_amb_w_m2_k=abs_hamb,
+            dt_s=PHASE_DT_S,
+        ),
+        desorption=PhaseProfile(
+            temperature_c=tuple(float(x) for x in des_t),
+            relative_humidity=tuple(float(x) for x in des_rh),
+            solar_w_m2=tuple(max(0.0, float(x)) for x in des_solar),
+            h_amb_w_m2_k=des_hamb,
+            h_amb_cond_w_m2_k=des_hcond,
+            dt_s=PHASE_DT_S,
+        ),
+    )
 
 
 def _load_figure_csv(path: Path) -> tuple[np.ndarray, np.ndarray]:
@@ -870,73 +909,4 @@ def _atacama_h_amb_w_m2_k(hours_from_6pm: float) -> float:
         10.0
         if hours_from_6pm >= ATACAMA_WIND_STEP_HOUR_FROM_ORIGIN
         else 1.0
-    )
-
-
-def _build_atacama_profile(
-    *,
-    desorption_start_h: float,
-    desorption_hours: float,
-    desorption_steps: int,
-) -> DailyWeatherProfile:
-    h_rh, rh = _load_figure_csv(ATACAMA_RH_CSV)
-    h_t, temp_c = _load_figure_csv(ATACAMA_TEMP_CSV)
-    h_amb_fig, amb_c = _load_figure_csv(ATACAMA_AMB_CSV)
-    h_s, solar_kw = _load_figure_csv(ATACAMA_SOLAR_CSV)
-
-    abs_h = _phase_hour_grid(0.0, ABSORPTION_HOURS, STEPS_PER_PHASE)
-    des_h = _phase_hour_grid(desorption_start_h, desorption_hours, desorption_steps)
-    # Fig. 4 ambient curve is digitized on hours from 8 a.m. install (0–8 h).
-    des_h_from_install = des_h - ATACAMA_INSTALL_HOUR_FROM_ORIGIN
-
-    abs_rh = _interp_clamped(h_rh, rh, abs_h)
-    des_rh = _interp_clamped(h_rh, rh, des_h)
-    abs_t = _interp_clamped(h_t, temp_c, abs_h)
-    des_t = _interp_clamped(h_amb_fig, amb_c, des_h_from_install)
-    des_solar = _interp_clamped(h_s, solar_kw, des_h) * 1000.0  # kW/m² → W/m²
-
-    abs_hamb = tuple(_atacama_h_amb_w_m2_k(float(h)) for h in abs_h)
-    des_hamb = tuple(_atacama_h_amb_w_m2_k(float(h)) for h in des_h)
-    des_hcond = (ATACAMA_CONDENSER_FAN_H_AMB_W_M2_K,) * desorption_steps
-
-    return DailyWeatherProfile(
-        absorption=PhaseProfile(
-            temperature_c=tuple(float(x) for x in abs_t),
-            relative_humidity=tuple(float(x) for x in abs_rh),
-            solar_w_m2=(0.0,) * STEPS_PER_PHASE,
-            h_amb_w_m2_k=abs_hamb,
-            dt_s=PHASE_DT_S,
-        ),
-        desorption=PhaseProfile(
-            temperature_c=tuple(float(x) for x in des_t),
-            relative_humidity=tuple(float(x) for x in des_rh),
-            solar_w_m2=tuple(max(0.0, float(x)) for x in des_solar),
-            h_amb_w_m2_k=des_hamb,
-            h_amb_cond_w_m2_k=des_hcond,
-            dt_s=PHASE_DT_S,
-        ),
-    )
-
-
-def atacama_figure_profile() -> DailyWeatherProfile:
-    """Fig. 4 symmetric 12 h + 12 h replay (legacy)."""
-    return _build_atacama_profile(
-        desorption_start_h=ABSORPTION_HOURS,
-        desorption_hours=DESORPTION_HOURS,
-        desorption_steps=STEPS_PER_PHASE,
-    )
-
-
-def atacama_field_profile() -> DailyWeatherProfile:
-    """Atacama field validation: 12 h open absorption, desorption from ~8:09 a.m.
-
-    Desorption begins where the digitized Fig. 4 curves start (≈0.15 h after
-    8 a.m.) and runs through 4 p.m.
-    """
-    return _build_atacama_profile(
-        desorption_start_h=(
-            ATACAMA_INSTALL_HOUR_FROM_ORIGIN + ATACAMA_DESORPTION_START_OFFSET_H
-        ),
-        desorption_hours=ATACAMA_FIELD_DESORPTION_HOURS,
-        desorption_steps=ATACAMA_FIELD_DESORPTION_STEPS,
     )

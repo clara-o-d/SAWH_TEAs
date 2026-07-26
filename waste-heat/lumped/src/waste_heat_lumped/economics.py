@@ -33,33 +33,27 @@ _PHYSICAL_SCALAR_PARAMS: tuple[str, ...] = (
 )
 
 
-def lcow_economic_params_csv_path() -> Path:
-    return (
-        Path(__file__).resolve().parent
-        / "data"
-        / "economics"
-        / "lcow_economic_params.csv"
-    )
-
-
-def _coerce_lcow_param(name: str, raw: Any) -> Any:
-    if name == "device_lifetime_years":
-        return int(round(float(raw)))
-    if name == "include_desorption_enthalpy":
-        if isinstance(raw, bool):
-            return raw
-        s = str(raw).strip().lower()
-        return s in {"1", "true", "yes", "y", "t"}
-    return float(raw)
-
-
 def _load_economic_data(
     csv_path: Path | str | None = None,
 ) -> tuple[dict[str, Any], tuple[tuple[str, float], ...]]:
-    path = Path(csv_path) if csv_path is not None else lcow_economic_params_csv_path()
+    path = (
+        Path(csv_path)
+        if csv_path is not None
+        else Path(__file__).resolve().parent / "data" / "economics" / "lcow_economic_params.csv"
+    )
     if not path.is_file():
         raise FileNotFoundError(f"LCOW economic params not found at {path}")
     import pandas as pd
+
+    def _coerce(name: str, raw: Any) -> Any:
+        if name == "device_lifetime_years":
+            return int(round(float(raw)))
+        if name == "include_desorption_enthalpy":
+            if isinstance(raw, bool):
+                return raw
+            s = str(raw).strip().lower()
+            return s in {"1", "true", "yes", "y", "t"}
+        return float(raw)
 
     df = pd.read_csv(path)
     if _COL_PARAMETER not in df.columns or _COL_VALUE not in df.columns:
@@ -72,7 +66,7 @@ def _load_economic_data(
         if not name:
             continue
         raw_val = row[_COL_VALUE]
-        value = _coerce_lcow_param(name, raw_val)
+        value = _coerce(name, raw_val)
         if name.startswith(_DEVICE_BOM_PREFIX):
             notes = row.get("notes")
             label = str(notes).strip() if notes == notes and str(notes).strip() else name
@@ -182,17 +176,6 @@ class ElectricalLoadSpec:
         return float(electricity_price_usd_per_kwh) * self.annual_kwh_per_m2()
 
 
-def htf_pump_shaft_power_w_per_m2(
-    *,
-    m_dot_kg_s_m2: float,
-    head_m: float,
-    rho_kg_m3: float = _FLUID_RHO_KG_M3,
-) -> float:
-    """Hydraulic shaft power for the loop-fluid transfer pump (W/m² footprint)."""
-    q_m3_s_m2 = float(m_dot_kg_s_m2) / float(rho_kg_m3)
-    return float(rho_kg_m3) * _GRAVITY_M_S2 * float(head_m) * q_m3_s_m2
-
-
 def default_electrical_loads(
     *,
     htf_head_m: float = 8.0,
@@ -204,10 +187,9 @@ def default_electrical_loads(
     ``m_dot_f_kg_s_m2`` are "active during desorption only" per
     ``DeviceConfig``), so the default operating window is 12 h/day.
     """
-    htf_shaft = htf_pump_shaft_power_w_per_m2(
-        m_dot_kg_s_m2=M_DOT_F_KG_S_M2,
-        head_m=htf_head_m,
-    )
+    # Hydraulic shaft power for the loop-fluid transfer pump (W/m² footprint).
+    q_m3_s_m2 = M_DOT_F_KG_S_M2 / _FLUID_RHO_KG_M3
+    htf_shaft = _FLUID_RHO_KG_M3 * _GRAVITY_M_S2 * htf_head_m * q_m3_s_m2
     return (
         ElectricalLoadSpec(
             name="Transfer pump",
@@ -228,18 +210,6 @@ def total_parasitic_electricity_annual_usd_per_m2(
     return sum(load.annual_cost_usd_per_m2(electricity_price_usd_per_kwh) for load in loads)
 
 
-def parasitic_electricity_breakdown(
-    loads: tuple[ElectricalLoadSpec, ...],
-    electricity_price_usd_per_kwh: float,
-) -> tuple[tuple[str, float], ...]:
-    return tuple(
-        (
-            f"Electricity: {load.name}",
-            load.annual_cost_usd_per_m2(electricity_price_usd_per_kwh),
-        )
-        for load in loads
-    )
-
 # =============================================================================
 # LCOW from Wilson simulation daily yield
 # =============================================================================
@@ -254,18 +224,6 @@ class LcowCostBreakdown:
     @property
     def total_usd_per_m3(self) -> float:
         return float(sum(v for _, v in self.items))
-
-
-def _hydrogel_cost_per_kg(
-    salt_price_usd_per_kg: float,
-    salt_to_polymer_ratio: float,
-    econ: LCOEconomicParams,
-) -> float:
-    sl = salt_to_polymer_ratio
-    return (
-        (salt_price_usd_per_kg * sl + econ.c_acrylamide_usd_per_kg) / (1.0 + sl)
-        + econ.c_additives_usd_per_kg_composite
-    )
 
 
 def _sorbent_replacement_annual_usd(
@@ -289,7 +247,10 @@ def _sorbent_replacement_annual_usd(
         if salt_price_usd_per_kg is not None
         else get_salt_price_usd_per_kg(salt_name)
     )
-    hydrogel_cost_per_kg = _hydrogel_cost_per_kg(salt_price, sl, econ)
+    hydrogel_cost_per_kg = (
+        (salt_price * sl + econ.c_acrylamide_usd_per_kg) / (1.0 + sl)
+        + econ.c_additives_usd_per_kg_composite
+    )
     return hydrogel_cost_per_kg * dry_mass / gel_lifetime
 
 
@@ -437,11 +398,9 @@ def lcow_cost_breakdown_from_daily_yield(
     annual_extra = econ.annual_extra_cycle_energy_cost_usd(cycles_per_day)
     segments.append(("Fixed energy", _lcow_seg(econ.energy_cost_usd_per_year)))
     segments.append(("Electricity (active heat)", _lcow_seg(annual_electricity_cost)))
-    for label, annual_usd in parasitic_electricity_breakdown(
-        default_electrical_loads(),
-        econ.electricity_price_usd_per_kwh,
-    ):
-        segments.append((label, _lcow_seg(annual_usd)))
+    for load in default_electrical_loads():
+        annual_usd = load.annual_cost_usd_per_m2(econ.electricity_price_usd_per_kwh)
+        segments.append((f"Electricity: {load.name}", _lcow_seg(annual_usd)))
     segments.append(("Extra cycling energy", _lcow_seg(annual_extra)))
 
     return LcowCostBreakdown(items=tuple(segments))
@@ -459,13 +418,6 @@ class NpvResult:
     npv_usd_per_m2: float
     payback_years_simple: float
     payback_years_discounted: float
-
-
-def _present_value_annuity_factor(discount_rate: float, years: float) -> float:
-    i = discount_rate
-    if i <= 0.0:
-        return years
-    return (1.0 - (1.0 + i) ** (-years)) / i
 
 
 def npv_from_daily_yield(
@@ -539,7 +491,7 @@ def npv_from_daily_yield(
 
     lifetime_years = float(econ.device_lifetime_years)
     i = econ.discount_rate
-    pvaf = _present_value_annuity_factor(i, lifetime_years)
+    pvaf = lifetime_years if i <= 0.0 else (1.0 - (1.0 + i) ** (-lifetime_years)) / i
     npv = -capex + annual_net_cash_flow * pvaf
 
     payback_simple = capex / annual_net_cash_flow if annual_net_cash_flow > 0.0 else float("inf")

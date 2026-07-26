@@ -206,25 +206,6 @@ _SAUL_WAGNER_A: tuple[float, ...] = (
 _SAUL_WAGNER_EXP: tuple[float, ...] = (1.0, 1.5, 3.0, 3.5, 4.0, 7.5)
 
 
-def reduced_temperature(temperature_c: float) -> float:
-    """θ = T / T_c,H2O."""
-    return (float(temperature_c) + 273.15) / T_CRIT_H2O_K
-
-
-def _pi_25(xi: float, params: VaporPressureParams) -> float:
-    return (
-        1.0
-        - (1.0 + (xi / params.pi6) ** params.pi7) ** params.pi8
-        - params.pi9 * math.exp(-((xi - 0.1) ** 2) / 0.005)
-    )
-
-
-def _f_xi_theta(xi: float, theta: float, params: VaporPressureParams) -> float:
-    a_term = 2.0 - (1.0 + (xi / params.pi0) ** params.pi1) ** params.pi2
-    b_term = (1.0 + (xi / params.pi3) ** params.pi4) ** params.pi5 - 1.0
-    return a_term + b_term * theta
-
-
 def vapor_pressure_ratio(
     salt_mass_fraction: float,
     temperature_c: float,
@@ -240,8 +221,15 @@ def vapor_pressure_ratio(
         return float("nan")
     if xi > params.xi_max:
         return float("nan")
-    theta = reduced_temperature(temperature_c)
-    pi = _pi_25(xi, params) * _f_xi_theta(xi, theta, params)
+    theta = (float(temperature_c) + 273.15) / T_CRIT_H2O_K  # θ = T / T_c,H2O
+    pi_25 = (
+        1.0
+        - (1.0 + (xi / params.pi6) ** params.pi7) ** params.pi8
+        - params.pi9 * math.exp(-((xi - 0.1) ** 2) / 0.005)
+    )
+    a_term = 2.0 - (1.0 + (xi / params.pi0) ** params.pi1) ** params.pi2
+    b_term = (1.0 + (xi / params.pi3) ** params.pi4) ** params.pi5 - 1.0
+    pi = pi_25 * (a_term + b_term * theta)
     return max(0.0, min(1.0, float(pi)))
 
 
@@ -251,14 +239,6 @@ def water_activity_licl(
 ) -> float:
     """LiCl–H2O brine water activity (Conde 2004 Table 3)."""
     return vapor_pressure_ratio(salt_mass_fraction, temperature_c, LICL_VAPOR_PRESSURE)
-
-
-def water_activity_cacl2(
-    salt_mass_fraction: float,
-    temperature_c: float = 25.0,
-) -> float:
-    """CaCl2–H2O brine water activity (Conde 2004 Table 3)."""
-    return vapor_pressure_ratio(salt_mass_fraction, temperature_c, CACL2_VAPOR_PRESSURE)
 
 
 def equilibrium_salt_mass_fraction(
@@ -296,28 +276,6 @@ def equilibrium_salt_mass_fraction_licl(
     )
 
 
-def equilibrium_salt_mass_fraction_cacl2(
-    relative_humidity: float,
-    temperature_c: float = 25.0,
-) -> float:
-    """Equilibrium CaCl2 brine salt mass fraction at RH and T."""
-    return equilibrium_salt_mass_fraction(
-        relative_humidity,
-        CACL2_VAPOR_PRESSURE,
-        temperature_c=temperature_c,
-    )
-
-
-def water_vapor_pressure_pa(temperature_c: float) -> float:
-    """Saul–Wagner vapour pressure of pure liquid water (Conde 2004 Appendix A)."""
-    t_k = float(temperature_c) + 273.15
-    if t_k <= 273.15 or t_k >= T_CRIT_H2O_K:
-        return float("nan")
-    tau = 1.0 - t_k / T_CRIT_H2O_K
-    numer = sum(a * tau**exp for a, exp in zip(_SAUL_WAGNER_A, _SAUL_WAGNER_EXP, strict=True))
-    ln_p_pc = numer / (1.0 - tau)
-    return float(P_CRIT_H2O_PA * math.exp(ln_p_pc))
-
 # =============================================================================
 # Heat-transfer correlations (Hollands et al. 1976; Wilson Note S1)
 # =============================================================================
@@ -353,13 +311,6 @@ def parallel_plate_emissivity(eps_a: float, eps_b: float) -> float:
     return 1.0 / (1.0 / eps_a + 1.0 / eps_b - 1.0)
 
 
-def mass_transfer_g_from_h_conv_m_s(h_conv_w_m2_k: float) -> float:
-    """Note S1 Eq. S5 (Le ≈ 1): g = h_conv · D_air / k_air."""
-    if h_conv_w_m2_k <= 0.0:
-        return 0.0
-    return h_conv_w_m2_k * D_AIR_M2_S / K_AIR_W_M_K
-
-
 def radiative_exchange_w_m2(t_hot_c: float, t_cold_c: float, *, emissivity: float = 0.9) -> float:
     t_hot_k = t_hot_c + 273.15
     t_cold_k = t_cold_c + 273.15
@@ -372,43 +323,6 @@ def conduction_air_gap_w_m2(t_hot_c: float, t_cold_c: float, gap_m: float) -> fl
     return K_AIR_W_M_K / gap_m * (t_hot_c - t_cold_c)
 
 
-def _rayleigh_vapor_gap(
-    gap_m: float,
-    t_hot_c: float,
-    t_cold_c: float,
-) -> float:
-    """Rayleigh number for the vapor-gap cavity (properties at mean film temperature)."""
-    if gap_m <= 0.0:
-        return 0.0
-    delta_t = max(abs(t_hot_c - t_cold_c), 1e-6)
-    return (
-        GRAVITY_M_S2
-        * BETA_AIR_K
-        * delta_t
-        * gap_m**3
-        / (NU_AIR_M2_S * ALPHA_AIR_M2_S)
-    )
-
-
-def hollands_nu_eq_s3(ra: float, *, tilt_deg: float) -> float:
-    """Wilson Note S1 Eq. S3 — Hollands et al. 1976 tilted parallel plates.
-
-    Nu = 1 + 1.44 * [1 − 1708 sin(1.8θ)^1.6 / Ra cosθ]* [1 − 1708 / Ra cosθ]*
-           + [(Ra cosθ / 5830)^(1/3) − 1]*
-
-    where []* = max(0, ...).  Single expression valid for all Ra.
-    """
-    cos_t = max(math.cos(math.radians(tilt_deg)), 1e-6)
-    ra_cos = ra * cos_t
-    if ra_cos <= 0.0:
-        return 1.0
-    sin_18t_16 = math.sin(math.radians(1.8 * tilt_deg)) ** 1.6
-    f1 = max(0.0, 1.0 - 1708.0 * sin_18t_16 / ra_cos)
-    f2 = max(0.0, 1.0 - 1708.0 / ra_cos)
-    f3 = max(0.0, (ra_cos / 5830.0) ** (1.0 / 3.0) - 1.0)
-    return 1.0 + 1.44 * f1 * f2 + f3
-
-
 def hollands_vapor_gap_h_conv_w_m2_k(
     gap_m: float,
     t_hot_c: float,
@@ -416,17 +330,29 @@ def hollands_vapor_gap_h_conv_w_m2_k(
     *,
     tilt_deg: float = 35.0,
 ) -> float:
-    """Note S1 Eqs. S3–S4: h_conv,g = Nu · k_air / (L_g − H)."""
+    """Note S1 Eqs. S3–S4: h_conv,g = Nu · k_air / (L_g − H).
+
+    Nu follows Hollands et al. 1976 tilted-parallel-plates (Eq. S3):
+        Nu = 1 + 1.44 * [1 − 1708 sin(1.8θ)^1.6 / Ra cosθ]* [1 − 1708 / Ra cosθ]*
+               + [(Ra cosθ / 5830)^(1/3) − 1]*
+    where []* = max(0, ...), valid for all Ra. Ra is the Rayleigh number for the
+    vapor-gap cavity (properties at mean film temperature).
+    """
     if gap_m <= 0.0:
         return 0.0
-    ra = _rayleigh_vapor_gap(gap_m, t_hot_c, t_cold_c)
-    nu = hollands_nu_eq_s3(ra, tilt_deg=tilt_deg)
+    delta_t = max(abs(t_hot_c - t_cold_c), 1e-6)
+    ra = GRAVITY_M_S2 * BETA_AIR_K * delta_t * gap_m**3 / (NU_AIR_M2_S * ALPHA_AIR_M2_S)
+    cos_t = max(math.cos(math.radians(tilt_deg)), 1e-6)
+    ra_cos = ra * cos_t
+    if ra_cos <= 0.0:
+        nu = 1.0
+    else:
+        sin_18t_16 = math.sin(math.radians(1.8 * tilt_deg)) ** 1.6
+        f1 = max(0.0, 1.0 - 1708.0 * sin_18t_16 / ra_cos)
+        f2 = max(0.0, 1.0 - 1708.0 / ra_cos)
+        f3 = max(0.0, (ra_cos / 5830.0) ** (1.0 / 3.0) - 1.0)
+        nu = 1.0 + 1.44 * f1 * f2 + f3
     return nu * K_AIR_W_M_K / gap_m
-
-
-def vapor_gap_mass_transfer_inhibited(gap_m: float) -> bool:
-    """True when gap is below Wilson's ~7 mm thermobuoyancy / transport limit."""
-    return gap_m < VAPOR_GAP_TRANSPORT_MIN_M
 
 
 def wind_to_h_amb_w_m2_k(wind_speed_m_s: float, *, base: float = 10.0) -> float:
@@ -464,40 +390,30 @@ class SaltProperties:
     rh_max: float
 
 
-def _salt_catalog_path() -> Path:
-    return Path(__file__).resolve().parent / "data" / "materials" / "salt_catalog.csv"
-
-
-def _heat_of_desorption_path() -> Path:
-    return (
-        Path(__file__).resolve().parent
-        / "data"
-        / "materials"
-        / "salt_heat_of_desorption.csv"
-    )
-
-
-@lru_cache(maxsize=1)
-def _load_heat_of_desorption() -> dict[str, float]:
-    path = _heat_of_desorption_path()
-    if not path.is_file():
-        return {}
-    df = pd.read_csv(path)
-    out: dict[str, float] = {}
-    for _, row in df.iterrows():
-        name = str(row["salt_name"]).strip()
-        try:
-            h = float(row["heat_of_desorption_j_per_kg"])
-        except (TypeError, ValueError):
-            continue
-        if math.isfinite(h) and h > 0.0:
-            out[name] = h
-    return out
-
-
 @lru_cache(maxsize=1)
 def _load_salt_catalog() -> dict[str, SaltProperties]:
-    df = pd.read_csv(_salt_catalog_path())
+    def _load_heat_of_desorption() -> dict[str, float]:
+        path = (
+            Path(__file__).resolve().parent
+            / "data"
+            / "materials"
+            / "salt_heat_of_desorption.csv"
+        )
+        if not path.is_file():
+            return {}
+        df = pd.read_csv(path)
+        out: dict[str, float] = {}
+        for _, row in df.iterrows():
+            name = str(row["salt_name"]).strip()
+            try:
+                h = float(row["heat_of_desorption_j_per_kg"])
+            except (TypeError, ValueError):
+                continue
+            if math.isfinite(h) and h > 0.0:
+                out[name] = h
+        return out
+
+    df = pd.read_csv(Path(__file__).resolve().parent / "data" / "materials" / "salt_catalog.csv")
     h_des_table = _load_heat_of_desorption()
     out: dict[str, SaltProperties] = {}
     for _, row in df.iterrows():
@@ -541,7 +457,13 @@ def clamp_temperature_c(temperature_c: float) -> float:
 def saturation_vapor_pressure_pa(temperature_c: float) -> float:
     """Pure-water vapour pressure (Pa): Conde (2004) Saul–Wagner, Tetens fallback."""
     t = clamp_temperature_c(temperature_c)
-    p = water_vapor_pressure_pa(t)
+    t_k = t + 273.15
+    if t_k <= 273.15 or t_k >= T_CRIT_H2O_K:
+        p = float("nan")
+    else:
+        tau = 1.0 - t_k / T_CRIT_H2O_K
+        numer = sum(a * tau**exp for a, exp in zip(_SAUL_WAGNER_A, _SAUL_WAGNER_EXP, strict=True))
+        p = float(P_CRIT_H2O_PA * math.exp(numer / (1.0 - tau)))
     if math.isfinite(p):
         return p
     return 1000.0 * 0.61078 * math.exp(17.27 * t / (t + 237.3))
@@ -677,19 +599,10 @@ def chamber_c_s_with_constant_density(
     return cs_ref * (_CHAMBER_CS_CALIB_H0_MM / h0_mm)
 
 
-def _pam_licl_dvs_isotherm_path() -> Path:
-    return (
-        Path(__file__).resolve().parent
-        / "data"
-        / "materials"
-        / "PAM-LiCL_isotherm.csv"
-    )
-
-
 @lru_cache(maxsize=1)
 def _load_pam_licl_dvs_isotherm() -> tuple[np.ndarray, np.ndarray]:
     """Note S2 DVS isotherm: RH (%), gravimetric uptake (g water / g dry composite)."""
-    path = _pam_licl_dvs_isotherm_path()
+    path = Path(__file__).resolve().parent / "data" / "materials" / "PAM-LiCL_isotherm.csv"
     rh_pct: list[float] = []
     uptake_g_g: list[float] = []
     with path.open() as f:
@@ -724,18 +637,6 @@ def pam_licl_uptake_g_g_at_rh(rh_fraction: float) -> float:
 DRY_COMPOSITE_DENSITY_KG_M3: float = RHO_COMPOSITE_KG_M3 / (
     1.0 + pam_licl_uptake_g_g_at_rh(0.20)
 )
-
-
-def pam_licl_water_activity_from_uptake_g_g(uptake_g_g: float) -> float:
-    """Invert DVS isotherm: water activity from gravimetric uptake."""
-    rh_pct, uptake = _load_pam_licl_dvs_isotherm()
-    u = float(uptake_g_g)
-    if u <= float(uptake[0]):
-        return max(0.0, float(rh_pct[0]) / 100.0)
-    if u >= float(uptake[-1]):
-        return min(1.0, float(rh_pct[-1]) / 100.0)
-    aw = float(np.interp(u, uptake, rh_pct)) / 100.0
-    return max(0.0, min(1.0, aw))
 
 
 def pam_licl_dry_mass_kg_m2(
@@ -821,24 +722,6 @@ def brine_salt_fraction_from_composite(
     return max(0.0, min(1.0, f_c / denom))
 
 
-def licl_water_activity_at_brine_fraction(
-    brine_salt_fraction: float,
-    temperature_c: float,
-) -> float:
-    """LiCl brine water activity — Conde (2004) Table 3 vapour-pressure correlation."""
-    t_corr = min(float(temperature_c), 150.0)
-    return water_activity_licl(brine_salt_fraction, t_corr)
-
-
-def licl_equilibrium_brine_salt_fraction(
-    relative_humidity: float,
-    temperature_c: float = 25.0,
-) -> float:
-    """Invert Conde (2004) LiCl isotherm: brine salt fraction at equilibrium with RH."""
-    t_corr = min(float(temperature_c), 150.0)
-    return equilibrium_salt_mass_fraction_licl(relative_humidity, t_corr)
-
-
 def pam_licl_composite_salt_fraction(
     c_w: float,
     *,
@@ -860,26 +743,6 @@ def pam_licl_composite_salt_fraction(
     return mass_salt / total
 
 
-def licl_brine_salt_fraction_from_gel(
-    c_w: float,
-    *,
-    c_s: float,
-    h_m: float,
-    h0_ref_m: float,
-    formula_weight_g_mol: float,
-    salt_weight_factor: float = 1.0,
-) -> float:
-    """Brine salt mass fraction m_s / (m_s + m_w) — LiCl solution a_w,s (Eq. 5)."""
-    del h_m  # inventory referenced to H₀ (see pam_licl_gravimetric_uptake_g_g)
-    salt_mol_m2 = c_s * h0_ref_m
-    mass_salt = salt_mol_m2 * formula_weight_g_mol * salt_weight_factor / 1000.0
-    mass_water = max(0.0, c_w) * h0_ref_m * WATER_MOLAR_MASS_KG_MOL
-    total = mass_salt + mass_water
-    if total <= 0.0:
-        return 1.0
-    return mass_salt / total
-
-
 def water_activity_from_c_w(
     c_w: float,
     *,
@@ -894,27 +757,33 @@ def water_activity_from_c_w(
     salt_weight_factor: float = 1.0,
 ) -> float:
     """Brine a_w,s in Eq. 5 (Wilson Device); activity of water in the salt solution."""
-    del ions_per_formula, salt_to_polymer_ratio
+    del ions_per_formula, salt_to_polymer_ratio, h_m  # h_m unused; inventory is on H₀ basis
     if c_w <= 0.0 or c_s <= 0.0:
         return 1.0
     h_ref = h0_ref_m if h0_ref_m is not None else 0.004
-    h = h_m if h_m is not None else h_ref
     mw_eff = formula_weight_g_mol * salt_weight_factor
     if salt_name == "LiCl":
-        f_b = licl_brine_salt_fraction_from_gel(
-            c_w,
-            c_s=c_s,
-            h_m=h,
-            h0_ref_m=h_ref,
-            formula_weight_g_mol=formula_weight_g_mol,
-            salt_weight_factor=salt_weight_factor,
-        )
-        aw = licl_water_activity_at_brine_fraction(f_b, temperature_c)
+        # Brine salt mass fraction m_s / (m_s + m_w) -- LiCl solution a_w,s (Eq. 5).
+        salt_mol_m2 = c_s * h_ref
+        mass_salt = salt_mol_m2 * mw_eff / 1000.0
+        mass_water = max(0.0, c_w) * h_ref * WATER_MOLAR_MASS_KG_MOL
+        total = mass_salt + mass_water
+        f_b = 1.0 if total <= 0.0 else mass_salt / total
+        t_corr = min(float(temperature_c), 150.0)
+        aw = water_activity_licl(f_b, t_corr)
         if math.isfinite(aw):
             return aw
         return float("nan")
 
-    f_b = brine_salt_fraction_from_c_w(c_w, c_s, mw_eff)
+    # Brine salt mass fraction from gel water/salt molarities (mol/m³ gel).
+    if not all(map(math.isfinite, (c_w, c_s, mw_eff))) or c_w < 0.0 or c_s < 0.0:
+        return float("nan")
+    mass_water = c_w * 18.015 / 1000.0
+    mass_salt = c_s * mw_eff / 1000.0
+    total = mass_water + mass_salt
+    if total <= 0.0:
+        return float("nan")
+    f_b = float(mass_salt / total)
     aw = water_activity_at_brine_fraction(salt_name, f_b, temperature_c)
     if math.isfinite(aw):
         return aw
@@ -944,7 +813,7 @@ def equilibrium_c_w_at_rh(
     del h_m  # inventory referenced to H₀ (see pam_licl_gravimetric_uptake_g_g)
 
     if salt_name == "LiCl":
-        f_b = licl_equilibrium_brine_salt_fraction(rh, temperature_c)
+        f_b = equilibrium_salt_mass_fraction_licl(rh, min(float(temperature_c), 150.0))
     else:
         f_b = equilibrate_salt_mf(salt_name, rh, temperature_c)
         if not math.isfinite(f_b):
@@ -1069,7 +938,9 @@ def mf_CaCl2(relative_humidity: float, temperature_c: float = 25.0) -> float:
     """Equilibrium brine salt fraction for CaCl2 (Conde 2004)."""
     if not (0.0 < relative_humidity < 1.0) or temperature_c > 100.0:
         return float("nan")
-    return equilibrium_salt_mass_fraction_cacl2(relative_humidity, temperature_c)
+    return equilibrium_salt_mass_fraction(
+        relative_humidity, CACL2_VAPOR_PRESSURE, temperature_c=temperature_c
+    )
 
 
 def mf_MgCl2(relative_humidity: float) -> float:
@@ -1145,26 +1016,9 @@ def water_activity_at_brine_fraction(
     if rec.name == "CaCl2":
         if temperature_c > 100.0:
             return float("nan")
-        return water_activity_cacl2(f, temperature_c)
+        return vapor_pressure_ratio(f, temperature_c, CACL2_VAPOR_PRESSURE)
     return float("nan")
 
-
-def brine_salt_fraction_from_c_w(
-    c_w_mol_m3: float,
-    c_s_mol_m3: float,
-    effective_formula_weight_g_per_mol: float,
-) -> float:
-    """Brine salt mass fraction from gel water/salt molarities (mol/m³ gel)."""
-    if not all(map(math.isfinite, (c_w_mol_m3, c_s_mol_m3, effective_formula_weight_g_per_mol))):
-        return float("nan")
-    if c_w_mol_m3 < 0.0 or c_s_mol_m3 < 0.0:
-        return float("nan")
-    mass_water = c_w_mol_m3 * 18.015 / 1000.0
-    mass_salt = c_s_mol_m3 * effective_formula_weight_g_per_mol / 1000.0
-    total = mass_water + mass_salt
-    if total <= 0.0:
-        return float("nan")
-    return float(mass_salt / total)
 
 # =============================================================================
 # Gel energy balance with fixed-T_f loop-fluid HX (replaces Wilson solar stack)
@@ -1207,34 +1061,6 @@ def q_f_to_gel_w_m2(
     return hx_effectiveness_q(mdot_cp, ua_gel_w_k, t_f_c - t_gel_c)
 
 
-def _gel_residual(
-    t_gel: float,
-    *,
-    t_cond_c: float,
-    t_f_c: float,
-    m_dot_f_kg_s_m2: float,
-    m_des_kg_s_m2: float,
-    params: DeviceThermalParams,
-    vapor_gap_effective_m: float,
-) -> float:
-    """Steady gel balance: Q_f→gel − ṁ_des h_des − q_gap − q_rad = 0."""
-    t_gel = clamp_temperature_c(t_gel)
-    q_in = q_f_to_gel_w_m2(
-        t_gel_c=t_gel,
-        t_f_c=t_f_c,
-        m_dot_f_kg_s_m2=m_dot_f_kg_s_m2,
-        ua_gel_w_k=params.ua_gel_w_k,
-        fluid_cp_j_kg_k=params.fluid_cp_j_kg_k,
-    )
-    h_conv_g = hollands_vapor_gap_h_conv_w_m2_k(
-        vapor_gap_effective_m, t_gel, t_cond_c, tilt_deg=params.tilt_deg
-    )
-    eps_gc = parallel_plate_emissivity(params.eps_gel, params.eps_al)
-    q_rad = radiative_exchange_w_m2(t_gel, t_cond_c, emissivity=eps_gc)
-    q_des = m_des_kg_s_m2 * params.h_des_j_per_kg
-    return q_in - q_des - h_conv_g * (t_gel - t_cond_c) - q_rad
-
-
 def solve_steady_gel_thermal(
     *,
     t_cond_c: float,
@@ -1270,17 +1096,27 @@ def solve_steady_gel_thermal(
             q_f_to_gel_w_m2=0.0,
         )
 
-    t_gel0 = clamp_temperature_c(t_guess if t_guess is not None else t_f)
-    sol = root(
-        lambda x: _gel_residual(
-            float(x[0]),
-            t_cond_c=t_cond_c,
+    def _gel_residual(t_gel: float) -> float:
+        """Steady gel balance: Q_f→gel − ṁ_des h_des − q_gap − q_rad = 0."""
+        t_gel = clamp_temperature_c(t_gel)
+        q_in = q_f_to_gel_w_m2(
+            t_gel_c=t_gel,
             t_f_c=t_f,
             m_dot_f_kg_s_m2=mdot_f,
-            m_des_kg_s_m2=m_des_kg_s_m2,
-            params=params,
-            vapor_gap_effective_m=gap_m,
-        ),
+            ua_gel_w_k=params.ua_gel_w_k,
+            fluid_cp_j_kg_k=params.fluid_cp_j_kg_k,
+        )
+        h_conv_g = hollands_vapor_gap_h_conv_w_m2_k(
+            gap_m, t_gel, t_cond_c, tilt_deg=params.tilt_deg
+        )
+        eps_gc = parallel_plate_emissivity(params.eps_gel, params.eps_al)
+        q_rad = radiative_exchange_w_m2(t_gel, t_cond_c, emissivity=eps_gc)
+        q_des = m_des_kg_s_m2 * params.h_des_j_per_kg
+        return q_in - q_des - h_conv_g * (t_gel - t_cond_c) - q_rad
+
+    t_gel0 = clamp_temperature_c(t_guess if t_guess is not None else t_f)
+    sol = root(
+        lambda x: _gel_residual(float(x[0])),
         x0=np.array([t_gel0]),
         method="hybr",
         tol=1e-8,
@@ -1310,44 +1146,6 @@ def solve_steady_gel_thermal(
 MassTransferPhase = Literal["absorption", "desorption"]
 
 
-def _absorption_effective_water_activity(
-    c_w: float,
-    *,
-    t_gel_c: float,
-    params: MassTransferParams,
-    h_m: float,
-) -> float:
-    """Composite gel a_w for Eq. 5 during open absorption.
-
-    LiCl uses brine activity plus PAM-LiCl DVS cap (Note S2). Other salts use brine only.
-    """
-    aw_brine = water_activity_from_c_w(
-        c_w,
-        c_s=params.c_s_mol_m3,
-        ions_per_formula=params.ions_per_formula,
-        temperature_c=t_gel_c,
-        salt_name=params.salt_name,
-        formula_weight_g_mol=params.formula_weight_g_mol,
-        salt_to_polymer_ratio=params.salt_to_polymer_ratio,
-        h_m=h_m,
-        h0_ref_m=params.h0_ref_m,
-        salt_weight_factor=params.salt_weight_factor,
-    )
-    if params.salt_name != "LiCl":
-        return aw_brine
-    u = pam_licl_gravimetric_uptake_g_g(
-        c_w,
-        h_m,
-        h0_ref_m=params.h0_ref_m,
-        c_s_mol_m3=params.c_s_mol_m3,
-        formula_weight_g_mol=params.formula_weight_g_mol,
-        salt_to_polymer_ratio=params.salt_to_polymer_ratio,
-        salt_weight_factor=params.salt_weight_factor,
-    )
-    aw_dvs = pam_licl_water_activity_from_uptake_g_g(u)
-    return max(aw_brine, aw_dvs)
-
-
 def _mass_transfer_driving_force(
     c_w: float,
     *,
@@ -1358,12 +1156,40 @@ def _mass_transfer_driving_force(
     phase: MassTransferPhase,
 ) -> float:
     if phase == "absorption":
-        aw = _absorption_effective_water_activity(
+        # Composite gel a_w for Eq. 5 during open absorption. LiCl uses brine
+        # activity plus PAM-LiCl DVS cap (Note S2); other salts use brine only.
+        aw_brine = water_activity_from_c_w(
             c_w,
-            t_gel_c=t_gel_c,
-            params=params,
+            c_s=params.c_s_mol_m3,
+            ions_per_formula=params.ions_per_formula,
+            temperature_c=t_gel_c,
+            salt_name=params.salt_name,
+            formula_weight_g_mol=params.formula_weight_g_mol,
+            salt_to_polymer_ratio=params.salt_to_polymer_ratio,
             h_m=h_m,
+            h0_ref_m=params.h0_ref_m,
+            salt_weight_factor=params.salt_weight_factor,
         )
+        if params.salt_name != "LiCl":
+            aw = aw_brine
+        else:
+            u = pam_licl_gravimetric_uptake_g_g(
+                c_w,
+                h_m,
+                h0_ref_m=params.h0_ref_m,
+                c_s_mol_m3=params.c_s_mol_m3,
+                formula_weight_g_mol=params.formula_weight_g_mol,
+                salt_to_polymer_ratio=params.salt_to_polymer_ratio,
+                salt_weight_factor=params.salt_weight_factor,
+            )
+            rh_pct, uptake = _load_pam_licl_dvs_isotherm()
+            if u <= float(uptake[0]):
+                aw_dvs = max(0.0, float(rh_pct[0]) / 100.0)
+            elif u >= float(uptake[-1]):
+                aw_dvs = min(1.0, float(rh_pct[-1]) / 100.0)
+            else:
+                aw_dvs = max(0.0, min(1.0, float(np.interp(u, uptake, rh_pct)) / 100.0))
+            aw = max(aw_brine, aw_dvs)
         if not math.isfinite(aw):
             return 0.0
         return c_r - aw
@@ -1414,30 +1240,15 @@ def mass_transfer_g_m_s(
     if t_cond_c is None:
         raise ValueError("t_cond_c required for desorption mass transfer")
     gap_m = max(params.vapor_gap_m - h_m, 0.0)
-    if vapor_gap_mass_transfer_inhibited(gap_m):
+    if gap_m < VAPOR_GAP_TRANSPORT_MIN_M:  # Wilson's ~7 mm thermobuoyancy / transport limit
         return 0.0
     h_conv = hollands_vapor_gap_h_conv_w_m2_k(
         gap_m, t_gel_c, t_cond_c, tilt_deg=params.tilt_deg
     )
-    return mass_transfer_g_from_h_conv_m_s(h_conv)
-
-
-def _mass_transfer_prefactor(
-    *,
-    phase: MassTransferPhase,
-    params: MassTransferParams,
-    h_m: float,
-    t_gel_c: float,
-    t_cond_c: float | None = None,
-) -> float:
-    g = mass_transfer_g_m_s(
-        phase=phase,
-        params=params,
-        h_m=h_m,
-        t_gel_c=t_gel_c,
-        t_cond_c=t_cond_c,
-    )
-    return g / params.h0_ref_m
+    # Note S1 Eq. S5 (Le ≈ 1): g = h_conv · D_air / k_air.
+    if h_conv <= 0.0:
+        return 0.0
+    return h_conv * D_AIR_M2_S / K_AIR_W_M_K
 
 
 def concentration_ratio_absorption(rh: float) -> float:
@@ -1467,13 +1278,8 @@ def dc_w_dt(
     """Eq. 5: dc_w/dt (mol/m³/s); g_chamber/H₀ (abs) or heat–mass analogy (des)."""
     t_k = max(t_gel_c + 273.15, 200.0)
     p_sat = saturation_vapor_pressure_pa(t_gel_c)
-    pref = _mass_transfer_prefactor(
-        phase=phase,
-        params=params,
-        h_m=h_m,
-        t_gel_c=t_gel_c,
-        t_cond_c=t_cond_c,
-    )
+    g = mass_transfer_g_m_s(phase=phase, params=params, h_m=h_m, t_gel_c=t_gel_c, t_cond_c=t_cond_c)
+    pref = g / params.h0_ref_m
     driving = _mass_transfer_driving_force(
         c_w,
         t_gel_c=t_gel_c,
@@ -1589,14 +1395,6 @@ def _materials_dir() -> Path:
     return Path(__file__).resolve().parent / "data" / "materials"
 
 
-def _mof_catalog_path() -> Path:
-    return _materials_dir() / "mof_catalog.csv"
-
-
-def _isotherm_path(filename: str) -> Path:
-    return _materials_dir() / filename
-
-
 @lru_cache(maxsize=8)
 def _load_isotherm(filename: str) -> tuple[np.ndarray, np.ndarray]:
     """Load tabulated isotherm: RH fraction, equilibrium loading q (kg water / kg MOF).
@@ -1604,7 +1402,7 @@ def _load_isotherm(filename: str) -> tuple[np.ndarray, np.ndarray]:
     Source columns: relative pressure (%), H2O uptake (mol/kg). Relative pressure is
     treated as RH at the measurement temperature (303 K).
     """
-    path = _isotherm_path(filename)
+    path = _materials_dir() / filename
     rh_pct: list[float] = []
     mol_per_kg: list[float] = []
     with path.open() as f:
@@ -1625,7 +1423,7 @@ def _load_isotherm(filename: str) -> tuple[np.ndarray, np.ndarray]:
 
 @lru_cache(maxsize=1)
 def _load_mof_catalog() -> dict[str, MofProperties]:
-    df = pd.read_csv(_mof_catalog_path())
+    df = pd.read_csv(_materials_dir() / "mof_catalog.csv")
     out: dict[str, MofProperties] = {}
     for _, row in df.iterrows():
         name = str(row["mof"]).strip()
@@ -1651,55 +1449,6 @@ def get_mof(name: str) -> MofProperties:
     return catalog[name]
 
 
-def loading_at_rh(
-    rh_fraction: float,
-    *,
-    props: MofProperties,
-) -> float:
-    """Forward isotherm q(RH) from tabulated MIL-100(Fe) data at 303 K."""
-    rh_tab, q_tab = _load_isotherm(props.isotherm_file)
-    rh = max(0.0, min(1.0, float(rh_fraction)))
-    return float(np.interp(rh, rh_tab, q_tab))
-
-
-def water_activity_from_loading(
-    q_kg_kg: float,
-    *,
-    temperature_c: float,
-    props: MofProperties,
-) -> float:
-    """Invert tabulated q(RH): water activity (≈ RH) at equilibrium loading."""
-    del temperature_c  # isotherm measured at 303 K
-    q = max(0.0, min(props.q_max_kg_kg, float(q_kg_kg)))
-    if q <= 1e-12:
-        return 0.0
-    rh_tab, q_tab = _load_isotherm(props.isotherm_file)
-    if q >= float(q_tab[-1]) - 1e-12:
-        return float(rh_tab[-1])
-    if q <= float(q_tab[0]):
-        return float(rh_tab[0])
-    return float(np.interp(q, q_tab, rh_tab))
-
-
-def equilibrium_loading_at_rh(
-    rh: float,
-    *,
-    temperature_c: float,
-    props: MofProperties,
-) -> float:
-    del temperature_c  # isotherm measured at 303 K
-    return loading_at_rh(rh, props=props)
-
-
-def fabrication_q_initial(*, props: MofProperties, temperature_c: float = 25.0) -> float:
-    """Initial MOF loading after fabrication at ~20% RH ambient."""
-    return equilibrium_loading_at_rh(
-        FABRICATION_EQUILIBRIUM_RH,
-        temperature_c=temperature_c,
-        props=props,
-    )
-
-
 def dq_dt(
     q_kg_kg: float,
     *,
@@ -1711,7 +1460,19 @@ def dq_dt(
 ) -> float:
     """dq/dt (kg/kg/s) — Wilson Eq. 5 analog for a fixed MOF coating inventory."""
     q = max(Q_MIN_KG_KG, min(props.q_max_kg_kg, float(q_kg_kg)))
-    aw = water_activity_from_loading(q, temperature_c=t_gel_c, props=props)
+
+    # Invert tabulated q(RH): water activity (≈ RH) at equilibrium loading
+    # (isotherm measured at 303 K, so t_gel_c is unused here).
+    if q <= 1e-12:
+        aw = 0.0
+    else:
+        rh_tab, q_tab = _load_isotherm(props.isotherm_file)
+        if q >= float(q_tab[-1]) - 1e-12:
+            aw = float(rh_tab[-1])
+        elif q <= float(q_tab[0]):
+            aw = float(rh_tab[0])
+        else:
+            aw = float(np.interp(q, q_tab, rh_tab))
     delta = driving - aw
     if phase == "absorption":
         if delta <= 0.0:
@@ -1787,18 +1548,11 @@ class _MofMassBridge:
     salt_to_polymer_ratio: float = 1.0
 
 
-def water_kg_m2(q_kg_kg: float, *, props: MofProperties) -> float:
-    return q_kg_kg * props.m_ads_kg_m2
-
-
 SorbentKind = Literal["hydrogel", "mof"]
 
 # =============================================================================
 # Unified sorbent interface: PAM-salt hydrogel (default) or MOF coating
 # =============================================================================
-
-if TYPE_CHECKING:
-    from waste_heat_lumped.simulation import DeviceConfig
 
 # PhaseResult.c_w stores mol/m³ for hydrogel or kg/kg loading for MOF.
 LOADING_MIN = Q_MIN_KG_KG
@@ -1832,21 +1586,11 @@ def initial_loading(config: DeviceConfig) -> float:
             hydrogel_thickness_m=config.hydrogel_thickness_m,
             hydrogel_density_kg_m3=config.hydrogel_density_kg_m3,
         )
-    return fabrication_q_initial(props=config.mof())
-
-
-def water_in_gel_l_m2(
-    c_w: float,
-    h_m: float,
-    *,
-    h0_ref_m: float = 0.004,
-    dvs_basis: bool = True,
-) -> float:
-    """Water in gel (L/m²). Paper Fig. S1D uses DVS gravimetric basis (g/g × m_dry)."""
-    if dvs_basis:
-        u = pam_licl_gravimetric_uptake_g_g(c_w, h_m, h0_ref_m=h0_ref_m)
-        return u * pam_licl_dry_mass_kg_m2(h0_ref_m)
-    return max(0.0, c_w) * h_m * WATER_MOLAR_MASS_KG_MOL
+    # Initial MOF loading after fabrication at ~20% RH ambient (isotherm at 303 K).
+    props = config.mof()
+    rh_tab, q_tab = _load_isotherm(props.isotherm_file)
+    rh = max(0.0, min(1.0, float(FABRICATION_EQUILIBRIUM_RH)))
+    return float(np.interp(rh, rh_tab, q_tab))
 
 
 def c_w_from_water_in_gel_l_m2(water_l_m2: float, h_m: float) -> float:
@@ -1863,8 +1607,11 @@ def water_in_sorbent_l_m2(
     config: DeviceConfig,
 ) -> float:
     if is_hydrogel(config):
-        return water_in_gel_l_m2(loading, h_m, h0_ref_m=config.hydrogel_thickness_m)
-    return water_kg_m2(loading, props=config.mof())
+        # Water in gel (L/m²), DVS gravimetric basis (g/g x m_dry; paper Fig. S1D).
+        h0_ref_m = config.hydrogel_thickness_m
+        u = pam_licl_gravimetric_uptake_g_g(loading, h_m, h0_ref_m=h0_ref_m)
+        return u * pam_licl_dry_mass_kg_m2(h0_ref_m)
+    return loading * config.mof().m_ads_kg_m2
 
 
 def clip_loading(loading: float, *, config: DeviceConfig) -> float:

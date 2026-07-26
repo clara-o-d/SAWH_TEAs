@@ -55,8 +55,25 @@ class WeatherClient:
         retry_backoff_factor: float = 2.0,
     ) -> None:
         self._timeout = session_timeout
-        self._session = self._build_session(
-            cache_dir, max_retries=max_retries, retry_backoff_factor=retry_backoff_factor
+        if cache_dir is not None:
+            try:
+                import requests_cache
+
+                session = requests_cache.CachedSession(
+                    cache_name=str(Path(cache_dir) / "openmeteo_cache"),
+                    backend="sqlite",
+                    expire_after=timedelta(hours=6),
+                )
+            except ImportError:
+                warnings.warn("requests-cache not installed; caching disabled.", stacklevel=2)
+                session = requests.Session()
+        else:
+            session = requests.Session()
+        self._session = retry_requests.retry(
+            session,
+            retries=max_retries,
+            backoff_factor=retry_backoff_factor,
+            status_to_retry=(429, 500, 502, 503, 504),
         )
 
     def get_historical(
@@ -77,7 +94,10 @@ class WeatherClient:
             "timezone": timezone,
             "hourly": ",".join(DEFAULT_VARIABLES),
         }
-        return self._fetch(_ARCHIVE_URL, params, latitude, longitude)
+        response = self._session.get(_ARCHIVE_URL, params=params, timeout=self._timeout)
+        _raise_for_openmeteo_error(response)
+        data = response.json()
+        return self._series_to_dataframe(data, "hourly", latitude, longitude)
 
     def get_historical_forecast_site_weather(
         self,
@@ -106,46 +126,6 @@ class WeatherClient:
         df_hourly = self._series_to_dataframe(data, "hourly", latitude, longitude)
         df_min15 = self._series_to_dataframe(data, "minutely_15", latitude, longitude)
         return df_hourly, df_min15
-
-    def _build_session(
-        self,
-        cache_dir: str | Path | None,
-        *,
-        max_retries: int,
-        retry_backoff_factor: float,
-    ) -> requests.Session:
-        if cache_dir is not None:
-            try:
-                import requests_cache
-
-                session = requests_cache.CachedSession(
-                    cache_name=str(Path(cache_dir) / "openmeteo_cache"),
-                    backend="sqlite",
-                    expire_after=timedelta(hours=6),
-                )
-            except ImportError:
-                warnings.warn("requests-cache not installed; caching disabled.", stacklevel=2)
-                session = requests.Session()
-        else:
-            session = requests.Session()
-        return retry_requests.retry(
-            session,
-            retries=max_retries,
-            backoff_factor=retry_backoff_factor,
-            status_to_retry=(429, 500, 502, 503, 504),
-        )
-
-    def _fetch(
-        self,
-        url: str,
-        params: dict,
-        latitude: float,
-        longitude: float,
-    ) -> pd.DataFrame:
-        response = self._session.get(url, params=params, timeout=self._timeout)
-        _raise_for_openmeteo_error(response)
-        data = response.json()
-        return self._series_to_dataframe(data, "hourly", latitude, longitude)
 
     @staticmethod
     def _series_to_dataframe(
@@ -191,15 +171,58 @@ STEPS_PER_HOUR = 4
 STEPS_PER_DAY = 24 * STEPS_PER_HOUR
 
 
-def _slot_index(index: pd.DatetimeIndex) -> pd.Series:
-    """Map each timestamp to its 15-min slot within the calendar day (0..95)."""
-    return index.hour * STEPS_PER_HOUR + index.minute // 15
+def representative_mean_day_df(
+    df: pd.DataFrame,
+    *,
+    reference_day: date | None = None,
+) -> pd.DataFrame:
+    """Build one synthetic calendar day from mean slot values across *df*.
 
+    Uses native 15-min resolution when timestamps are 15-min spaced; otherwise
+    falls back to hourly means expanded to 96 slots.
+    """
+    if df.empty:
+        raise ValueError("Cannot build representative mean day from empty weather data.")
 
-def _mean_by_slot(df: pd.DataFrame, col: str) -> tuple[float, ...]:
-    grouped = df[col].groupby(_slot_index(df.index)).mean()
-    fallback = float(grouped.mean()) if len(grouped) else 0.0
-    return tuple(float(grouped.get(s, fallback)) for s in range(STEPS_PER_DAY))
+    ref = reference_day or date(2024, 1, 1)
+    base = pd.Timestamp(ref)
+    if df.index.tz is not None:
+        base = base.tz_localize(df.index.tz)
+
+    median_delta_min = float(df.index.to_series().diff().dropna().dt.total_seconds().median() / 60.0)
+    if median_delta_min <= 20.0:
+        rh = representative_kinetics_rh_from_minutely_15(df)
+        temp = representative_kinetics_temperature_from_minutely_15(df)
+        solar = representative_kinetics_solar_from_minutely_15(df)
+        wind = representative_kinetics_wind_from_minutely_15(df)
+        freq = "15min"
+    else:
+        rh_h = representative_hourly_rh_from_hourly(df)
+        temp_h = representative_hourly_temperature_from_hourly(df)
+        solar_h = representative_hourly_solar_from_hourly(df)
+        wind_h = representative_hourly_wind_from_hourly(df)
+        rh = _expand_hourly_to_15min(rh_h)
+        temp = _expand_hourly_to_15min(temp_h)
+        solar = _expand_hourly_to_15min(solar_h)
+        wind = _expand_hourly_to_15min(wind_h)
+        freq = "15min"
+
+    index = pd.date_range(base, periods=STEPS_PER_DAY, freq=freq)
+    out = pd.DataFrame(
+        {
+            "relative_humidity_2m": [r * 100.0 for r in rh],
+            "temperature_2m": temp,
+            "shortwave_radiation": solar,
+            "wind_speed_10m": wind,
+        },
+        index=index,
+    )
+    out.index.name = "time"
+    if "latitude" in df.columns:
+        out["latitude"] = float(df["latitude"].iloc[0])
+    if "longitude" in df.columns:
+        out["longitude"] = float(df["longitude"].iloc[0])
+    return out
 
 
 def representative_kinetics_rh_from_minutely_15(df: pd.DataFrame) -> tuple[float, ...]:
@@ -208,6 +231,13 @@ def representative_kinetics_rh_from_minutely_15(df: pd.DataFrame) -> tuple[float
         raise KeyError("DataFrame must contain column 'relative_humidity_2m'")
     rh_pct = _mean_by_slot(df, "relative_humidity_2m")
     return tuple(r / 100.0 for r in rh_pct)
+
+
+def _mean_by_slot(df: pd.DataFrame, col: str) -> tuple[float, ...]:
+    slot = df.index.hour * STEPS_PER_HOUR + df.index.minute // 15  # 15-min slot 0..95
+    grouped = df[col].groupby(slot).mean()
+    fallback = float(grouped.mean()) if len(grouped) else 0.0
+    return tuple(float(grouped.get(s, fallback)) for s in range(STEPS_PER_DAY))
 
 
 def representative_kinetics_temperature_from_minutely_15(df: pd.DataFrame) -> tuple[float, ...]:
@@ -277,58 +307,22 @@ def _expand_hourly_to_15min(hourly: tuple[float, ...]) -> tuple[float, ...]:
     return tuple(out[:STEPS_PER_DAY])
 
 
-def representative_mean_day_df(
-    df: pd.DataFrame,
-    *,
-    reference_day: date | None = None,
-) -> pd.DataFrame:
-    """Build one synthetic calendar day from mean slot values across *df*.
-
-    Uses native 15-min resolution when timestamps are 15-min spaced; otherwise
-    falls back to hourly means expanded to 96 slots.
-    """
-    if df.empty:
-        raise ValueError("Cannot build representative mean day from empty weather data.")
-
-    ref = reference_day or date(2024, 1, 1)
-    base = pd.Timestamp(ref)
-    if df.index.tz is not None:
-        base = base.tz_localize(df.index.tz)
-
-    median_delta_min = float(df.index.to_series().diff().dropna().dt.total_seconds().median() / 60.0)
-    if median_delta_min <= 20.0:
-        rh = representative_kinetics_rh_from_minutely_15(df)
-        temp = representative_kinetics_temperature_from_minutely_15(df)
-        solar = representative_kinetics_solar_from_minutely_15(df)
-        wind = representative_kinetics_wind_from_minutely_15(df)
-        freq = "15min"
-    else:
-        rh_h = representative_hourly_rh_from_hourly(df)
-        temp_h = representative_hourly_temperature_from_hourly(df)
-        solar_h = representative_hourly_solar_from_hourly(df)
-        wind_h = representative_hourly_wind_from_hourly(df)
-        rh = _expand_hourly_to_15min(rh_h)
-        temp = _expand_hourly_to_15min(temp_h)
-        solar = _expand_hourly_to_15min(solar_h)
-        wind = _expand_hourly_to_15min(wind_h)
-        freq = "15min"
-
-    index = pd.date_range(base, periods=STEPS_PER_DAY, freq=freq)
-    out = pd.DataFrame(
-        {
-            "relative_humidity_2m": [r * 100.0 for r in rh],
-            "temperature_2m": temp,
-            "shortwave_radiation": solar,
-            "wind_speed_10m": wind,
-        },
-        index=index,
-    )
-    out.index.name = "time"
-    if "latitude" in df.columns:
-        out["latitude"] = float(df["latitude"].iloc[0])
-    if "longitude" in df.columns:
-        out["longitude"] = float(df["longitude"].iloc[0])
+def site_row_from_hourly(df: pd.DataFrame) -> dict[str, float]:
+    """Mean daily diurnal extrema for SAWH site diagnostics."""
+    rh_high, rh_low = diurnal_rh_from_hourly(df)
+    out: dict[str, float] = {"rh_high_frac": rh_high, "rh_low_frac": rh_low}
+    if "temperature_2m" in df.columns:
+        t_high, t_low = diurnal_temperature_from_hourly(df)
+        out["temperature_high_c"] = t_high
+        out["temperature_low_c"] = t_low
+    if "shortwave_radiation" in df.columns:
+        out["solar_irradiance_w_per_m2"] = mean_daily_max_irradiance_from_hourly(df)
     return out
+
+
+def diurnal_rh_from_hourly(df: pd.DataFrame) -> tuple[float, float]:
+    """Mean of daily max RH and mean of daily min RH (fractions 0-1)."""
+    return _diurnal_extrema(df, "relative_humidity_2m", scale=1.0 / 100.0)
 
 
 def _diurnal_extrema(df: pd.DataFrame, col: str, scale: float = 1.0) -> tuple[float, float]:
@@ -337,11 +331,6 @@ def _diurnal_extrema(df: pd.DataFrame, col: str, scale: float = 1.0) -> tuple[fl
         raise KeyError(f"DataFrame must contain column {col!r}")
     r = df[col].resample("D")
     return (float(r.max().mean() * scale), float(r.min().mean() * scale))
-
-
-def diurnal_rh_from_hourly(df: pd.DataFrame) -> tuple[float, float]:
-    """Mean of daily max RH and mean of daily min RH (fractions 0-1)."""
-    return _diurnal_extrema(df, "relative_humidity_2m", scale=1.0 / 100.0)
 
 
 def diurnal_temperature_from_hourly(df: pd.DataFrame) -> tuple[float, float]:
@@ -355,19 +344,6 @@ def mean_daily_max_irradiance_from_hourly(df: pd.DataFrame) -> float:
     if col not in df.columns:
         raise KeyError(f"DataFrame must contain column {col!r}")
     return float(df[col].resample("D").max().mean())
-
-
-def site_row_from_hourly(df: pd.DataFrame) -> dict[str, float]:
-    """Mean daily diurnal extrema for SAWH site diagnostics."""
-    rh_high, rh_low = diurnal_rh_from_hourly(df)
-    out: dict[str, float] = {"rh_high_frac": rh_high, "rh_low_frac": rh_low}
-    if "temperature_2m" in df.columns:
-        t_high, t_low = diurnal_temperature_from_hourly(df)
-        out["temperature_high_c"] = t_high
-        out["temperature_low_c"] = t_low
-    if "shortwave_radiation" in df.columns:
-        out["solar_irradiance_w_per_m2"] = mean_daily_max_irradiance_from_hourly(df)
-    return out
 
 # =============================================================================
 # Weather profiles for fluid-heated daily-cycle SAWH

@@ -1,5 +1,5 @@
 # Reference defaults for solar_lumped (not loaded automatically by code).
-# Authoritative economics: src/solar_lumped/data/economics/lcow_economic_params.csv
+# Authoritative physics + economics: docs/parameters.xlsx
 
 device:
   hydrogel_thickness_mm: 4.0
@@ -7,7 +7,7 @@ device:
   insulation_gap_mm: 5.0
   salt: LiCl
   salt_to_polymer_ratio: 4.0
-  tilt_deg: 35.0
+  tilt_deg: 30.0
 
 weather:
   mode: real  # real (mean diurnal from year) | baseline | atacama-replay | cambridge-replay

@@ -19,6 +19,7 @@ dependencies = [
     "requests>=2.31",
     "requests-cache>=1.2",
     "retry-requests>=2.0",
+    "openpyxl>=3.1",
 ]
 
 [project.optional-dependencies]
@@ -39,7 +40,6 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-"solar_lumped.data.economics" = ["*.csv"]
 "solar_lumped.data.materials" = ["*.csv"]
 "solar_lumped.weather" = ["*.csv"]
 

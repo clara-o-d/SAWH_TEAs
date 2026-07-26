@@ -27,13 +27,13 @@ from solar_lumped.economics import LCOEconomicParams, lcow_from_daily_yield
 from solar_lumped.physics import (
     ABSORBER_THERMAL_MASS_J_M2_K,
     CP_AL_J_KG_K,
-    C_W_MAX_MOL_M3,
-    C_W_MIN_MOL_M3,
     DEFAULT_MOF_NAME,
     DRY_COMPOSITE_DENSITY_KG_M3,
     EPS_ABS,
+    EPS_ABS_IR_CASE2,
     EPS_AL,
     EPS_GEL,
+    EPS_GLASS_IR_CASE2,
     FIN_AREA_RATIO,
     GLASS_THERMAL_MASS_J_M2_K,
     G_CHAMBER_M_S,
@@ -45,6 +45,7 @@ from solar_lumped.physics import (
     L_G_M,
     L_INS_M,
     RHO_AL_KG_M3,
+    SALT_TO_POLYMER_RATIO_DEFAULT,
     STEFAN_BOLTZMANN_W_M2_K4,
     SaltProperties,
     SorbentKind,
@@ -57,10 +58,7 @@ from solar_lumped.physics import (
     ThermalState,
     clamp_temperature_c,
     clip_loading,
-    concentration_ratio_desorption,
     condenser_h_conv_w_m2_k,
-    dH_dt,
-    dc_w_dt,
     desorption_water_activity,
     evaluate_mass_rates,
     gel_thermal_mass_j_m2_k,
@@ -118,7 +116,7 @@ class DeviceConfig:
     sorbent: SorbentKind = "hydrogel"
     mof_name: str = DEFAULT_MOF_NAME
     salt_name: str = "LiCl"
-    salt_to_polymer_ratio: float = 4.0
+    salt_to_polymer_ratio: float = SALT_TO_POLYMER_RATIO_DEFAULT
     hydrogel_thickness_m: float = H0_M
     vapor_gap_m: float = L_G_M
     insulation_gap_m: float = L_INS_M
@@ -237,8 +235,8 @@ class DeviceConfig:
             # emissivities instead of Wilson's original blackbody/cavity
             # approximation (case1, still reachable via an explicit `thermal=`
             # override with eps_abs_ir=eps_glass_ir=1.0 -- see DeviceThermalParams).
-            eps_abs_ir=0.05,
-            eps_glass_ir=0.95,
+            eps_abs_ir=EPS_ABS_IR_CASE2,
+            eps_glass_ir=EPS_GLASS_IR_CASE2,
         )
 
     def condenser_thermal_mass_j_m2_k(self) -> float:
@@ -257,8 +255,8 @@ class DeviceConfig:
     def baseline(cls, **overrides: object) -> DeviceConfig:
         """Wilson Fig. 2 baseline device (Table S3, tilt 30°, fin area ratio 7.1)."""
         base = {
-            "tilt_deg": 30.0,
-            "fin_area_ratio": 7.1,
+            "tilt_deg": TILT_DEG,
+            "fin_area_ratio": FIN_AREA_RATIO,
         }
         base.update(overrides)
         return cls(**base)  # type: ignore[arg-type]
@@ -334,98 +332,6 @@ def _m_des_calc(
     return m_calc, state.t_gel_c, dc, state
 
 
-def _solve_m_des_coupled(
-    *,
-    loading: float,
-    h_m: float,
-    t_cond_c: float,
-    t_amb_c: float,
-    q_solar_w_m2: float,
-    h_amb: float,
-    mass: MassTransferParams,
-    thermal: DeviceThermalParams,
-    vapor_gap_m: float,
-    config: DeviceConfig,
-    t_guess: tuple[float, float, float] | None,
-) -> tuple[float, float, float, ThermalState]:
-    """Root of m_calc(m) - m = 0 so Eqs. 1–4 and Eq. 5 agree (avoids fixed-point cycling)."""
-
-    def residual(m_des: float) -> float:
-        m_calc, _, _, _ = _m_des_calc(
-            m_des,
-            loading=loading,
-            h_m=h_m,
-            t_cond_c=t_cond_c,
-            t_amb_c=t_amb_c,
-            q_solar_w_m2=q_solar_w_m2,
-            h_amb=h_amb,
-            mass=mass,
-            thermal=thermal,
-            vapor_gap_m=vapor_gap_m,
-            config=config,
-            t_guess=t_guess,
-        )
-        if not math.isfinite(m_calc):
-            return -m_des
-        return m_calc - m_des
-
-    m_at_zero, t_gel0, dc0, state0 = _m_des_calc(
-        0.0,
-        loading=loading,
-        h_m=h_m,
-        t_cond_c=t_cond_c,
-        t_amb_c=t_amb_c,
-        q_solar_w_m2=q_solar_w_m2,
-        h_amb=h_amb,
-        mass=mass,
-        thermal=thermal,
-        vapor_gap_m=vapor_gap_m,
-        config=config,
-        t_guess=t_guess,
-    )
-    if not math.isfinite(m_at_zero) or not math.isfinite(t_gel0):
-        state0 = solve_steady_thermal(
-            t_cond_c=t_cond_c,
-            t_amb_c=t_amb_c,
-            q_solar_w_m2=q_solar_w_m2,
-            m_des_kg_s_m2=0.0,
-            h_amb=h_amb,
-            params=thermal,
-            h_m=h_m,
-            t_guess=t_guess,
-            vapor_gap_m=vapor_gap_m,
-        )
-        return 0.0, state0.t_gel_c, 0.0, state0
-    if m_at_zero <= 0.0:
-        return 0.0, t_gel0, dc0, state0
-
-    hi = max(m_at_zero * 2.0, 1e-8)
-    while hi < _M_DES_BRACKET_MAX and residual(hi) > 0.0:
-        hi *= 2.0
-    if residual(hi) >= 0.0:
-        return 0.0, t_gel0, dc0, state0
-
-    try:
-        m_star = float(brentq(residual, 0.0, hi, xtol=1e-14))
-    except ValueError:
-        return 0.0, t_gel0, dc0, state0
-    m_calc, t_gel, dc, state = _m_des_calc(
-        m_star,
-        loading=loading,
-        h_m=h_m,
-        t_cond_c=t_cond_c,
-        t_amb_c=t_amb_c,
-        q_solar_w_m2=q_solar_w_m2,
-        h_amb=h_amb,
-        mass=mass,
-        thermal=thermal,
-        vapor_gap_m=vapor_gap_m,
-        config=config,
-        t_guess=(state0.t_gel_c, state0.t_abs_c, state0.t_glass_c),
-    )
-    return m_calc, t_gel, dc, state
-
-
 def evaluate_coupled_rates(
     *,
     c_w: float,
@@ -491,7 +397,29 @@ def evaluate_coupled_rates(
         )
 
     t_cond = clamp_temperature_c(t_cond_c)
-    m_des, t_gel, dc, state = _solve_m_des_coupled(
+
+    # Root of m_calc(m) - m = 0 so Eqs. 1-4 and Eq. 5 agree (avoids fixed-point cycling).
+    def _m_des_residual(m_des_guess: float) -> float:
+        m_calc, _, _, _ = _m_des_calc(
+            m_des_guess,
+            loading=c_w,
+            h_m=h_m,
+            t_cond_c=t_cond,
+            t_amb_c=t_amb_c,
+            q_solar_w_m2=q_sol,
+            h_amb=h_amb,
+            mass=mass,
+            thermal=thermal,
+            vapor_gap_m=gap_eff,
+            config=config,
+            t_guess=t_guess,
+        )
+        if not math.isfinite(m_calc):
+            return -m_des_guess
+        return m_calc - m_des_guess
+
+    m_at_zero, t_gel0, dc0, state0 = _m_des_calc(
+        0.0,
         loading=c_w,
         h_m=h_m,
         t_cond_c=t_cond,
@@ -504,6 +432,48 @@ def evaluate_coupled_rates(
         config=config,
         t_guess=t_guess,
     )
+    if not math.isfinite(m_at_zero) or not math.isfinite(t_gel0):
+        state0 = solve_steady_thermal(
+            t_cond_c=t_cond,
+            t_amb_c=t_amb_c,
+            q_solar_w_m2=q_sol,
+            m_des_kg_s_m2=0.0,
+            h_amb=h_amb,
+            params=thermal,
+            h_m=h_m,
+            t_guess=t_guess,
+            vapor_gap_m=gap_eff,
+        )
+        m_des, t_gel, dc, state = 0.0, state0.t_gel_c, 0.0, state0
+    elif m_at_zero <= 0.0:
+        m_des, t_gel, dc, state = 0.0, t_gel0, dc0, state0
+    else:
+        hi = max(m_at_zero * 2.0, 1e-8)
+        while hi < _M_DES_BRACKET_MAX and _m_des_residual(hi) > 0.0:
+            hi *= 2.0
+        if _m_des_residual(hi) >= 0.0:
+            m_des, t_gel, dc, state = 0.0, t_gel0, dc0, state0
+        else:
+            try:
+                m_star = float(brentq(_m_des_residual, 0.0, hi, xtol=1e-14))
+            except ValueError:
+                m_des, t_gel, dc, state = 0.0, t_gel0, dc0, state0
+            else:
+                m_des, t_gel, dc, state = _m_des_calc(
+                    m_star,
+                    loading=c_w,
+                    h_m=h_m,
+                    t_cond_c=t_cond,
+                    t_amb_c=t_amb_c,
+                    q_solar_w_m2=q_sol,
+                    h_amb=h_amb,
+                    mass=mass,
+                    thermal=thermal,
+                    vapor_gap_m=gap_eff,
+                    config=config,
+                    t_guess=(state0.t_gel_c, state0.t_abs_c, state0.t_glass_c),
+                )
+
     _, dh, _ = evaluate_mass_rates(
         loading=c_w,
         h_m=h_m,
@@ -1435,125 +1405,6 @@ def _phase_weather(
     )
 
 
-def _absorption_device_temps(
-    abs_res: PhaseResult,
-    profile: PhaseProfile,
-    config: DeviceConfig,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    mass = config.mass_params()
-    thermal = config.thermal_params()
-    n = len(profile.temperature_c)
-    dt = profile.dt_s
-    h_min = config.hydrogel_thickness_m
-    t_abs: list[float] = []
-    t_glass: list[float] = []
-    t_cond: list[float] = []
-    t_gel: list[float] = []
-    guess: tuple[float, float, float] | None = None
-
-    for k in range(len(abs_res.time_s)):
-        i = _profile_index(float(abs_res.time_s[k]), dt, n)
-        h_m = max(float(abs_res.H[k]), h_min)
-        t_amb = profile.temperature_c[i]
-        rates = evaluate_coupled_rates(
-            c_w=float(abs_res.c_w[k]),
-            h_m=h_m,
-            t_cond_c=t_amb,
-            t_amb_c=t_amb,
-            rh=profile.relative_humidity[i],
-            q_solar_w_m2=0.0,
-            h_amb=profile.h_amb_w_m2_k[i],
-            phase="absorption",
-            mass=mass,
-            thermal=thermal,
-            vapor_gap_m=config.vapor_gap_m,
-            condenser_thermal_mass_j_m2_k=config.condenser_thermal_mass_j_m2_k(),
-            fin_area_ratio=config.fin_area_ratio,
-            h_fg_j_per_kg=config.h_fg_j_per_kg,
-            config=config,
-            t_guess=guess,
-        )
-        guess = (
-            rates.thermal.t_gel_c,
-            rates.thermal.t_abs_c,
-            rates.thermal.t_glass_c,
-        )
-        t_abs.append(rates.thermal.t_abs_c)
-        t_glass.append(rates.thermal.t_glass_c)
-        t_cond.append(t_amb)
-        t_gel.append(rates.t_gel_c)
-
-    return (
-        np.array(t_abs),
-        np.array(t_glass),
-        np.array(t_cond),
-        np.array(t_gel),
-    )
-
-
-def _desorption_device_temps(
-    des_res: PhaseResult,
-    profile: PhaseProfile,
-    config: DeviceConfig,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    if des_res.t_cond_c is None:
-        raise ValueError("Desorption result missing condenser temperature history.")
-
-    if des_res.t_abs_c is not None and des_res.t_glass_c is not None:
-        return des_res.t_abs_c, des_res.t_glass_c, des_res.t_cond_c, des_res.t_gel_c
-
-    mass = config.mass_params()
-    thermal = config.thermal_params()
-    tmass = config.condenser_thermal_mass_j_m2_k()
-    n = len(profile.temperature_c)
-    dt = profile.dt_s
-    h_min = config.hydrogel_thickness_m
-    t_abs: list[float] = []
-    t_glass: list[float] = []
-    guess: tuple[float, float, float] | None = None
-
-    for k in range(len(des_res.time_s)):
-        i = _profile_index(float(des_res.time_s[k]), dt, n)
-        h_m = max(float(des_res.H[k]), h_min)
-        rates = evaluate_coupled_rates(
-            c_w=float(des_res.c_w[k]),
-            h_m=h_m,
-            t_cond_c=float(des_res.t_cond_c[k]),
-            t_amb_c=profile.temperature_c[i],
-            rh=profile.relative_humidity[i],
-            q_solar_w_m2=profile.solar_w_m2[i],
-            h_amb=profile.h_amb_w_m2_k[i],
-            phase="desorption",
-            mass=mass,
-            thermal=thermal,
-            vapor_gap_m=config.vapor_gap_m,
-            condenser_thermal_mass_j_m2_k=tmass,
-            fin_area_ratio=config.fin_area_ratio,
-            h_fg_j_per_kg=config.h_fg_j_per_kg,
-            config=config,
-            t_guess=guess,
-            h_amb_cond=(
-                profile.h_amb_cond_w_m2_k[i]
-                if profile.h_amb_cond_w_m2_k is not None
-                else None
-            ),
-        )
-        guess = (
-            rates.thermal.t_gel_c,
-            rates.thermal.t_abs_c,
-            rates.thermal.t_glass_c,
-        )
-        t_abs.append(rates.thermal.t_abs_c)
-        t_glass.append(rates.thermal.t_glass_c)
-
-    return (
-        np.array(t_abs),
-        np.array(t_glass),
-        des_res.t_cond_c,
-        des_res.t_gel_c,
-    )
-
-
 def detailed_series(
     profile: DailyWeatherProfile,
     abs_res: PhaseResult,
@@ -1561,12 +1412,120 @@ def detailed_series(
     config: DeviceConfig,
 ) -> DetailedSeries:
     """Build full-cycle device and weather trajectories."""
-    abs_t_abs, abs_t_glass, abs_t_cond, abs_t_gel = _absorption_device_temps(
-        abs_res, profile.absorption, config
-    )
-    des_t_abs, des_t_glass, des_t_cond, des_t_gel = _desorption_device_temps(
-        des_res, profile.desorption, config
-    )
+
+    def _absorption_device_temps() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        mass = config.mass_params()
+        thermal = config.thermal_params()
+        abs_profile = profile.absorption
+        n = len(abs_profile.temperature_c)
+        dt = abs_profile.dt_s
+        h_min = config.hydrogel_thickness_m
+        t_abs: list[float] = []
+        t_glass: list[float] = []
+        t_cond: list[float] = []
+        t_gel: list[float] = []
+        guess: tuple[float, float, float] | None = None
+
+        for k in range(len(abs_res.time_s)):
+            i = _profile_index(float(abs_res.time_s[k]), dt, n)
+            h_m = max(float(abs_res.H[k]), h_min)
+            t_amb = abs_profile.temperature_c[i]
+            rates = evaluate_coupled_rates(
+                c_w=float(abs_res.c_w[k]),
+                h_m=h_m,
+                t_cond_c=t_amb,
+                t_amb_c=t_amb,
+                rh=abs_profile.relative_humidity[i],
+                q_solar_w_m2=0.0,
+                h_amb=abs_profile.h_amb_w_m2_k[i],
+                phase="absorption",
+                mass=mass,
+                thermal=thermal,
+                vapor_gap_m=config.vapor_gap_m,
+                condenser_thermal_mass_j_m2_k=config.condenser_thermal_mass_j_m2_k(),
+                fin_area_ratio=config.fin_area_ratio,
+                h_fg_j_per_kg=config.h_fg_j_per_kg,
+                config=config,
+                t_guess=guess,
+            )
+            guess = (
+                rates.thermal.t_gel_c,
+                rates.thermal.t_abs_c,
+                rates.thermal.t_glass_c,
+            )
+            t_abs.append(rates.thermal.t_abs_c)
+            t_glass.append(rates.thermal.t_glass_c)
+            t_cond.append(t_amb)
+            t_gel.append(rates.t_gel_c)
+
+        return (
+            np.array(t_abs),
+            np.array(t_glass),
+            np.array(t_cond),
+            np.array(t_gel),
+        )
+
+    def _desorption_device_temps() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+        if des_res.t_cond_c is None:
+            raise ValueError("Desorption result missing condenser temperature history.")
+
+        if des_res.t_abs_c is not None and des_res.t_glass_c is not None:
+            return des_res.t_abs_c, des_res.t_glass_c, des_res.t_cond_c, des_res.t_gel_c
+
+        mass = config.mass_params()
+        thermal = config.thermal_params()
+        tmass = config.condenser_thermal_mass_j_m2_k()
+        des_profile = profile.desorption
+        n = len(des_profile.temperature_c)
+        dt = des_profile.dt_s
+        h_min = config.hydrogel_thickness_m
+        t_abs: list[float] = []
+        t_glass: list[float] = []
+        guess: tuple[float, float, float] | None = None
+
+        for k in range(len(des_res.time_s)):
+            i = _profile_index(float(des_res.time_s[k]), dt, n)
+            h_m = max(float(des_res.H[k]), h_min)
+            rates = evaluate_coupled_rates(
+                c_w=float(des_res.c_w[k]),
+                h_m=h_m,
+                t_cond_c=float(des_res.t_cond_c[k]),
+                t_amb_c=des_profile.temperature_c[i],
+                rh=des_profile.relative_humidity[i],
+                q_solar_w_m2=des_profile.solar_w_m2[i],
+                h_amb=des_profile.h_amb_w_m2_k[i],
+                phase="desorption",
+                mass=mass,
+                thermal=thermal,
+                vapor_gap_m=config.vapor_gap_m,
+                condenser_thermal_mass_j_m2_k=tmass,
+                fin_area_ratio=config.fin_area_ratio,
+                h_fg_j_per_kg=config.h_fg_j_per_kg,
+                config=config,
+                t_guess=guess,
+                h_amb_cond=(
+                    des_profile.h_amb_cond_w_m2_k[i]
+                    if des_profile.h_amb_cond_w_m2_k is not None
+                    else None
+                ),
+            )
+            guess = (
+                rates.thermal.t_gel_c,
+                rates.thermal.t_abs_c,
+                rates.thermal.t_glass_c,
+            )
+            t_abs.append(rates.thermal.t_abs_c)
+            t_glass.append(rates.thermal.t_glass_c)
+
+        return (
+            np.array(t_abs),
+            np.array(t_glass),
+            des_res.t_cond_c,
+            des_res.t_gel_c,
+        )
+
+    abs_t_abs, abs_t_glass, abs_t_cond, abs_t_gel = _absorption_device_temps()
+    des_t_abs, des_t_glass, des_t_cond, des_t_gel = _desorption_device_temps()
 
     abs_weather = _phase_weather(abs_res.time_s, profile.absorption)
     des_weather = _phase_weather(des_res.time_s, profile.desorption)
@@ -1741,7 +1700,6 @@ def water_inventory_series(
     config: DeviceConfig,
 ) -> WaterInventorySeries:
     """Concatenate absorption and desorption phases into one sorbent water trajectory."""
-    h0_ref = config.hydrogel_thickness_m
     w_abs = np.array(
         [
             water_in_sorbent_l_m2(float(c), float(h), config=config)
@@ -2059,101 +2017,6 @@ DAILY_SUMMARY_COLUMNS: tuple[str, ...] = (
 )
 
 
-def simulate_single_day(
-    profile: DailyWeatherProfile,
-    config: DeviceConfig,
-    *,
-    c_w_initial: float | None = None,
-    h_initial: float | None = None,
-) -> tuple[float, float, tuple[float, float]]:
-    """Run one day; return (yield, eta, (c_w, H) after desorption)."""
-    yield_kg, eta, _, des_res = run_daily_cycle(
-        profile,
-        config,
-        c_w_initial=c_w_initial,
-        h_initial=h_initial,
-    )
-    return yield_kg, eta, cycle_end_state(des_res)
-
-
-def _water_uptake_l_m2(
-    inventory: WaterInventorySeries,
-    *,
-    absorption_end_s: float,
-) -> float:
-    abs_mask = inventory.time_s <= absorption_end_s + 1e-9
-    water_abs = inventory.water_l_m2[abs_mask]
-    if len(water_abs) == 0:
-        return 0.0
-    start = float(water_abs[0])
-    return max(0.0, float(water_abs.max()) - start)
-
-
-def _record_from_day(
-    day_key: date,
-    profile: DailyWeatherProfile,
-    day_df: pd.DataFrame,
-    config: DeviceConfig,
-    *,
-    c_w_initial: float | None,
-    h_initial: float | None,
-) -> tuple[DailySimulationRecord, tuple[float, float], DetailedSeries, WaterInventorySeries]:
-    yield_kg, eta, abs_res, des_res = run_daily_cycle(
-        profile,
-        config,
-        c_w_initial=c_w_initial,
-        h_initial=h_initial,
-    )
-    detailed = detailed_series(profile, abs_res, des_res, config)
-    inventory = water_inventory_series(abs_res, des_res, config=config)
-    weather = day_weather_stats(day_df)
-
-    record = DailySimulationRecord(
-        date=day_key,
-        day_of_year=day_key.timetuple().tm_yday,
-        rh_avg_frac=weather.get("rh_avg_frac", 0.0),
-        rh_peak_frac=weather.get("rh_peak_frac", 0.0),
-        temp_avg_c=weather.get("temp_avg_c", 0.0),
-        temp_peak_c=weather.get("temp_peak_c", 0.0),
-        solar_avg_w_m2=weather.get("solar_avg_w_m2", 0.0),
-        solar_peak_w_m2=weather.get("solar_peak_w_m2", 0.0),
-        daily_yield_kg_m2=float(yield_kg),
-        daily_yield_l_m2=float(yield_kg),
-        eta_thermal=float(eta),
-        water_uptake_l_m2=_water_uptake_l_m2(
-            inventory,
-            absorption_end_s=inventory.absorption_end_s,
-        ),
-        water_release_l_m2=float(yield_kg),
-        t_abs_peak_c=float(detailed.t_abs_c.max()),
-        t_glass_peak_c=float(detailed.t_glass_c.max()),
-        t_cond_peak_c=float(detailed.t_cond_c.max()),
-        t_gel_peak_c=float(detailed.t_gel_c.max()),
-    )
-    return record, cycle_end_state(des_res), detailed, inventory
-
-
-def warmup_on_profile(
-    profile: DailyWeatherProfile,
-    config: DeviceConfig,
-    *,
-    n_cycles: int = 2,
-    c_w_initial: float | None = None,
-    h_initial: float | None = None,
-) -> tuple[float, float]:
-    """Run repeated daily cycles on one profile; return post-desorption (c_w, H)."""
-    cw, h = c_w_initial, h_initial
-    for _ in range(max(0, n_cycles)):
-        _, _, _, des_res = run_daily_cycle(
-            profile,
-            config,
-            c_w_initial=cw,
-            h_initial=h,
-        )
-        cw, h = cycle_end_state(des_res)
-    return cw, h
-
-
 def simulate_annual_year(
     day_items: list[tuple[date, DailyWeatherProfile, pd.DataFrame]],
     config: DeviceConfig,
@@ -2167,16 +2030,60 @@ def simulate_annual_year(
     if not day_items:
         return []
 
+    def _record_from_day(
+        day_key: date,
+        profile: DailyWeatherProfile,
+        day_df: pd.DataFrame,
+        *,
+        c_w_initial: float | None,
+        h_initial: float | None,
+    ) -> tuple[DailySimulationRecord, tuple[float, float], DetailedSeries, WaterInventorySeries]:
+        yield_kg, eta, abs_res, des_res = run_daily_cycle(
+            profile,
+            config,
+            c_w_initial=c_w_initial,
+            h_initial=h_initial,
+        )
+        detailed = detailed_series(profile, abs_res, des_res, config)
+        inventory = water_inventory_series(abs_res, des_res, config=config)
+        weather = day_weather_stats(day_df)
+
+        abs_mask = inventory.time_s <= inventory.absorption_end_s + 1e-9
+        water_abs = inventory.water_l_m2[abs_mask]
+        water_uptake_l_m2 = (
+            max(0.0, float(water_abs.max()) - float(water_abs[0])) if len(water_abs) else 0.0
+        )
+
+        record = DailySimulationRecord(
+            date=day_key,
+            day_of_year=day_key.timetuple().tm_yday,
+            rh_avg_frac=weather.get("rh_avg_frac", 0.0),
+            rh_peak_frac=weather.get("rh_peak_frac", 0.0),
+            temp_avg_c=weather.get("temp_avg_c", 0.0),
+            temp_peak_c=weather.get("temp_peak_c", 0.0),
+            solar_avg_w_m2=weather.get("solar_avg_w_m2", 0.0),
+            solar_peak_w_m2=weather.get("solar_peak_w_m2", 0.0),
+            daily_yield_kg_m2=float(yield_kg),
+            daily_yield_l_m2=float(yield_kg),
+            eta_thermal=float(eta),
+            water_uptake_l_m2=water_uptake_l_m2,
+            water_release_l_m2=float(yield_kg),
+            t_abs_peak_c=float(detailed.t_abs_c.max()),
+            t_glass_peak_c=float(detailed.t_glass_c.max()),
+            t_cond_peak_c=float(detailed.t_cond_c.max()),
+            t_gel_peak_c=float(detailed.t_gel_c.max()),
+        )
+        return record, cycle_end_state(des_res), detailed, inventory
+
     jan1 = date(day_items[0][0].year, 1, 1)
     warmup_profile = next(
         (prof for day_key, prof, _ in day_items if day_key == jan1),
         day_items[0][1],
     )
-    cw, h = warmup_on_profile(
-        warmup_profile,
-        config,
-        n_cycles=warmup_cycles,
-    )
+    cw, h = None, None
+    for _ in range(max(0, warmup_cycles)):
+        _, _, _, des_res = run_daily_cycle(warmup_profile, config, c_w_initial=cw, h_initial=h)
+        cw, h = cycle_end_state(des_res)
 
     records: list[DailySimulationRecord] = []
     n_days = len(day_items)
@@ -2185,7 +2092,6 @@ def simulate_annual_year(
             day_key,
             profile,
             day_df,
-            config,
             c_w_initial=cw,
             h_initial=h,
         )
@@ -2254,9 +2160,8 @@ def aggregate_yields(
     cw, h = c_w_initial, h_initial
     for i, item in enumerate(day_profiles):
         prof = item[1] if isinstance(item, tuple) else item
-        y, eta, (cw, h) = simulate_single_day(
-            prof, config, c_w_initial=cw, h_initial=h
-        )
+        y, eta, _, des_res = run_daily_cycle(prof, config, c_w_initial=cw, h_initial=h)
+        cw, h = cycle_end_state(des_res)
         if warmup and i == 0:
             continue
         if y >= 0.0:

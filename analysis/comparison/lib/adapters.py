@@ -106,7 +106,7 @@ def _scenario_econ(params_cls: Any) -> Any:
     """Baseline ``LCOEconomicParams`` with the shared scenario econ fields pinned.
 
     The packages' own CSV defaults already match ``scenario.py`` (device
-    lifetime 20 yr, discount rate 0.08, electricity $0.10/kWh) as of writing;
+    lifetime 20 yr, discount rate 0.03, electricity $0.10/kWh) as of writing;
     this makes that agreement explicit/robust instead of implicit, so a
     future change to one package's CSV defaults can't silently desync the
     comparison from its own stated scenario.

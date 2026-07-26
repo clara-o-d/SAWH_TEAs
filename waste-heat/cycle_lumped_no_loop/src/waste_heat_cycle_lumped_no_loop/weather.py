@@ -49,8 +49,25 @@ class WeatherClient:
         retry_backoff_factor: float = 2.0,
     ) -> None:
         self._timeout = session_timeout
-        self._session = self._build_session(
-            cache_dir, max_retries=max_retries, retry_backoff_factor=retry_backoff_factor
+        if cache_dir is not None:
+            try:
+                import requests_cache
+
+                session = requests_cache.CachedSession(
+                    cache_name=str(Path(cache_dir) / "openmeteo_cache"),
+                    backend="sqlite",
+                    expire_after=timedelta(hours=6),
+                )
+            except ImportError:
+                warnings.warn("requests-cache not installed; caching disabled.", stacklevel=2)
+                session = requests.Session()
+        else:
+            session = requests.Session()
+        self._session = retry_requests.retry(
+            session,
+            retries=max_retries,
+            backoff_factor=retry_backoff_factor,
+            status_to_retry=(429, 500, 502, 503, 504),
         )
 
     def get_historical(
@@ -71,7 +88,10 @@ class WeatherClient:
             "timezone": timezone,
             "hourly": ",".join(DEFAULT_VARIABLES),
         }
-        return self._fetch(_ARCHIVE_URL, params, latitude, longitude)
+        response = self._session.get(_ARCHIVE_URL, params=params, timeout=self._timeout)
+        _raise_for_openmeteo_error(response)
+        data = response.json()
+        return self._series_to_dataframe(data, "hourly", latitude, longitude)
 
     def get_historical_forecast_site_weather(
         self,
@@ -100,46 +120,6 @@ class WeatherClient:
         df_hourly = self._series_to_dataframe(data, "hourly", latitude, longitude)
         df_min15 = self._series_to_dataframe(data, "minutely_15", latitude, longitude)
         return df_hourly, df_min15
-
-    def _build_session(
-        self,
-        cache_dir: str | Path | None,
-        *,
-        max_retries: int,
-        retry_backoff_factor: float,
-    ) -> requests.Session:
-        if cache_dir is not None:
-            try:
-                import requests_cache
-
-                session = requests_cache.CachedSession(
-                    cache_name=str(Path(cache_dir) / "openmeteo_cache"),
-                    backend="sqlite",
-                    expire_after=timedelta(hours=6),
-                )
-            except ImportError:
-                warnings.warn("requests-cache not installed; caching disabled.", stacklevel=2)
-                session = requests.Session()
-        else:
-            session = requests.Session()
-        return retry_requests.retry(
-            session,
-            retries=max_retries,
-            backoff_factor=retry_backoff_factor,
-            status_to_retry=(429, 500, 502, 503, 504),
-        )
-
-    def _fetch(
-        self,
-        url: str,
-        params: dict,
-        latitude: float,
-        longitude: float,
-    ) -> pd.DataFrame:
-        response = self._session.get(url, params=params, timeout=self._timeout)
-        _raise_for_openmeteo_error(response)
-        data = response.json()
-        return self._series_to_dataframe(data, "hourly", latitude, longitude)
 
     @staticmethod
     def _series_to_dataframe(
@@ -180,13 +160,9 @@ STEPS_PER_HOUR = 4
 STEPS_PER_DAY = 24 * STEPS_PER_HOUR
 
 
-def _slot_index(index: pd.DatetimeIndex) -> pd.Series:
-    """Map each timestamp to its 15-min slot within the calendar day (0..95)."""
-    return index.hour * STEPS_PER_HOUR + index.minute // 15
-
-
 def _mean_by_slot(df: pd.DataFrame, col: str) -> tuple[float, ...]:
-    grouped = df[col].groupby(_slot_index(df.index)).mean()
+    slot = df.index.hour * STEPS_PER_HOUR + df.index.minute // 15
+    grouped = df[col].groupby(slot).mean()
     fallback = float(grouped.mean()) if len(grouped) else 0.0
     return tuple(float(grouped.get(s, fallback)) for s in range(STEPS_PER_DAY))
 
@@ -337,26 +313,6 @@ def _steps_for_tau(tau_half_s: float, dt_s: float = PROFILE_DT_S) -> int:
     return max(4, int(round(tau_half_s / dt_s)))
 
 
-def _constant_profile(
-    *,
-    n: int,
-    t_amb_c: float,
-    rh: float,
-    h_amb: float,
-    t_wh_in_c: float,
-    m_dot_wh: float,
-    dt_s: float,
-) -> HalfCycleProfile:
-    return HalfCycleProfile(
-        temperature_c=(t_amb_c,) * n,
-        relative_humidity=(rh,) * n,
-        h_amb_w_m2_k=(h_amb,) * n,
-        t_wh_in_c=(t_wh_in_c,) * n,
-        m_dot_wh_kg_s_m2=(m_dot_wh,) * n,
-        dt_s=dt_s,
-    )
-
-
 def datacenter_baseline_profile(
     *,
     tau_half_s: float | None = None,
@@ -369,13 +325,12 @@ def datacenter_baseline_profile(
 ) -> HalfCycleProfile:
     tau = tau_half_s if tau_half_s is not None else TAU_HALF_S
     n = _steps_for_tau(tau, dt_s)
-    return _constant_profile(
-        n=n,
-        t_amb_c=t_amb_c,
-        rh=rh,
-        h_amb=h_amb,
-        t_wh_in_c=t_wh_in_c,
-        m_dot_wh=m_dot_wh_kg_s_m2,
+    return HalfCycleProfile(
+        temperature_c=(t_amb_c,) * n,
+        relative_humidity=(rh,) * n,
+        h_amb_w_m2_k=(h_amb,) * n,
+        t_wh_in_c=(t_wh_in_c,) * n,
+        m_dot_wh_kg_s_m2=(m_dot_wh_kg_s_m2,) * n,
         dt_s=dt_s,
     )
 

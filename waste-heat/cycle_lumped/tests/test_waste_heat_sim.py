@@ -80,7 +80,7 @@ def test_half_cycle_ends_at_rh_threshold(config_hydrogel: DeviceConfig, profile)
 
 
 def test_equal_mass_transfer_over_half_cycle(config_hydrogel: DeviceConfig, profile):
-    """``sorbent._equalize_mass_rates`` scales m_ads/m_des to a common value at every
+    """``mass_rates``'s equalization step scales m_ads/m_des to a common value at every
     instant, so their time integrals must match to numerical precision, not just
     approximately -- a wide tolerance here would silently hide a broken equalizer."""
     cyc = run_cycle(profile, config_hydrogel)
