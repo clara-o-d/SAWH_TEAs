@@ -4,17 +4,17 @@ import math
 
 import pytest
 
-from solar_lumped.physics.adsorbent import (
+from solar_lumped.physics import (
     DEFAULT_MOF_NAME,
     equilibrium_loading_at_rh,
     get_mof,
     loading_at_rh,
     water_activity_from_loading,
 )
-from solar_lumped.physics.salt_properties import WATER_MOLAR_MASS_KG_MOL
-from solar_lumped.simulation.device_config import DeviceConfig
-from solar_lumped.simulation.ode_system import run_daily_cycle
-from solar_lumped.weather.profiles import baseline_profile
+from solar_lumped.physics import WATER_MOLAR_MASS_KG_MOL
+from solar_lumped.simulation import DeviceConfig
+from solar_lumped.simulation import run_daily_cycle
+from solar_lumped.weather import baseline_profile
 
 
 def test_mil100_isotherm_units():

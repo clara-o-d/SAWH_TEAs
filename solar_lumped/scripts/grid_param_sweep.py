@@ -11,9 +11,11 @@ sites: a single annual mean day (--resolution single, 12x cheaper) is within
 Built for cluster job arrays: one invocation = one site. Pass --site-index
 (e.g. $SLURM_ARRAY_TASK_ID) to pick a site out of the full --step land grid,
 or --lat/--lon directly for a one-off/local run. Each invocation runs the full
-parameter grid (default 5x3x3x3x3 = 405 combos) for that one site and appends
-one row per combo to --output-csv, skipping combos already present when
---resume is set (so a preempted job array task can be resubmitted safely).
+parameter grid (default 5x5x5 = 125 combos, sweeping hydrogel thickness, fin
+area ratio, and vapor gap) for that one site and appends one row per combo to
+--output-csv, skipping combos already present when --resume is set (so a
+preempted job array task can be resubmitted safely). eps_abs and tau_glass
+are fixed constants per case (--eps-abs/--tau-glass), not swept.
 
 The weather fetch (and the monthly mean-day profiles built from it) happen
 once per site and are reused across all parameter combos — only the device
@@ -35,41 +37,39 @@ _SRC = _REPO / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from solar_lumped.physics.device_balances import DeviceThermalParams  # noqa: E402
-from solar_lumped.simulation.device_config import DeviceConfig  # noqa: E402
-from solar_lumped.simulation.ode_system import find_cyclic_state, run_daily_cycle  # noqa: E402
-from solar_lumped.weather.client import WeatherClient  # noqa: E402
-from solar_lumped.weather.climate import representative_mean_day_df  # noqa: E402
-from solar_lumped.weather.land_grid import grid_land_points  # noqa: E402
-from solar_lumped.weather.profiles import DailyWeatherProfile, profile_from_day_df  # noqa: E402
+from solar_lumped.physics import DeviceThermalParams  # noqa: E402
+from solar_lumped.simulation import DeviceConfig  # noqa: E402
+from solar_lumped.simulation import find_cyclic_state, run_daily_cycle  # noqa: E402
+from solar_lumped.weather import WeatherClient  # noqa: E402
+from solar_lumped.weather import representative_mean_day_df  # noqa: E402
+from solar_lumped.weather import grid_land_points  # noqa: E402
+from solar_lumped.weather import DailyWeatherProfile, profile_from_day_df  # noqa: E402
 
 # Baselines: table_s3.H0_M=4mm, L_G_M=40mm, EPS_ABS=0.95, TAU_GLASS=0.9, FIN_AREA_RATIO=7.1.
 DEFAULT_HYDROGEL_THICKNESS_MM: tuple[float, ...] = (1.0, 3.25, 5.5, 7.75, 10.0)
-DEFAULT_EPS_ABS: tuple[float, ...] = (0.85, 0.90, 0.95)
-DEFAULT_TAU_GLASS: tuple[float, ...] = (0.80, 0.85, 0.90)
-DEFAULT_FIN_AREA_RATIO: tuple[float, ...] = (3.0, 7.1, 12.0)
-# Vapor gap is fixed (not swept) -- see --vapor-gap-mm.
-DEFAULT_VAPOR_GAP_MM: float = 40.0
+DEFAULT_FIN_AREA_RATIO: tuple[float, ...] = (3.0, 5.275, 7.55, 9.825, 12.0)
+DEFAULT_VAPOR_GAP_MM: tuple[float, ...] = (20.0, 30.0, 40.0, 50.0, 60.0)
+# eps_abs and tau_glass are fixed constants per case (not swept) -- see --eps-abs/--tau-glass.
+DEFAULT_EPS_ABS: float = 0.95
+DEFAULT_TAU_GLASS: float = 0.90
 
 
 @dataclass(frozen=True, slots=True)
 class Combo:
     hydrogel_thickness_mm: float
-    eps_abs: float
-    tau_glass: float
     fin_area_ratio: float
+    vapor_gap_mm: float
 
 
 def combo_grid(
     *,
     hydrogel_thickness_mm: list[float],
-    eps_abs: list[float],
-    tau_glass: list[float],
     fin_area_ratio: list[float],
+    vapor_gap_mm: list[float],
 ) -> list[Combo]:
     return [
         Combo(*vals)
-        for vals in itertools.product(hydrogel_thickness_mm, eps_abs, tau_glass, fin_area_ratio)
+        for vals in itertools.product(hydrogel_thickness_mm, fin_area_ratio, vapor_gap_mm)
     ]
 
 
@@ -80,15 +80,16 @@ def build_device_config(
     salt_loading: float,
     insulation_gap_mm: float,
     tilt_deg: float,
-    vapor_gap_mm: float,
+    eps_abs: float,
+    tau_glass: float,
     eps_abs_ir: float | None = None,
     eps_glass_ir: float | None = None,
 ) -> DeviceConfig:
     thermal = DeviceThermalParams(
         insulation_gap_m=insulation_gap_mm * 1e-3,
-        vapor_gap_m=vapor_gap_mm * 1e-3,
-        eps_abs=combo.eps_abs,
-        tau_glass=combo.tau_glass,
+        vapor_gap_m=combo.vapor_gap_mm * 1e-3,
+        eps_abs=eps_abs,
+        tau_glass=tau_glass,
         tilt_deg=tilt_deg,
         eps_abs_ir=eps_abs_ir,
         eps_glass_ir=eps_glass_ir,
@@ -97,7 +98,7 @@ def build_device_config(
         salt_name=salt,
         salt_to_polymer_ratio=salt_loading,
         hydrogel_thickness_m=combo.hydrogel_thickness_mm * 1e-3,
-        vapor_gap_m=vapor_gap_mm * 1e-3,
+        vapor_gap_m=combo.vapor_gap_mm * 1e-3,
         insulation_gap_m=insulation_gap_mm * 1e-3,
         fin_area_ratio=combo.fin_area_ratio,
         tilt_deg=tilt_deg,
@@ -239,9 +240,8 @@ def _existing_combo_keys(path: Path, lat: float, lon: float) -> set[tuple]:
         keys.add(
             (
                 round(float(row["hydrogel_thickness_mm"]), 6),
-                round(float(row["eps_abs"]), 6),
-                round(float(row["tau_glass"]), 6),
                 round(float(row["fin_area_ratio"]), 6),
+                round(float(row["vapor_gap_mm"]), 6),
             )
         )
     return keys
@@ -270,9 +270,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--insulation-gap-mm", type=float, default=5.0)
     p.add_argument("--tilt-deg", type=float, default=35.0)
     p.add_argument("--hydrogel-thickness-mm", type=float, nargs="+", default=list(DEFAULT_HYDROGEL_THICKNESS_MM))
-    p.add_argument("--eps-abs", type=float, nargs="+", default=list(DEFAULT_EPS_ABS))
-    p.add_argument("--tau-glass", type=float, nargs="+", default=list(DEFAULT_TAU_GLASS))
     p.add_argument("--fin-area-ratio", type=float, nargs="+", default=list(DEFAULT_FIN_AREA_RATIO))
+    p.add_argument("--vapor-gap-mm", type=float, nargs="+", default=list(DEFAULT_VAPOR_GAP_MM))
+    p.add_argument(
+        "--eps-abs", type=float, default=DEFAULT_EPS_ABS,
+        help="Absorber solar absorptivity (fixed constant, not swept). Case 1/2 baseline: 0.95; "
+        "Case 3 'optical material limits': 1.0.",
+    )
+    p.add_argument(
+        "--tau-glass", type=float, default=DEFAULT_TAU_GLASS,
+        help="Glass solar transmittance (fixed constant, not swept). Case 1/2 baseline: 0.90; "
+        "Case 3: 1.0.",
+    )
     p.add_argument(
         "--eps-abs-ir", type=float, default=None,
         help="Absorber IR emissivity for the modified Eqs. 3/4 radiative exchange (fixed constant, "
@@ -284,12 +293,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--eps-glass-ir", type=float, default=None,
         help="Glass IR emissivity for the modified Eqs. 3/4 radiative exchange (fixed constant, not "
         "swept). See --eps-abs-ir. (Case 2: 0.95; Case 3: 0.0.)",
-    )
-    p.add_argument(
-        "--vapor-gap-mm",
-        type=float,
-        default=DEFAULT_VAPOR_GAP_MM,
-        help="Fixed (not swept).",
     )
     p.add_argument(
         "--warmup-method",
@@ -343,9 +346,8 @@ def main(argv: list[str] | None = None) -> int:
 
     all_combos = combo_grid(
         hydrogel_thickness_mm=args.hydrogel_thickness_mm,
-        eps_abs=args.eps_abs,
-        tau_glass=args.tau_glass,
         fin_area_ratio=args.fin_area_ratio,
+        vapor_gap_mm=args.vapor_gap_mm,
     )
     end = None if args.combo_limit is None else args.combo_offset + args.combo_limit
     combos = all_combos[args.combo_offset : end]
@@ -385,9 +387,8 @@ def main(argv: list[str] | None = None) -> int:
     for i, combo in enumerate(combos, start=1):
         key = (
             round(combo.hydrogel_thickness_mm, 6),
-            round(combo.eps_abs, 6),
-            round(combo.tau_glass, 6),
             round(combo.fin_area_ratio, 6),
+            round(combo.vapor_gap_mm, 6),
         )
         if key in done:
             continue
@@ -397,7 +398,8 @@ def main(argv: list[str] | None = None) -> int:
             salt_loading=args.salt_loading,
             insulation_gap_mm=args.insulation_gap_mm,
             tilt_deg=args.tilt_deg,
-            vapor_gap_mm=args.vapor_gap_mm,
+            eps_abs=args.eps_abs,
+            tau_glass=args.tau_glass,
             eps_abs_ir=args.eps_abs_ir,
             eps_glass_ir=args.eps_glass_ir,
         )
@@ -417,12 +419,12 @@ def main(argv: list[str] | None = None) -> int:
                 "mean_solar_w_m2": f"{mean_solar:.2f}",
                 "salt": args.salt,
                 "hydrogel_thickness_mm": combo.hydrogel_thickness_mm,
-                "eps_abs": combo.eps_abs,
-                "tau_glass": combo.tau_glass,
+                "eps_abs": args.eps_abs,
+                "tau_glass": args.tau_glass,
                 "eps_abs_ir": args.eps_abs_ir if args.eps_abs_ir is not None else "",
                 "eps_glass_ir": args.eps_glass_ir if args.eps_glass_ir is not None else "",
                 "fin_area_ratio": combo.fin_area_ratio,
-                "vapor_gap_mm": args.vapor_gap_mm,
+                "vapor_gap_mm": combo.vapor_gap_mm,
                 "warmup_method": args.warmup_method,
                 "resolution": args.resolution,
                 "mean_yield_kg_m2": f"{mean_yield:.6f}",
@@ -432,9 +434,9 @@ def main(argv: list[str] | None = None) -> int:
         )
         n_done += 1
         print(
-            f"  [{i}/{len(combos)}] h={combo.hydrogel_thickness_mm:.2f}mm eps_abs={combo.eps_abs:.2f} "
-            f"tau_glass={combo.tau_glass:.2f} fin={combo.fin_area_ratio:.1f} "
-            f"gap={args.vapor_gap_mm:.1f}mm -> yield={mean_yield:.6f} kg/m² "
+            f"  [{i}/{len(combos)}] h={combo.hydrogel_thickness_mm:.2f}mm eps_abs={args.eps_abs:.2f} "
+            f"tau_glass={args.tau_glass:.2f} fin={combo.fin_area_ratio:.2f} "
+            f"gap={combo.vapor_gap_mm:.1f}mm -> yield={mean_yield:.6f} kg/m² "
             f"({time.perf_counter() - t0:.1f}s elapsed)",
             flush=True,
         )

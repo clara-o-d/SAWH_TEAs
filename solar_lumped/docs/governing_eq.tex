@@ -1,10 +1,20 @@
 \documentclass[11pt]{article}
 \usepackage{amsmath, amssymb}
-\usepackage[margin=1in]{geometry}
+\usepackage[margin=0.85in]{geometry}
 \usepackage{booktabs}
 \usepackage{siunitx}
+\usepackage{longtable}
+\usepackage{array}
+\usepackage{seqsplit}
+\usepackage{hyperref}
 
-\title{Governing Equations for a Solar-Driven, Single-Bed PAM--LiCl SAWH Device}
+\DeclareSIUnit{\usd}{USD}
+\DeclareSIUnit{\year}{yr}
+\newcolumntype{P}[1]{>{\raggedright\arraybackslash}p{#1}}
+\newcommand{\code}[1]{\texttt{\seqsplit{#1}}}
+
+\title{Model Documentation: Governing Equations and Economics for a\\
+Solar-Driven, Single-Bed PAM--LiCl SAWH Device}
 \author{}
 \date{}
 
@@ -13,13 +23,60 @@
 
 \section*{Reference and scope}
 
-This document describes the lumped model implemented in \texttt{solar\_lumped}, following Wilson \& D\'{i}az-Mar\'{i}n \textit{Device} (2025) Eqs.~1--6 and Note~S1 (COMSOL Table~S3 parameters). The device is a single hydrogel bed that alternates between open \emph{absorption} (night) and sealed \emph{desorption} (day) half-cycles. Thermal balances for the gel, solar absorber, and cover glass are solved as quasi-steady algebraic equations; the condenser temperature is transient during desorption.
+This document describes the lumped device + techno-economic model implemented in
+\code{solar\_lumped}, following Wilson \& D\'{i}az-Mar\'{i}n \textit{Device} (2025) Eqs.~1--6
+and Note~S1 (COMSOL Table~S3 parameters) for the physics, and the package's own
+\code{economics/} module for cost. The device is a single hydrogel bed that alternates
+between open \emph{absorption} (night) and sealed \emph{desorption} (day) half-cycles. This
+is the default (\code{desorption\_solver="quasi\_steady"}) configuration; one alternate
+exists in code but is out of scope here: \code{segregated} / \code{coupled\_bdf} desorption
+integrators, which trade the quasi-steady algebraic thermal solve for COMSOL-mimicking or
+fully transient alternatives (\code{device\_config.py}).
 
-\textbf{Subscripts:} $g$ = hydrogel; $abs$ = solar absorber; $gl$ = cover glass; $cond$ = aluminum condenser; $amb$ = ambient.
+\textbf{Base case is Case 2, not Wilson's original paper physics.} As of 2026-07,
+\code{DeviceConfig.thermal\_params()} -- the physics every plain \code{DeviceConfig()} call
+gets unless it explicitly overrides \code{thermal=} -- defaults to real absorber/glass IR
+emissivities ($\varepsilon_{abs,ir}=0.05$, $\varepsilon_{gl,ir}=0.95$, the "selective surface"
+variant, Case~2 in \code{sawh\_bayesopt.design\_space.CASE\_EPS\_IR}) rather than Wilson's
+original blackbody/cavity approximation (Case~1). Every equation, assumption, and default value
+below describes Case~2 unless stated otherwise. Case~1 (Wilson's exact paper physics) remains
+reachable via an explicit \code{DeviceThermalParams(eps\_abs\_ir=1.0, eps\_glass\_ir=1.0)} (or
+the equivalent \code{eps\_abs\_ir=eps\_glass\_ir=None}, still numerically identical -- see
+Section~\ref{sec:radiative}) override, and is exactly what the paper-reproduction scripts under
+\code{analysis/paper\_recreation/wilson/} use -- those scripts build their own
+\code{DeviceThermalParams} directly rather than going through
+\code{DeviceConfig.thermal\_params()}, so they are unaffected by this default and continue to
+reproduce Wilson's digitized figures under Case~1. Case~3 (idealized optical-material limits,
+$\varepsilon_{abs,ir}=\varepsilon_{gl,ir}=0.0$) is a third explicit sensitivity variant, also not
+the default.
 
-\section{State variables}
+\textbf{Subscripts:} $g$ = hydrogel; $abs$ = solar absorber; $gl$ = cover glass; $cond$ =
+aluminum condenser; $amb$ = ambient.
 
-All quantities are per unit footprint area (\si{\metre\squared}) unless noted.
+\textbf{How to use the Source columns below:} cells already filled cite the in-repo file or
+paper section the value/range comes from. Cells marked \textbf{TBD} have no literature or
+vendor citation on file yet -- the value is either an as-implemented constant or an
+arbitrarily chosen sweep bound with no documented justification. Fill these in as sources are
+found; do not treat a TBD as validated.
+
+\tableofcontents
+
+\section{Model design}
+
+\subsection{Device overview}
+
+A footprint-area device stacks (top to bottom, day-side up): cover glass $\to$ air/insulation
+gap $\to$ solar absorber (aluminum) $\to$ hydrogel-salt composite bed $\to$ vapor gap $\to$
+aluminum condenser (finned, ambient-cooled). All balances are per unit footprint area
+(\si{\metre\squared}) unless noted. During \textbf{desorption} (daytime), the chamber is
+sealed: solar radiation heats the absorber, which conducts heat into the gel; the gel desorbs
+water vapor across the vapor gap to the cooler condenser, where it condenses and is collected.
+During \textbf{absorption} (nighttime), the chamber is opened to ambient air; the gel re-hydrates
+by uptake from ambient humidity, with no solar input and no condenser dynamics. An optional
+uncovered variant (\code{has\_glass=False}) removes the glass/insulation-gap stack entirely and
+radiates the absorber directly to a sky/ambient sink.
+
+\subsection{State variables}
 
 \begin{table}[h]
 \centering
@@ -36,13 +93,76 @@ $T_g, T_{abs}, T_{gl}$ & \si{\celsius} & Quasi-steady thermal states (algebraic 
 \end{tabular}
 \end{table}
 
-\textbf{Absorption phase ODEs:} $\dot{c}_w$, $\dot{H}$ with $Q_{solar}=0$, $\dot{m}_{des}=0$, $\dot{T}_{cond}=0$.
+\textbf{Absorption phase ODEs:} $\dot{c}_w$, $\dot{H}$ with $Q_{solar}=0$, $\dot{m}_{des}=0$,
+$\dot{T}_{cond}=0$. \textbf{Desorption phase ODEs:} $\dot{c}_w$, $\dot{H}$, $\dot{T}_{cond}$
+with $T_g$, $T_{abs}$, $T_{gl}$ from the coupled thermal solve.
 
-\textbf{Desorption phase ODEs:} $\dot{c}_w$, $\dot{H}$, $\dot{T}_{cond}$ with $T_g$, $T_{abs}$, $T_{gl}$ from the coupled thermal solve.
+\subsection{Daily cycle structure}
 
-\section{Thermal balances (Wilson Eqs.~1, 3, 4)}
+One simulated day is one absorption half-cycle followed by one desorption half-cycle, gel
+state carried forward between them. The absorption/desorption split follows the forcing
+weather profile's own real day/night boundary (solar-radiation threshold crossing, so the two
+halves are not forced to equal length) in \code{real}/replay weather modes; the
+\code{baseline} synthetic-profile mode instead defaults to a fixed
+\SI{12}{\hour}/\SI{12}{\hour} split (\code{weather/profiles.py::PHASE\_HOURS}) so that
+single-axis parameter sweeps hold the forcing schedule constant. Multi-day runs either warm up
+for a fixed cycle count or use Aitken $\Delta^2$ extrapolation (\code{find\_cyclic\_state}) to
+locate the true steady periodic post-desorption $(c_w, H)$ state before reporting a single
+representative day.
 
-During each integration step the gel, absorber, and glass temperatures satisfy the steady residual form (Eqs.~1, 3, 4 set to zero):
+\section{Physics model assumptions}
+
+\begin{itemize}
+\item \textbf{Lumped / 0-D:} the gel, absorber, glass, and condenser are each a single uniform
+temperature node per footprint area; no through-thickness gradients are resolved.
+\item \textbf{Quasi-steady thermal solve during desorption:} $T_g$, $T_{abs}$, $T_{gl}$ are found
+by root-finding the steady residual form of Eqs.~1, 3, 4 at every ODE evaluation (assumes the
+thermal response is fast relative to the hydration/mass-transfer timescale). Only $T_{cond}$
+carries real thermal inertia (finite aluminum slab thermal mass) during desorption.
+\item \textbf{Absorption thermal shortcut:} during absorption, $T_g = T_{abs} = T_{gl} = T_{amb}$
+is assumed outright (fast gel thermal storage, \code{coupled\_dynamics.py} Note~S1 Eq.~S1)
+rather than solved from Eqs.~1/3/4 -- there is no solar input and no condenser coupling to
+balance against.
+\item \textbf{Radiative exchange (base case, Case~2 "selective surface"):}
+absorber$\leftrightarrow$glass and glass$\leftrightarrow$ambient exchange use real IR
+emissivities $\varepsilon_{abs,ir}=0.05$, $\varepsilon_{gl,ir}=0.95$ (Table~\ref{tab:phys-swept}),
+not Wilson's typeset Eqs.~3--4 blackbody/cavity approximation ($\varepsilon=1$). Setting both to
+$1.0$ (Case~1) reproduces Wilson's original paper physics exactly; setting both to $0.0$ (Case~3)
+gives the idealized optical-material-limits sensitivity variant. See
+Section~\ref{sec:radiative}.
+\item \textbf{Radiative sink temperature:} the default sink for the outermost surface is ambient
+air temperature; an optional \code{sky\_temp\_depression\_c} lowers the effective radiant sky
+temperature below air temperature, needed to reproduce the COMSOL Atacama field-test curves
+(surface-to-ambient radiation with a real sky, not blackbody air).
+\item \textbf{Water inventory basis:} $c_w$ and $H$ are tracked as separate states, but the
+sorbate mass used for activity/uptake calculations is referenced to the fixed fabrication
+thickness $H_0$, not the swollen $H(t)$ -- swelling only feeds back into vapor-gap convection
+($L_g-H$) and gel--absorber conductance ($H/k_{gel}$). This avoids double-counting dilution (see
+\code{salt\_properties.py::pam\_licl\_gravimetric\_uptake\_g\_g}).
+\item \textbf{Water activity (LiCl):} brine activity from the Conde (2004) correlation, capped
+during absorption only by the measured PAM--LiCl DVS isotherm, i.e.\ $a_w =
+\max(a_{w,brine}, a_{w,DVS})$ in absorption; brine activity alone in desorption. Non-LiCl salts
+(NaCl, CaCl$_2$, MgCl$_2$) use brine activity only, with no DVS cap (no isotherm digitized for
+them) -- out of this document's primary scope but present in code.
+\item \textbf{Mass-transfer coefficient:} absorption uses a fixed empirical open-chamber
+convection coefficient $g_{chamber}$; desorption derives $g$ from the Hollands natural-convection
+$h_{conv,g}$ via a Lewis-number-unity heat/mass analogy (Note~S1 Eq.~S5). No forced convection is
+modeled in either phase.
+\item \textbf{Self-consistent desorption coupling:} $\dot{m}_{des}$ is found as the root of
+$\dot{m}_{calc}(\dot{m}_{des}) - \dot{m}_{des} = 0$ (Brent's method) so that the gel heat balance
+(Eq.~1) and the mass-transfer equations (Eqs.~5--6) agree on the same rate at every step.
+\item \textbf{Scope:} default salt is LiCl with a hydrogel sorbent. A MOF-sorbent path and three
+additional deliquescent salts exist in code with their own property tables but are not documented
+further here.
+\item \textbf{Initial condition:} $c_w$ initializes at equilibrium with the $\sim$\SI{20}{\percent}
+RH ambient the gel is fabricated at (DVS isotherm, LiCl), unless a cyclic steady-state or explicit
+override is requested instead.
+\end{itemize}
+
+\section{Thermal balances (Wilson Eqs.~1, 3, 4)}\label{sec:radiative}
+
+During each integration step the gel, absorber, and glass temperatures satisfy the steady
+residual form (Eqs.~1, 3, 4 set to zero):
 
 \begin{equation}
 U_{gel}(T_{abs} - T_g)
@@ -56,7 +176,7 @@ U_{gel}(T_{abs} - T_g)
 k_{air}\frac{T_{abs} - T_{gl}}{L_{ins}}
 + \varepsilon_{ag}\sigma(T_{abs}^4 - T_{gl}^4)
 = h_{amb}(T_{gl} - T_{amb})
-+ \sigma(T_{gl}^4 - T_{amb}^4)
++ \varepsilon_{ga}\sigma(T_{gl}^4 - T_{sky}^4)
 \label{eq:glass}
 \end{equation}
 
@@ -68,12 +188,34 @@ k_{air}\frac{T_{abs} - T_{gl}}{L_{ins}}
 \label{eq:absorber}
 \end{equation}
 
+where $T_{sky} = T_{amb} - \Delta T_{sky}$ (default $\Delta T_{sky}=0$). In the uncovered variant
+(\code{has\_glass=False}), Eqs.~\eqref{eq:glass}--\eqref{eq:absorber} collapse to a single
+absorber-to-sky balance $\varepsilon_{abs}Q_{solar} = h_{amb}(T_{abs}-T_{amb}) +
+\varepsilon_{abs}\sigma(T_{abs}^4 - T_{sky}^4) + U_{gel}(T_{abs}-T_g)$ with $T_{gl} \equiv T_{amb}$.
+
 \textbf{Correlations (Note~S1):}
 \begin{itemize}
-\item $h_{conv,g}$: Hollands et al.\ natural convection between parallel plates in the vapor gap $L_g - H$ (tilt-dependent).
-\item $\varepsilon_{gc} = 1/(1/\varepsilon_{gel} + 1/\varepsilon_{Al} - 1)$: parallel-plate radiative exchange.
-\item $U_{gel} = k_{Al}/L_{Al}$: gel--absorber conduction (Table~S3).
-\item Absorption: $Q_{solar}=0$; desorption: $Q_{solar}\ge 0$ from weather profile.
+\item $h_{conv,g}$: Hollands et al.\ natural convection between parallel plates in the vapor gap
+$L_g - H$ (tilt-dependent; Eqs.~S3--S4).
+\item $\varepsilon_{gc} = 1/(1/\varepsilon_{gel} + 1/\varepsilon_{Al} - 1)$: parallel-plate
+radiative exchange (Eq.~S2).
+\item $U_{gel}$: series-resistance gel--absorber conductance (updated from the single-layer
+approximation in earlier drafts of this document to match \code{table\_s3.py::u\_gel\_w\_m2\_k}):
+\begin{equation}
+\frac{1}{U_{gel}} = \frac{L_{Al}}{k_{Al}} + \frac{L_{silicone}}{k_{silicone}} + \frac{H(t)}{k_{gel}}
+\label{eq:ugel}
+\end{equation}
+(aluminum backing + silicone bonding layer + hydrogel conduction in series; $H$ floored at
+$H_0/4$ to avoid a singular resistance).
+\item $\varepsilon_{ag}, \varepsilon_{ga}$ (base case, Case~2): $\varepsilon_{ag} =
+\mathrm{parallel\_plate\_emissivity}(\varepsilon_{abs,ir}, \varepsilon_{gl,ir}) =
+1/(1/0.05 + 1/0.95 - 1) \approx 0.0508$ (absorber$\to$glass, same parallel-plate formula as
+$\varepsilon_{gc}$ above); $\varepsilon_{ga} = \varepsilon_{gl,ir} = 0.95$ directly (glass radiates
+to ambient/sky, not a cavity). Case~1 ($\varepsilon_{abs,ir}=\varepsilon_{gl,ir}=1.0$) collapses
+both to $1.0$, reproducing the blackbody base model exactly; Case~3 (both $0.0$) collapses both
+to $0.0$ (no net IR exchange).
+\item Absorption: $Q_{solar}=0$; desorption: $Q_{solar}\ge 0$ from the weather profile (or a
+fixed baseline value for controlled sweeps).
 \end{itemize}
 
 \section{Condenser energy balance (Wilson Eq.~2, transient)}
@@ -88,7 +230,8 @@ During desorption only:
 \label{eq:condenser}
 \end{equation}
 
-where $A_r$ is the fin area ratio and $h_{conv,cond} = A_r\,h_{amb}$.
+where $A_r$ is the fin area ratio and $h_{conv,cond} = A_r\,h_{amb}$ (or $A_r\,h_{amb,cond}$ when a
+separate fan-forced condenser convection coefficient is supplied).
 
 \section{Mass transport (Wilson Eqs.~5--6)}
 
@@ -103,7 +246,13 @@ where $A_r$ is the fin area ratio and $h_{conv,cond} = A_r\,h_{amb}$.
 = g\,\frac{MW_{w}}{\rho_{sol}}\,\frac{P_{sat}(T_g)}{RT_g}\,(C_R - a_w)
 \label{eq:dH}
 \end{equation}
-Wilson's Eq.~6 as printed omits the $g$ prefactor, but the bare product $\frac{MW_w}{\rho_{sol}}\frac{P_{sat}}{RT_g}$ is dimensionless (m$^3$/mol $\times$ mol/m$^3$), so $dH/dt$ as printed cannot carry units of m/s. Including $g$ (same mass-transfer coefficient as Eq.~\eqref{eq:dcw}) is required both for dimensional consistency and to match the desorption mass-rate identity $\dot{m}_{des} = -\rho_{sol}A_c\,dH/dt$ used elsewhere in the paper against the flux-based $\dot{m}_{des} = MW_w\,g\,\frac{P_{sat}}{RT_g}(C_R-a_w)$. This implementation therefore keeps the $g$ factor.
+Wilson's Eq.~6 as printed omits the $g$ prefactor, but the bare product
+$\frac{MW_w}{\rho_{sol}}\frac{P_{sat}}{RT_g}$ is dimensionless (m$^3$/mol $\times$ mol/m$^3$), so
+$dH/dt$ as printed cannot carry units of m/s. Including $g$ (same mass-transfer coefficient as
+Eq.~\eqref{eq:dcw}) is required both for dimensional consistency and to match the desorption
+mass-rate identity $\dot{m}_{des} = -\rho_{sol}A_c\,dH/dt$ used elsewhere in the paper against the
+flux-based $\dot{m}_{des} = MW_w\,g\,\frac{P_{sat}}{RT_g}(C_R-a_w)$. This implementation therefore
+keeps the $g$ factor.
 
 \textbf{Concentration ratio $C_R$:}
 \begin{align}
@@ -118,7 +267,12 @@ g &= g_{chamber} && \text{(absorption)} \\
 g &= h_{conv,g}\,\frac{D_{air}}{k_{air}} && \text{(desorption; Lewis-number analogy, Note~S1 Eq.~S5)}
 \end{align}
 
-\textbf{Water activity $a_w$ (PAM--LiCl):} brine activity from salt thermodynamics, capped by the measured DVS isotherm during absorption (Note~S2). During desorption, brine activity alone.
+\textbf{Water activity $a_w$ (PAM--LiCl):} brine activity from salt thermodynamics, capped by the
+measured DVS isotherm during absorption (Note~S2). During desorption, brine activity alone.
+
+\textbf{Saturation vapor pressure $P_{sat}(T)$:} Conde (2004) Saul--Wagner correlation, with a
+Tetens-equation fallback if the primary correlation is non-finite
+(\code{salt\_properties.py::saturation\_vapor\_pressure\_pa}).
 
 \textbf{Desorption mass flux from gel inventory:}
 \begin{equation}
@@ -128,50 +282,366 @@ g &= h_{conv,g}\,\frac{D_{air}}{k_{air}} && \text{(desorption; Lewis-number anal
 
 \section{Thermal--mass coupling constraint}
 
-During desorption, $\dot{m}_{des}$ in Eq.~\eqref{eq:gel} must equal the flux implied by Eqs.~\eqref{eq:dcw}--\eqref{eq:mdes}. The implementation finds $\dot{m}_{des}$ as the root of $f(\dot{m}_{des}) = \dot{m}_{calc}(\dot{m}_{des}) - \dot{m}_{des} = 0$ (Brent's method), ensuring Eqs.~1 and 5--6 are self-consistent at each ODE evaluation.
+During desorption, $\dot{m}_{des}$ in Eq.~\eqref{eq:gel} must equal the flux implied by
+Eqs.~\eqref{eq:dcw}--\eqref{eq:mdes}. The implementation finds $\dot{m}_{des}$ as the root of
+$f(\dot{m}_{des}) = \dot{m}_{calc}(\dot{m}_{des}) - \dot{m}_{des} = 0$ (Brent's method), ensuring
+Eqs.~1 and 5--6 are self-consistent at each ODE evaluation.
 
-\section{Constraints and cycle structure}
+\section{Constraints and cycle-level outputs}
 
 \begin{itemize}
 \item $c_w \in [c_{w,\min}, c_{w,\max}]$; rates clipped at bounds.
-\item $H \ge H_0$; swelling allowed in absorption ($\dot{H}\ge 0$ at $H=H_0$); no shrinkage below $H_0$ in desorption.
+\item $H \ge H_0$; swelling allowed in absorption ($\dot{H}\ge 0$ at $H=H_0$); no shrinkage below
+$H_0$ in desorption.
 \item Desorption: enforce $\dot{c}_w \le 0$, $\dot{H} \le 0$.
-\item Daily cycle: absorption half-cycle ($\sim$12~h, no solar) followed by desorption half-cycle ($\sim$12~h, solar + condenser transient).
+\item Vapor gap below \SI{7}{\milli\metre} (Wilson's thermobuoyancy/transport floor,
+$L_g - H$) is treated as mass-transfer-inhibited: $g \to 0$ rather than extrapolating the
+Hollands correlation outside its validated range.
 \item Initial $c_w$ from fabrication equilibrium RH (DVS isotherm at $H_0$) unless overridden.
-\item Thermal efficiency: $\eta_{th} = \dot{m}_{water}\,h_{fg} / \int Q_{solar}\,dt$ over the desorption phase.
+\item Daily water yield is the condenser-collected mass over one desorption phase; thermal
+efficiency $\eta_{th} = \dot{m}_{water}\,h_{fg} / \int Q_{solar}\,dt$, integrated over the
+desorption phase only (blending in the near-zero-solar absorption phase would dilute the ratio
+without adding real signal).
 \end{itemize}
 
-\section{Default parameters (Table~S3 / \texttt{table\_s3.py})}
+\section{Physics model parameters}
 
-\begin{table}[h]
-\centering
-\small
-\sisetup{table-format=3.3}
-\begin{tabular}{@{}lll@{}}
+Table~\ref{tab:phys-swept} lists parameters actively exposed to parameter sweeps / Bayesian
+optimization, with the ranges the codebase already uses. Table~\ref{tab:phys-fixed} lists fixed
+material and correlation constants with no documented sweep range.
+
+{\small\begin{longtable}{P{3.3cm}P{1.6cm}P{2.6cm}P{3.0cm}P{3.6cm}}
+\caption{Swept / design physics parameters and their documented ranges.
+\label{tab:phys-swept}} \\
 \toprule
-\textbf{Parameter} & \textbf{Symbol} & \textbf{Default} \\
+\textbf{Parameter} & \textbf{Symbol} & \textbf{Baseline} & \textbf{Sweep range} & \textbf{Source} \\
 \midrule
-Hydrogel reference thickness & $H_0$ & \SI{4}{\milli\metre} \\
-Vapor gap length & $L_g$ & \SI{40}{\milli\metre} \\
-Insulation gap & $L_{ins}$ & \SI{5}{\milli\metre} \\
-Aluminum plate thickness & $L_{Al}$ & \SI{0.125}{\inch} \\
-Chamber convection (abs.) & $g_{chamber}$ & \SI{0.0085}{\metre\per\second} \\
-Solution density & $\rho_{sol}$ & \SI{1250.2}{\kilogram\per\cubic\metre} \\
-Desorption enthalpy & $h_{des}$ & \SI{2.32e6}{\joule\per\kilogram} \\
-Condensation enthalpy & $h_{fg}$ & \SI{2.256e6}{\joule\per\kilogram} \\
-Gel emissivity & $\varepsilon_{gel}$ & 1.0 \\
-Condenser emissivity & $\varepsilon_{Al}$ & 0.05 \\
-Absorber emissivity & $\varepsilon_{abs}$ & 0.95 \\
-Glass transmittance & $\tau_{glass}$ & 0.9 \\
-Tilt angle & --- & \SI{30}{\degree} (baseline) \\
-Fin area ratio & $A_r$ & 7.1 (baseline) \\
-Salt & --- & LiCl, salt:polymer = 4:1 \\
+\endfirsthead
+\toprule
+\textbf{Parameter} & \textbf{Symbol} & \textbf{Baseline} & \textbf{Sweep range} & \textbf{Source} \\
+\midrule
+\endhead
 \bottomrule
-\end{tabular}
-\end{table}
+\endfoot
+Hydrogel reference thickness & $H_0$ & \SI{4}{\milli\metre} & \SIrange{1.0}{10.0}{\milli\metre} &
+\code{table\_s3.H0\_M}; range: \code{parameter\_sweep.py} / \code{lcow\_economic\_params.csv}
+(\code{hydrogel\_thickness\_min/max\_m}) \\
+Vapor gap & $L_g$ & \SI{40}{\milli\metre} & \SIrange{7.0}{60.0}{\milli\metre} &
+\code{table\_s3.L\_G\_M}; range: \code{parameter\_sweep.py} / \code{design\_space.py}
+\code{DesignBounds}; lower bound = \code{table\_s3.VAPOR\_GAP\_TRANSPORT\_MIN\_M} \\
+Insulation gap & $L_{ins}$ & \SI{5}{\milli\metre} & \SIrange{1.0}{20.0}{\milli\metre} &
+\code{table\_s3.L\_INS\_M}; range: \code{parameter\_sweep.py} / \code{design\_space.py} \\
+Condenser fin area ratio & $A_r$ & 7.1 & \numrange{3.0}{12.0} &
+\code{table\_s3.FIN\_AREA\_RATIO}; range: \code{parameter\_sweep.py} /
+\code{grid\_param\_sweep.py} / \code{design\_space.py} \\
+Tilt angle & $\theta$ & \SI{30}{\degree} (Fig.~2 baseline; \SI{35}{\degree} used as the Sherlock
+grid-sweep baseline) & \SIrange{0}{60}{\degree} & \code{table\_s3.TILT\_DEG}; range:
+\code{parameter\_sweep.py} / \code{design\_space.py} \\
+Salt:polymer ratio & $S/L$ & 4.0 & \numrange{1.0}{8.0} & \code{table\_s3} default /
+\code{DeviceConfig}; range: \code{parameter\_sweep.py} / \code{design\_space.py} \\
+Absorber emissivity & $\varepsilon_{abs}$ & 0.95 & \numrange{0.85}{0.95} (3 discrete levels) &
+\code{table\_s3.EPS\_ABS}; range: \code{sherlock\_param\_sweep.tex} /
+\code{grid\_param\_sweep.py --eps-abs} \\
+Glass transmittance & $\tau_{glass}$ & 0.90 & \numrange{0.80}{0.90} (3 discrete levels) &
+\code{table\_s3.TAU\_GLASS}; range: \code{sherlock\_param\_sweep.tex} /
+\code{grid\_param\_sweep.py --tau-glass} \\
+Desorption enthalpy (LiCl) & $h_{des}$ & \SI{2.32e6}{\joule\per\kilogram} (Table~S3 COMSOL value) &
+\SIrange{1.8e6}{3.2e6}{\joule\per\kilogram} & \code{table\_s3.H\_DES\_J\_PER\_KG}; range:
+\code{parameter\_sweep.py}; cf. literature range in \code{salt\_heat\_of\_desorption.csv}
+(LiCl $\approx$\SI{2.85e6}{\joule\per\kilogram}, D\'{i}az-Mar\'{i}n) \\
+Salt weight factor (DVS-cap MW scaling, dimensionless) & --- & 1.0 & \numrange{0.826}{1.180}
+(i.e.\ effective LiCl formula weight \SIrange{35}{50}{\gram\per\mole}) &
+\code{parameter\_sweep.py::make\_sweep\_params} \\
+Ambient convection coefficient (baseline profile) & $h_{amb}$ & \SI{10.0}{\watt\per\square\metre\per\kelvin} &
+\SIrange{1.0}{12.5}{\watt\per\square\metre\per\kelvin} &
+\code{weather/profiles.py::FIXED\_H\_AMB\_W\_M2\_K}; range: \code{parameter\_sweep.py} \\
+Uptake RH / ambient relative humidity (baseline profile) & $RH_{amb}$ & 0.5 &
+\numrange{0.15}{0.80} & \code{parameter\_sweep.py} (\code{humidity\_high}; baseline-mode
+profile only) \\
+Solar irradiance (baseline profile) & $Q_{solar}$ & \SI{600}{\watt\per\square\metre} &
+\SIrange{400}{800}{\watt\per\square\metre} & \code{parameter\_sweep.py}
+(\code{solar\_irradiance\_w\_per\_m2}; baseline-mode profile only -- real-weather mode uses
+fetched irradiance instead) \\
+Ambient temperature (baseline profile) & $T_{amb}$ & \SI{25}{\celsius} &
+\SIrange{10}{40}{\celsius} & \code{parameter\_sweep.py} (\code{temperature\_c};
+baseline-mode profile only) \\
+Absorber/glass real IR emissivity pair (base case; Case~2, "selective surface") &
+$\varepsilon_{abs,ir}, \varepsilon_{gl,ir}$ & (0.05, 0.95) -- \code{DeviceConfig.thermal\_params()}
+default as of 2026-07 & categorical, not a continuous sweep: \code{case1} = (1.0, 1.0) reproduces
+Wilson's blackbody physics exactly; \code{case3} = (0.0, 0.0) idealized optical limits &
+\code{device\_config.py::DeviceConfig.thermal\_params()}; case registry:
+\code{sawh\_bayesopt.design\_space.py::CASE\_EPS\_IR} -- \textbf{TBD} literature basis for the
+case2/case3 numeric pairs \\
+\end{longtable}}
 
-\section*{Integration}
+{\small\begin{longtable}{P{3.1cm}P{1.6cm}P{3.6cm}P{4.6cm}}
+\caption{Fixed physics material / correlation constants (no documented sweep range).
+\label{tab:phys-fixed}} \\
+\toprule
+\textbf{Parameter} & \textbf{Symbol} & \textbf{Value} & \textbf{Source} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Parameter} & \textbf{Symbol} & \textbf{Value} & \textbf{Source} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+Chamber convection (absorption) & $g_{chamber}$ & \SI{0.0085}{\metre\per\second} &
+\code{table\_s3.G\_CHAMBER\_M\_S}; duplicated in economics CSV as
+\code{mass\_transfer\_convection\_coefficient\_m\_s} -- \textbf{TBD} calibration source \\
+Solution/brine density & $\rho_{sol}$ & \SI{1250.2}{\kilogram\per\cubic\metre} (LiCl); salt-dependent
+& \code{salt\_catalog.csv} (NaCl/CaCl$_2$/MgCl$_2$ $\approx$\SI{1200}{\kilogram\per\cubic\metre}) \\
+Condensation enthalpy & $h_{fg}$ & \SI{2.256e6}{\joule\per\kilogram} & \code{table\_s3.H\_FG\_J\_PER\_KG} --
+\textbf{TBD} source (steam-table value assumed) \\
+Gel emissivity & $\varepsilon_{gel}$ & 1.0 & \code{table\_s3.EPS\_GEL} -- \textbf{TBD} \\
+Condenser (Al) emissivity & $\varepsilon_{Al}$ & 0.05 & \code{table\_s3.EPS\_AL} -- \textbf{TBD} \\
+Sky temperature depression & $\Delta T_{sky}$ & \SI{0}{\kelvin} (no depression; non-zero used
+only to calibrate the COMSOL Atacama field-test curves) &
+\code{DeviceThermalParams.sky\_temp\_depression\_c}
+-- \textbf{TBD} calibrated value / general range \\
+Air thermal conductivity & $k_{air}$ & \SI{0.0286}{\watt\per\metre\per\kelvin} & \code{table\_s3.K\_AIR\_W\_M\_K} \\
+Aluminum thermal conductivity & $k_{Al}$ & \SI{167.0}{\watt\per\metre\per\kelvin} & \code{table\_s3.K\_AL\_W\_M\_K} (Table~S3) \\
+Hydrogel thermal conductivity & $k_{gel}$ & \SI{0.6}{\watt\per\metre\per\kelvin} & \code{table\_s3.K\_GEL\_W\_M\_K} (Table~S3) \\
+Cover glass thermal conductivity & $k_{glass}$ & \SI{1.2}{\watt\per\metre\per\kelvin} & \code{table\_s3.K\_GLASS\_W\_M\_K} -- \textbf{TBD} \\
+Silicone bonding-layer conductivity & $k_{silicone}$ & \SI{0.2}{\watt\per\metre\per\kelvin} & \code{table\_s3.K\_SILICONE\_W\_M\_K} -- \textbf{TBD} \\
+Aluminum density / specific heat & $\rho_{Al}, c_{p,Al}$ & \SI{2700}{\kilogram\per\cubic\metre},
+\SI{900}{\joule\per\kilogram\per\kelvin} & \code{table\_s3.RHO\_AL\_KG\_M3} /
+\code{CP\_AL\_J\_KG\_K} -- standard aluminum handbook values, \textbf{TBD} exact citation \\
+Cover-glass density / specific heat & $\rho_{glass}, c_{p,glass}$ &
+\SI{2230}{\kilogram\per\cubic\metre}, \SI{830}{\joule\per\kilogram\per\kelvin} &
+\code{table\_s3.RHO\_GLASS\_KG\_M3} / \code{CP\_GLASS\_J\_KG\_K} (borosilicate) -- \textbf{TBD} \\
+Gel specific heat & $c_{p,gel}$ & \SI{3500}{\joule\per\kilogram\per\kelvin} &
+\code{table\_s3.CP\_GEL\_J\_KG\_K} (hydrated PAM--LiCl, water-dominated) -- \textbf{TBD} \\
+Water-vapor-in-air diffusivity & $D_{air}$ & \SI{2.62e-5}{\square\metre\per\second} &
+\code{correlations.py::D\_AIR\_M2\_S} (Note~S1 Sh~=~Nu analogy) -- \textbf{TBD} exact source \\
+Air kinematic viscosity / Prandtl number & $\nu_{air}, Pr_{air}$ & \SI{1.5e-5}{\square\metre\per\second}, 0.71
+& \code{correlations.py} -- standard air properties near \SI{25}{\celsius}, \textbf{TBD} citation \\
+Gravitational acceleration & $g$ & \SI{9.81}{\metre\per\square\second} & \code{correlations.py::GRAVITY\_M\_S2} \\
+Stefan--Boltzmann constant & $\sigma$ & \SI{5.670374419e-8}{\watt\per\square\metre\per\kelvin\tothe{4}} & CODATA \\
+Vapor-gap transport floor & --- & \SI{7}{\milli\metre} & \code{table\_s3.VAPOR\_GAP\_TRANSPORT\_MIN\_M}
+(Wilson \S 2.2 thermobuoyancy/transport floor) \\
+\end{longtable}}
 
-The coupled system is integrated with SciPy \texttt{solve\_ivp} (Radau, stiff). State during desorption: $\mathbf{y} = [c_w,\, H,\, T_{cond}]$; during absorption: $\mathbf{y} = [c_w,\, H]$.
+\section{Economics model assumptions}
+
+\begin{itemize}
+\item \textbf{LCOW} is a standard fixed-charge-rate techno-economic calculation: annualized cost
+divided by annual usable water volume. CAPEX is amortized via a capital recovery factor (CRF) at
+a fixed discount rate over a fixed device lifetime -- not a full multi-year cash-flow model with
+price escalation.
+\item \textbf{NPV / payback} (\code{npv.py}) reuses the same cost components as LCOW, but
+restructures CAPEX as an upfront year-0 payment against a level (non-escalating) annual net cash
+flow (revenue at an assumed water price, minus OPEX), discounted at the same rate -- a
+level-annuity NPV, not a full pro forma.
+\item \textbf{CAPEX} is a fixed per-footprint bill of materials (BOM), summed from six line items,
+scaled uniformly by a \code{total\_investment\_factor} (contingency / installation multiplier
+that is easy to sweep even though the underlying line items themselves are not).
+\item \textbf{Maintenance} is a fixed fraction of CAPEX per year -- not tied to any modeled
+failure or service-call process.
+\item \textbf{Sorbent replacement:} the hydrogel is replaced on a fixed interval
+(\code{hydrogel\_lifetime\_years}); its replacement cost is the dry composite mass per footprint
+area times a blended cost (catalog salt price + fixed acrylamide/additive costs, Table~S1). MOF
+sorbent instead uses mass $\times$ price / lifetime directly.
+\item \textbf{Utilization factor} is a single multiplicative derating of the physics-simulated
+gross annual yield (daily yield $\times$ 365 $\times$ cycles/day), meant to stand in for real-world
+downtime / non-ideal weather years -- not a modeled reliability/availability process.
+\item \textbf{Electricity cost} only applies to the optional active/electric-heat-assist mode; the
+reproduced passive-solar baseline has zero electric heat and therefore zero electricity cost.
+\item \textbf{Out of scope:} water transport/distribution, land, installation labor, permitting,
+and end-of-life salvage value are not modeled.
+\item \textbf{No escalation:} all costs are unescalated real USD (no inflation or fuel/material
+price growth curves).
+\item \textbf{Water price} (NPV/payback only) is an external scenario input, not derived from any
+market model.
+\end{itemize}
+
+\section{Economics governing equations}
+
+\textbf{Capital recovery factor:}
+\begin{equation}
+CRF = \frac{i(1+i)^L}{(1+i)^L - 1}
+\label{eq:crf}
+\end{equation}
+where $i$ is the discount rate and $L$ the device lifetime (years).
+
+\textbf{Sorbent (hydrogel) replacement, annualized:}
+\begin{equation}
+C_{sorbent} = \frac{c_{gel}\,m_{dry}}{L_{gel}}, \qquad
+c_{gel} = \frac{c_{salt}\,(S/L) + c_{acrylamide}}{1 + S/L} + c_{additives}
+\label{eq:sorbent}
+\end{equation}
+where $m_{dry} = H_0\,\rho_{gel}$ is the dry composite mass per footprint area, $S/L$ is the
+salt:polymer ratio, and $L_{gel}$ is the hydrogel replacement interval (years). (MOF sorbent:
+$C_{sorbent} = m_{MOF}\,c_{MOF} / L_{gel}$ directly.)
+
+\textbf{Annualized device cost:}
+\begin{equation}
+C_{annual} = CRF \cdot f_{inv}\,C_{device} + C_{sorbent} + f_{maint}\,f_{inv}\,C_{device}
++ C_{energy,fixed} + C_{elec} + C_{cycle,extra}
+\label{eq:annual-cost}
+\end{equation}
+where $C_{device} = \sum_j C_{BOM,j}$ (six BOM line items, Table~\ref{tab:econ-fixed}),
+$f_{inv}$ is the total investment factor, $f_{maint}$ the maintenance cost fraction,
+$C_{elec} = p_{elec}\,\dot{Q}_{elec}\,t_{des}\cdot 365 / 1000$ is the optional active-heating
+electricity cost (USD/kWh $\times$ W/m$^2$ $\times$ h/day $\times$ days/yr, converted to kWh), and
+$C_{cycle,extra}$ charges a fixed energy cost per half-cycle beyond one per day.
+
+\textbf{LCOW:}
+\begin{equation}
+LCOW = \frac{C_{annual}}{f_{util}\left(\dfrac{365\cdot n_{cyc}\cdot Y_{daily}}{\rho_w}\right)}
+\label{eq:lcow}
+\end{equation}
+where $Y_{daily}$ is the simulated daily water yield (kg/m$^2$), $n_{cyc}$ the number of
+half-cycles per day, $\rho_w$ the density of water (kg/m$^3$), and $f_{util}$ the utilization
+factor. The cost breakdown (\code{lcow\_cost\_breakdown\_from\_daily\_yield}) reports each term
+of Eq.~\eqref{eq:annual-cost} individually, divided by the same denominator, so CAPEX / sorbent /
+maintenance / energy segments sum exactly to $LCOW$.
+
+\textbf{NPV and payback:}
+\begin{align}
+NPV &= -f_{inv}\,C_{device} + \left(R_{annual} - OPEX_{annual}\right)\cdot
+\frac{1-(1+i)^{-L}}{i}
+\label{eq:npv} \\
+R_{annual} &= f_{util}\left(\frac{365\cdot n_{cyc}\cdot Y_{daily}}{\rho_w}\right) p_{water}
+\label{eq:revenue}
+\end{align}
+where $p_{water}$ is the assumed water sale price (USD/m$^3$) and $OPEX_{annual}$ is
+Eq.~\eqref{eq:annual-cost} without the CAPEX/CRF term. Simple payback is
+$CAPEX / (R_{annual}-OPEX_{annual})$; discounted payback solves
+$1-\left(1 - i\,CAPEX/(R_{annual}-OPEX_{annual})\right) = (1+i)^{-t}$ for $t$
+(\code{npv.py::npv\_from\_daily\_yield}).
+
+\section{Economics model parameters}
+
+Table~\ref{tab:econ-swept} lists economics parameters exposed to sweeps
+(\code{parameter\_sweep.py::make\_sweep\_params}); Table~\ref{tab:econ-fixed} lists fixed
+inputs (BOM line items, per-salt prices, and scenario constants) with no documented sweep range.
+
+{\small\begin{longtable}{P{3.1cm}P{1.4cm}P{2.8cm}P{3.4cm}P{3.4cm}}
+\caption{Swept economics parameters and their documented ranges.
+\label{tab:econ-swept}} \\
+\toprule
+\textbf{Parameter} & \textbf{Symbol} & \textbf{Baseline} & \textbf{Sweep range} & \textbf{Source} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Parameter} & \textbf{Symbol} & \textbf{Baseline} & \textbf{Sweep range} & \textbf{Source} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+Discount rate & $i$ & 0.08 & \numrange{0.04}{0.12} &
+\code{lcow\_economic\_params.csv}; range: \code{parameter\_sweep.py} \\
+Device lifetime & $L$ & \SI{20}{\year} & \SIrange{10}{30}{\year} (integer) &
+\code{lcow\_economic\_params.csv}; range: \code{parameter\_sweep.py} \\
+Utilization factor & $f_{util}$ & 0.9 & \numrange{0.7}{1.0} &
+\code{lcow\_economic\_params.csv}; range: \code{parameter\_sweep.py} \\
+Total investment factor & $f_{inv}$ & 1.0 & \numrange{0.7}{1.5} &
+\code{lcow\_economic\_params.csv}; range: \code{parameter\_sweep.py} \\
+Maintenance cost fraction & $f_{maint}$ & 0.05 \si{\per\year} & \numrange{0.02}{0.10}
+\si{\per\year} & \code{lcow\_economic\_params.csv}; range: \code{parameter\_sweep.py} \\
+Electricity price & $p_{elec}$ & \SI{0.10}{\usd\per\kilo\watt\hour} & \SIrange{0.05}{0.30}{\usd\per\kilo\watt\hour} &
+\code{lcow\_economic\_params.csv}; range: \code{parameter\_sweep.py} \\
+Acrylamide price & $c_{acrylamide}$ & \SI{1.10}{\usd\per\kilogram} &
+\SIrange{0.55}{1.65}{\usd\per\kilogram} ($\pm$50\% of baseline) &
+\code{lcow\_economic\_params.csv} (Table~S1 note); range: \code{parameter\_sweep.py} \\
+Additives price (composite) & $c_{additives}$ & \SI{0.0072148}{\usd\per\kilogram} &
+\SIrange{0.0036074}{0.0108222}{\usd\per\kilogram} ($\pm$50\% of baseline) &
+\code{lcow\_economic\_params.csv} (APS, MBAA, TEMED per Table~S1); range: \code{parameter\_sweep.py} \\
+Hydrogel lifetime & $L_{gel}$ & \SI{1.0}{\year} & \SIrange{0.5}{2.0}{\year} &
+\code{lcow\_economic\_params.csv}; range: \code{parameter\_sweep.py} \\
+Water price (NPV/payback scenario input) & $p_{water}$ & \SI{5.0}{\usd\per\cubic\metre} &
+\SIrange{1.0}{25.0}{\usd\per\cubic\metre} & \code{parameter\_sweep.py}
+(\code{\_BASELINE\_WATER\_PRICE\_USD\_PER\_M3}) -- \textbf{TBD} market basis \\
+Salt:polymer ratio (dual physics/cost role -- see Table~\ref{tab:phys-swept}) & $S/L$ & 4.0 &
+\numrange{1.0}{8.0} & See Table~\ref{tab:phys-swept}; also sets $C_{sorbent}$ via Eq.~\eqref{eq:sorbent} \\
+\end{longtable}}
+
+{\small\begin{longtable}{P{3.6cm}P{2.2cm}P{3.0cm}P{4.6cm}}
+\caption{Fixed economics parameters and BOM line items (no documented sweep range).
+\label{tab:econ-fixed}} \\
+\toprule
+\textbf{Parameter} & \textbf{Symbol} & \textbf{Value} & \textbf{Source} \\
+\midrule
+\endfirsthead
+\toprule
+\textbf{Parameter} & \textbf{Symbol} & \textbf{Value} & \textbf{Source} \\
+\midrule
+\endhead
+\bottomrule
+\endfoot
+BOM: aluminum heater & $C_{BOM,1}$ & \SI{11.382}{\usd\per\square\metre} &
+\code{lcow\_economic\_params.csv} (\code{device\_bom\_aluminum\_heater}) -- \textbf{TBD} itemized cost basis \\
+BOM: condenser & $C_{BOM,2}$ & \SI{28.455}{\usd\per\square\metre} &
+\code{lcow\_economic\_params.csv} (\code{device\_bom\_condenser}) -- \textbf{TBD} \\
+BOM: acrylic enclosure & $C_{BOM,3}$ & \SI{5.95}{\usd\per\square\metre} &
+\code{lcow\_economic\_params.csv} (\code{device\_bom\_acrylic\_enclosure}) -- \textbf{TBD} \\
+BOM: insulation & $C_{BOM,4}$ & \SI{2.0}{\usd\per\square\metre} &
+\code{lcow\_economic\_params.csv} (\code{device\_bom\_insulation}) -- \textbf{TBD} \\
+BOM: clamps & $C_{BOM,5}$ & \SI{3.474}{\usd\per\square\metre} &
+\code{lcow\_economic\_params.csv} (\code{device\_bom\_clamps}) -- \textbf{TBD} \\
+BOM: fixtures & $C_{BOM,6}$ & \SI{1.0}{\usd\per\square\metre} &
+\code{lcow\_economic\_params.csv} (\code{device\_bom\_fixtures}) -- \textbf{TBD} \\
+\textit{Total device BOM} & $C_{device}$ & \textit{\SI{52.261}{\usd\per\square\metre}} (sum of
+the above) & derived \\
+Salt price (per catalog) & $c_{salt}$ & LiCl \num{0.55}; NaCl \num{0.045}; CaCl$_2$
+\num{0.17}; MgCl$_2$ \num{0.01985} (\si{\usd\per\kilogram}) & \code{salt\_catalog.csv} --
+\textbf{TBD} vendor/date basis \\
+Fixed annual energy cost & $C_{energy,fixed}$ & \SI{0.0}{\usd\per\year} &
+\code{lcow\_economic\_params.csv} (\code{energy\_cost\_usd\_per\_year}) -- no sweep documented \\
+Extra half-cycle energy cost & --- & \SI{0.0}{\usd\per\day} &
+\code{lcow\_economic\_params.csv} (\code{energy\_cost\_usd\_per\_extra\_half\_cycle\_per\_day})
+-- no sweep documented \\
+Desorption hours per day & $t_{des}$ & \SI{12.0}{\hour} & \code{lcow\_economic\_params.csv}
+(\code{desorption\_hours\_per\_day}); tie to the physics day/night split
+(\code{weather/profiles.py::PHASE\_HOURS}) is manual, not automatic -- keep the two consistent
+when sweeping cycle length \\
+Max electric heat (optimization bound, not baseline) & $\dot{Q}_{elec,max}$ &
+\SI{1500.0}{\watt\per\square\metre} & \code{lcow\_economic\_params.csv}
+(\code{max\_electric\_heat\_w\_per\_m2}) -- an optimizer bound, not a swept axis; baseline
+passive device has $\dot{Q}_{elec}=0$ \\
+Include desorption enthalpy in $T_g$ solve & --- & \code{true} (boolean, not swept) &
+\code{lcow\_economic\_params.csv} (\code{include\_desorption\_enthalpy}) \\
+Water density & $\rho_w$ & \SI{1000}{\kilogram\per\cubic\metre} &
+\code{lcow\_economic\_params.csv} (\code{water\_density\_kg\_per\_l} $\times$
+\code{l\_per\_m3}) \\
+\end{longtable}}
+
+\section{Integration}
+
+The coupled physics system is integrated with SciPy \code{solve\_ivp} (Radau, stiff). State
+during desorption: $\mathbf{y} = [c_w,\, H,\, T_{cond}]$; during absorption: $\mathbf{y} =
+[c_w,\, H]$. LCOW/NPV are evaluated post-hoc from the resulting daily yield -- they do not feed
+back into the ODE integration.
+
+\section{Open items}
+
+\begin{itemize}
+\item Every \textbf{TBD} cell above is an as-implemented constant or sweep bound with no
+literature/vendor citation currently attached in the repository -- filling these in (or replacing
+the value where a better source disagrees) is the natural next step for anyone extending this
+document.
+\item The physics/economics duplication of the mass-transfer convection coefficient
+($g_{chamber}$ in \code{table\_s3.py} vs.\ \code{mass\_transfer\_convection\_coefficient\_m\_s}
+in \code{lcow\_economic\_params.csv}) is a single physical quantity kept in two files; a change
+to one without the other would silently desynchronize the model.
+\item \code{desorption\_hours\_per\_day} (economics, fixed at 12h) is not derived from the
+physics day/night split, which can vary by site/season in real-weather mode -- a mismatch here
+biases the electricity-cost term for the optional active-heating case.
+\item \textbf{Case~2 default (2026-07):} \code{sawh\_bayesopt} (\code{design\_space.py},
+\code{evaluator.py}, \code{bayesopt.py}, and the \code{run\_bayesopt.py}/\code{hp\_sweep.py} CLI
+flags) also now defaults its own case-selection axis to \code{case2}, and \code{case1} there is
+now built with an explicit \code{eps\_abs\_ir=eps\_glass\_ir=1.0} override rather than relying on
+omission -- numerically identical to the old \code{None, None} encoding (verified;
+$\varepsilon_{ag}=\varepsilon_{ga}=1.0$ either way), so historical \code{case1} \code{cache.jsonl}
+entries remain valid, but every \code{to\_device\_config\_kwargs} call now always includes a
+\code{"thermal"} key (previously omitted for \code{case1}), which changes that request's cache
+key. \code{scripts/grid\_param\_sweep.py}'s \code{--eps-abs-ir}/\code{--eps-glass-ir} CLI flags
+(used for the already-executed Sherlock global-grid sweep, \code{sherlock\_param\_sweep.tex})
+were deliberately \emph{not} changed -- they still default to \code{None} (Case~1) to keep that
+documented, already-run production sweep's baseline meaning intact; a rerun under Case~2 would
+need those flags set explicitly.
+\end{itemize}
 
 \end{document}

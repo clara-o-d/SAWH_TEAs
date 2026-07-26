@@ -27,11 +27,11 @@ from run_solar_sim import (  # noqa: E402
     resolve_solar_sim_arguments,
     run_solar_simulation,
 )
-from solar_lumped.economics.lcow import LcowCostBreakdown  # noqa: E402
-from solar_lumped.economics.npv import npv_from_daily_yield  # noqa: E402
-from solar_lumped.economics.params import LCOEconomicParams  # noqa: E402
-from solar_lumped.physics import table_s3  # noqa: E402
-from solar_lumped.physics.salt_properties import get_salt  # noqa: E402
+from solar_lumped.economics import LcowCostBreakdown  # noqa: E402
+from solar_lumped.economics import npv_from_daily_yield  # noqa: E402
+from solar_lumped.economics import LCOEconomicParams  # noqa: E402
+from solar_lumped.physics import H_DES_J_PER_KG  # noqa: E402
+from solar_lumped.physics import get_salt  # noqa: E402
 
 DEFAULT_SWEEP_KEYS: tuple[str, ...] = (
     "h_des_j_per_kg",
@@ -206,7 +206,7 @@ def make_sweep_params(
             "h_des (J/kg)",
             1.8e6,
             3.2e6,
-            table_s3.H_DES_J_PER_KG,
+            H_DES_J_PER_KG,
         ),
         SweepParam(
             "salt_weight_factor",

@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import math
 
-from solar_lumped.physics.conde2004 import (
+from solar_lumped.physics import (
     LICL_VAPOR_PRESSURE,
     equilibrium_salt_mass_fraction_licl,
     vapor_pressure_ratio,
     water_activity_licl,
     water_vapor_pressure_pa,
 )
-from solar_lumped.physics.salt_properties import (
+from solar_lumped.physics import (
     licl_equilibrium_brine_salt_fraction,
     licl_water_activity_at_brine_fraction,
     saturation_vapor_pressure_pa,

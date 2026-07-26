@@ -2,11 +2,13 @@
 """GPU-driven device-parameter sweep -- the JAX/diffrax counterpart to
 scripts/grid_param_sweep.py (see docs/sherlock_param_sweep.tex for the CPU
 version this mirrors). One invocation = one or more sites; each site's full
-135-combo grid x 12 monthly profiles = up to 1,620 instances is batched into a
-single compiled call on the GPU (see FINDINGS.md Results 5/7/8/9 -- batching
-combos and batching different-length months are each separately validated;
-this is their cross product, not yet validated on real hardware at this
-combined size -- that's what this script's first runs are for).
+125-combo grid (hydrogel thickness x fin area ratio x vapor gap, 5 values
+each; eps_abs/tau_glass are fixed constants per case, not swept) x 12 monthly
+profiles = up to 1,500 instances is batched into a single compiled call on
+the GPU (see FINDINGS.md Results 5/7/8/9 -- batching combos and batching
+different-length months are each separately validated; this is their cross
+product, not yet validated on real hardware at this combined size -- that's
+what this script's first runs are for).
 
 Deliberately mirrors grid_param_sweep.py's CLI, weather fetch, combo grid, and
 CSV schema exactly (imported directly, not reimplemented) so output is
@@ -37,9 +39,9 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import numpy as np  # noqa: E402
 
 import grid_param_sweep as gps  # noqa: E402
-from solar_lumped.physics.sorbent import initial_loading  # noqa: E402
-from solar_lumped.weather.client import WeatherClient  # noqa: E402
-from solar_lumped.weather.land_grid import grid_land_points  # noqa: E402
+from solar_lumped.physics import initial_loading  # noqa: E402
+from solar_lumped.weather import WeatherClient  # noqa: E402
+from solar_lumped.weather import grid_land_points  # noqa: E402
 
 from jax_daily_cycle import build_batch_arrays, find_cyclic_state_batched, make_batched_daily_cycle_fn  # noqa: E402
 
@@ -62,10 +64,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--insulation-gap-mm", type=float, default=5.0)
     p.add_argument("--tilt-deg", type=float, default=35.0)
     p.add_argument("--hydrogel-thickness-mm", type=float, nargs="+", default=list(gps.DEFAULT_HYDROGEL_THICKNESS_MM))
-    p.add_argument("--eps-abs", type=float, nargs="+", default=list(gps.DEFAULT_EPS_ABS))
-    p.add_argument("--tau-glass", type=float, nargs="+", default=list(gps.DEFAULT_TAU_GLASS))
     p.add_argument("--fin-area-ratio", type=float, nargs="+", default=list(gps.DEFAULT_FIN_AREA_RATIO))
-    p.add_argument("--vapor-gap-mm", type=float, default=gps.DEFAULT_VAPOR_GAP_MM)
+    p.add_argument("--vapor-gap-mm", type=float, nargs="+", default=list(gps.DEFAULT_VAPOR_GAP_MM))
+    p.add_argument(
+        "--eps-abs", type=float, default=gps.DEFAULT_EPS_ABS,
+        help="Absorber solar absorptivity (fixed constant, not swept). Case 1/2 baseline: 0.95; "
+        "Case 3 'optical material limits': 1.0.",
+    )
+    p.add_argument(
+        "--tau-glass", type=float, default=gps.DEFAULT_TAU_GLASS,
+        help="Glass solar transmittance (fixed constant, not swept). Case 1/2 baseline: 0.90; "
+        "Case 3: 1.0.",
+    )
     p.add_argument(
         "--eps-abs-ir", type=float, default=None,
         help="Absorber IR emissivity for the modified Eqs. 3/4 radiative exchange (fixed constant, "
@@ -115,8 +125,8 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, client: WeatherCl
     mean_rh, mean_t_amb, mean_solar = gps.mean_weather_stats(months)
 
     all_combos = gps.combo_grid(
-        hydrogel_thickness_mm=args.hydrogel_thickness_mm, eps_abs=args.eps_abs,
-        tau_glass=args.tau_glass, fin_area_ratio=args.fin_area_ratio,
+        hydrogel_thickness_mm=args.hydrogel_thickness_mm,
+        fin_area_ratio=args.fin_area_ratio, vapor_gap_mm=args.vapor_gap_mm,
     )
     if args.resume:
         done = gps._existing_combo_keys(args.output_csv, lat, lon)
@@ -128,7 +138,7 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, client: WeatherCl
 
     combos = [
         c for c in all_combos
-        if (round(c.hydrogel_thickness_mm, 6), round(c.eps_abs, 6), round(c.tau_glass, 6), round(c.fin_area_ratio, 6))
+        if (round(c.hydrogel_thickness_mm, 6), round(c.fin_area_ratio, 6), round(c.vapor_gap_mm, 6))
         not in done
     ]
     if not combos:
@@ -137,7 +147,7 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, client: WeatherCl
     configs = [
         gps.build_device_config(
             c, salt=args.salt, salt_loading=args.salt_loading, insulation_gap_mm=args.insulation_gap_mm,
-            tilt_deg=args.tilt_deg, vapor_gap_mm=args.vapor_gap_mm,
+            tilt_deg=args.tilt_deg, eps_abs=args.eps_abs, tau_glass=args.tau_glass,
             eps_abs_ir=args.eps_abs_ir, eps_glass_ir=args.eps_glass_ir,
         )
         for c in combos
@@ -179,12 +189,12 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, client: WeatherCl
                 "lat": lat, "lon": lon,
                 "mean_rh_frac": f"{mean_rh:.6f}", "mean_t_amb_c": f"{mean_t_amb:.4f}", "mean_solar_w_m2": f"{mean_solar:.2f}",
                 "salt": args.salt,
-                "hydrogel_thickness_mm": combo.hydrogel_thickness_mm, "eps_abs": combo.eps_abs,
-                "tau_glass": combo.tau_glass,
+                "hydrogel_thickness_mm": combo.hydrogel_thickness_mm, "eps_abs": args.eps_abs,
+                "tau_glass": args.tau_glass,
                 "eps_abs_ir": args.eps_abs_ir if args.eps_abs_ir is not None else "",
                 "eps_glass_ir": args.eps_glass_ir if args.eps_glass_ir is not None else "",
                 "fin_area_ratio": combo.fin_area_ratio,
-                "vapor_gap_mm": args.vapor_gap_mm,
+                "vapor_gap_mm": combo.vapor_gap_mm,
                 "warmup_method": "aitken-gpu-fixed-round", "resolution": "monthly",
                 "mean_yield_kg_m2": f"{mean_yield[ci]:.6f}", "mean_eta_thermal": f"{mean_eta[ci]:.6f}",
                 "n_periods": len(months),

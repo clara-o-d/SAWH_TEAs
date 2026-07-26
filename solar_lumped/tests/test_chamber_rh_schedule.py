@@ -8,7 +8,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-_DIAZ_SCRIPTS = Path(__file__).resolve().parents[1] / "diaz-marin-et-al._re-creation" / "scripts"
+_DIAZ_SCRIPTS = Path(__file__).resolve().parents[2] / "analysis" / "paper_recreation" / "diaz_marin" / "scripts"
 if str(_DIAZ_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_DIAZ_SCRIPTS))
 

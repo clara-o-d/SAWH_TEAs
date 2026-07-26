@@ -2,12 +2,12 @@
 
 Mirrors, for the ``physics_model="note_s1"`` / ``desorption_solver="quasi_steady"``
 path only (the default -- see solar_lumped/scripts/grid_param_sweep.py):
-  - solar_lumped.physics.device_balances.solve_steady_thermal (scipy.optimize.root
+  - solar_lumped.physics.solve_steady_thermal (scipy.optimize.root
     "hybr" on Eqs. 1/3/4) -> replaced with a fixed-iteration Newton solve.
-  - solar_lumped.simulation.coupled_dynamics._solve_m_des_coupled (scipy.brentq
+  - solar_lumped.simulation._solve_m_des_coupled (scipy.brentq
     root of m_calc(m) - m = 0) -> replaced with fixed-iteration bisection.
-  - solar_lumped.physics.mass_transfer.dc_w_dt / dH_dt (desorption branch only).
-  - solar_lumped.physics.salt_properties.water_activity_from_c_w (LiCl branch only
+  - solar_lumped.physics.dc_w_dt / dH_dt (desorption branch only).
+  - solar_lumped.physics.water_activity_from_c_w (LiCl branch only
     -- this prototype does not port the CaCl2/MgCl2/NaCl brine_equilibrium path).
 
 All functions are pure, vmap-safe (no data-dependent Python control flow -- every
@@ -23,7 +23,7 @@ import jax.numpy as jnp
 
 jax.config.update("jax_enable_x64", True)
 
-# ---- Table S3 / Note S1 constants (solar_lumped/src/solar_lumped/physics/table_s3.py) ----
+# ---- Table S3 / Note S1 constants (solar_lumped/src/solar_lumped/physics.py) ----
 H0_M = 0.004
 L_G_M = 0.04
 L_INS_M = 0.005
@@ -199,9 +199,9 @@ def concentration_ratio_desorption(t_gel_c, t_cond_c):
 
 
 class MassParams:
-    """Mirrors solar_lumped.physics.mass_transfer.MassTransferParams for LiCl."""
+    """Mirrors solar_lumped.physics.MassTransferParams for LiCl."""
 
-    def __init__(self, *, h0_ref_m, vapor_gap_m, tilt_deg, c_s_mol_m3, formula_weight_g_mol, g_conv_m_s=0.0085):
+    def __init__(self, *, h0_ref_m, vapor_gap_m, tilt_deg, c_s_mol_m3, formula_weight_g_mol, g_conv_m_s=0.015):
         self.h0_ref_m = h0_ref_m
         self.vapor_gap_m = vapor_gap_m
         self.tilt_deg = tilt_deg

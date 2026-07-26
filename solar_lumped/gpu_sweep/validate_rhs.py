@@ -19,14 +19,14 @@ if str(_SRC) not in sys.path:
 
 import numpy as np  # noqa: E402
 
-from solar_lumped.physics.device_balances import DeviceThermalParams  # noqa: E402
-from solar_lumped.physics.sorbent import initial_loading  # noqa: E402
-from solar_lumped.simulation.coupled_dynamics import evaluate_coupled_rates  # noqa: E402
-from solar_lumped.simulation.device_config import DeviceConfig  # noqa: E402
-from solar_lumped.simulation.ode_system import _integrate_absorption, _integrate_desorption  # noqa: E402
-from solar_lumped.weather.client import WeatherClient  # noqa: E402
-from solar_lumped.weather.climate import representative_mean_day_df  # noqa: E402
-from solar_lumped.weather.profiles import profile_from_day_df  # noqa: E402
+from solar_lumped.physics import DeviceThermalParams  # noqa: E402
+from solar_lumped.physics import initial_loading  # noqa: E402
+from solar_lumped.simulation import evaluate_coupled_rates  # noqa: E402
+from solar_lumped.simulation import DeviceConfig  # noqa: E402
+from solar_lumped.simulation import _integrate_absorption, _integrate_desorption  # noqa: E402
+from solar_lumped.weather import WeatherClient  # noqa: E402
+from solar_lumped.weather import representative_mean_day_df  # noqa: E402
+from solar_lumped.weather import profile_from_day_df  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import jax_physics as jp  # noqa: E402

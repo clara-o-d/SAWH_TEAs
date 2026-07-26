@@ -5,10 +5,10 @@
 # Case 3's flags and its own output directory (don't mix with Case 1/2 output
 # -- see docs/gpu_sweep_handoff.md).
 #
-# Note: eps_abs=1 and tau_glass=1 are fixed idealized values, not the usual
-# swept 0.85-0.95/0.80-0.90 ranges -- pass --eps-abs 1.0 --tau-glass 1.0
-# explicitly (single values, not lists) so the combo grid doesn't sweep them.
-# hydrogel-thickness-mm and fin-area-ratio still sweep normally.
+# Note: eps_abs and tau_glass are always fixed constants (not swept) -- pass
+# --eps-abs 1.0 --tau-glass 1.0 for Case 3's idealized values (vs. the
+# Case 1/2 baseline of 0.95/0.90). hydrogel-thickness-mm, fin-area-ratio, and
+# vapor-gap-mm still sweep normally (5 values each, 125 combos/site).
 #
 # Merge afterward:
 #   (head -1 outputs/gpu_grid_sweep_case3/chunk_0.csv; tail -n +2 -q outputs/gpu_grid_sweep_case3/chunk_*.csv) \

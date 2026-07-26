@@ -4,14 +4,14 @@ from __future__ import annotations
 
 import math
 
-from solar_lumped.simulation.device_config import DeviceConfig
-from solar_lumped.simulation.site_feasibility import (
+from solar_lumped.simulation import DeviceConfig
+from solar_lumped.simulation import (
     FAIL_LCO,
     salt_climate_feasible,
     simulate_salt_lcow,
 )
-from solar_lumped.physics.salt_properties import get_salt
-from solar_lumped.weather.profiles import baseline_profile
+from solar_lumped.physics import get_salt
+from solar_lumped.weather import baseline_profile
 
 
 def test_drh_rejects_nacl_at_low_rh():

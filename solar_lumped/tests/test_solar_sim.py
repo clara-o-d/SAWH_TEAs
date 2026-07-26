@@ -5,39 +5,54 @@ import math
 import numpy as np
 import pytest
 
-from solar_lumped.economics.lcow import (
+# Wilson Table S3 g_chamber, used only when replaying/validating against a
+# specific published Wilson et al. figure (the code's own default may differ).
+WILSON_TABLE_S3_G_CHAMBER_M_S = 0.0085
+
+from solar_lumped.economics import (
     lcow_cost_breakdown_from_daily_yield,
     lcow_from_daily_yield,
 )
-from solar_lumped.economics.params import LCOEconomicParams, dry_composite_mass_kg
-from solar_lumped.physics.device_balances import thermal_residual_norm
-from solar_lumped.physics.device_balances import DeviceThermalParams
-from solar_lumped.physics.mass_transfer import concentration_ratio_absorption, dc_w_dt
-from solar_lumped.physics.salt_properties import equilibrium_c_w_at_rh
-from solar_lumped.simulation.device_config import DeviceConfig
-from solar_lumped.simulation.ode_system import run_daily_cycle
-from solar_lumped.weather.profiles import baseline_profile
+from solar_lumped.economics import LCOEconomicParams, dry_composite_mass_kg
+from solar_lumped.physics import thermal_residual_norm
+from solar_lumped.physics import DeviceThermalParams
+from solar_lumped.physics import concentration_ratio_absorption, dc_w_dt
+from solar_lumped.physics import equilibrium_c_w_at_rh
+from solar_lumped.physics import (
+    CONDENSER_THERMAL_MASS_J_M2_K,
+    EPS_AL,
+    EPS_GEL,
+    FIN_AREA_RATIO,
+    G_CHAMBER_M_S,
+    H0_M,
+    H_DES_J_PER_KG,
+    H_FG_J_PER_KG,
+    L_C_M,
+    L_G_M,
+    U_GEL_W_M2_K,
+    u_gel_w_m2_k,
+)
+from solar_lumped.simulation import DeviceConfig
+from solar_lumped.simulation import run_daily_cycle
+from solar_lumped.weather import baseline_profile
 
 
 def test_table_s3_device_defaults():
     cfg = DeviceConfig.comsol_table_s3()
-    from solar_lumped.physics import table_s3
 
-    assert cfg.hydrogel_thickness_m == table_s3.H0_M
-    assert cfg.vapor_gap_m == table_s3.L_G_M
-    assert cfg.g_conv_m_s == table_s3.G_CHAMBER_M_S
-    assert cfg.condenser_thickness_m == pytest.approx(table_s3.L_C_M)
-    assert cfg.fin_area_ratio == table_s3.FIN_AREA_RATIO
-    assert cfg.h_fg_j_per_kg == table_s3.H_FG_J_PER_KG
+    assert cfg.hydrogel_thickness_m == H0_M
+    assert cfg.vapor_gap_m == L_G_M
+    assert cfg.g_conv_m_s == G_CHAMBER_M_S
+    assert cfg.condenser_thickness_m == pytest.approx(L_C_M)
+    assert cfg.fin_area_ratio == FIN_AREA_RATIO
+    assert cfg.h_fg_j_per_kg == H_FG_J_PER_KG
     thermal = cfg.thermal_params()
-    assert thermal.h_des_j_per_kg == table_s3.H_DES_J_PER_KG
-    assert table_s3.u_gel_w_m2_k(cfg.hydrogel_thickness_m) == pytest.approx(
-        table_s3.U_GEL_W_M2_K
-    )
-    assert thermal.eps_gel == table_s3.EPS_GEL
-    assert thermal.eps_al == table_s3.EPS_AL
+    assert thermal.h_des_j_per_kg == H_DES_J_PER_KG
+    assert u_gel_w_m2_k(cfg.hydrogel_thickness_m) == pytest.approx(U_GEL_W_M2_K)
+    assert thermal.eps_gel == EPS_GEL
+    assert thermal.eps_al == EPS_AL
     assert cfg.condenser_thermal_mass_j_m2_k() == pytest.approx(
-        table_s3.CONDENSER_THERMAL_MASS_J_M2_K
+        CONDENSER_THERMAL_MASS_J_M2_K
     )
 
 
@@ -71,7 +86,7 @@ def test_absorption_increases_c_w():
 
 
 def test_pam_licl_brine_aw_inverts_at_rh():
-    from solar_lumped.physics.salt_properties import (
+    from solar_lumped.physics import (
         licl_equilibrium_brine_salt_fraction,
         water_activity_from_c_w,
     )
@@ -103,7 +118,7 @@ def test_pam_licl_brine_aw_inverts_at_rh():
 
 
 def test_water_inventory_series_baseline():
-    from solar_lumped.simulation.water_inventory import water_inventory_series
+    from solar_lumped.simulation import water_inventory_series
 
     y, _, abs_res, des_res = run_daily_cycle(baseline_profile(), DeviceConfig.baseline())
     series = water_inventory_series(abs_res, des_res, config=DeviceConfig.baseline())
@@ -123,8 +138,8 @@ def test_baseline_simulation_runs():
 
 
 def test_desorption_flux_matches_inventory_loss():
-    from solar_lumped.physics.mass_transfer import m_des_kg_s_m2_from_state
-    from solar_lumped.physics.salt_properties import WATER_MOLAR_MASS_KG_MOL
+    from solar_lumped.physics import m_des_kg_s_m2_from_state
+    from solar_lumped.physics import WATER_MOLAR_MASS_KG_MOL
 
     h0 = DeviceConfig.baseline().hydrogel_thickness_m
     y, _, abs_r, des_r = run_daily_cycle(baseline_profile(), DeviceConfig.baseline())
@@ -142,7 +157,8 @@ def test_desorption_flux_matches_inventory_loss():
 
 
 def test_baseline_yield_from_desorption_flux():
-    y, _, _, des = run_daily_cycle(baseline_profile(), DeviceConfig.baseline())
+    config = DeviceConfig.baseline(g_conv_m_s=WILSON_TABLE_S3_G_CHAMBER_M_S)
+    y, _, _, des = run_daily_cycle(baseline_profile(), config)
     assert y == des.water_collected_kg_m2
     assert y >= 0.0
     # Paper Fig. 2 baseline ~1.7 L/m²/day (25°C, 50% RH, 600 W/m²)
@@ -172,8 +188,8 @@ def test_lcow_breakdown_sums():
 
 
 def test_atacama_replay_runs():
-    from solar_lumped.weather.atacama_figure import ATACAMA_FIELD_DESORPTION_STEPS
-    from solar_lumped.weather.profiles import replay_profile
+    from solar_lumped.weather import ATACAMA_FIELD_DESORPTION_STEPS
+    from solar_lumped.weather import replay_profile
 
     profile = replay_profile("atacama-replay")
     config = DeviceConfig.atacama_field()
@@ -190,7 +206,7 @@ def test_atacama_replay_runs():
 
 
 def test_cycled_initial_uses_post_desorption_state():
-    from solar_lumped.weather.profiles import replay_profile
+    from solar_lumped.weather import replay_profile
 
     profile = replay_profile("atacama-replay")
     config = DeviceConfig.atacama_field()
@@ -205,11 +221,11 @@ def test_cycled_initial_uses_post_desorption_state():
 
 
 def test_baseline_starts_at_fabrication_equilibrium():
-    from solar_lumped.physics.salt_properties import (
+    from solar_lumped.physics import (
         FABRICATION_EQUILIBRIUM_RH,
         pam_licl_uptake_g_g_at_rh,
     )
-    from solar_lumped.weather.profiles import baseline_initial_c_w
+    from solar_lumped.weather import baseline_initial_c_w
 
     config = DeviceConfig.baseline()
     h0 = config.hydrogel_thickness_m
@@ -219,7 +235,7 @@ def test_baseline_starts_at_fabrication_equilibrium():
         config,
         c_w_initial=c_w0,
     )
-    from solar_lumped.physics.salt_properties import pam_licl_gravimetric_uptake_g_g
+    from solar_lumped.physics import pam_licl_gravimetric_uptake_g_g
 
     u0 = pam_licl_gravimetric_uptake_g_g(
         float(abs_res.c_w[0]), float(abs_res.H[0]), h0_ref_m=h0
@@ -229,14 +245,14 @@ def test_baseline_starts_at_fabrication_equilibrium():
 
 
 def test_fig_s1_replay_matches_note_s1d():
-    from solar_lumped.weather.fig_s1 import (
+    from solar_lumped.physics import water_in_gel_l_m2
+    from solar_lumped.weather import (
         FIG_S1_ABSORPTION_STEPS,
         FIG_S1_DESORPTION_STEPS,
         FIG_S1_INITIAL_WATER_L_M2,
         fig_s1_initial_c_w,
-        water_in_gel_l_m2,
     )
-    from solar_lumped.weather.profiles import replay_profile
+    from solar_lumped.weather import replay_profile
 
     profile = replay_profile("fig-s1-replay")
     assert len(profile.absorption.temperature_c) == FIG_S1_ABSORPTION_STEPS
@@ -244,7 +260,7 @@ def test_fig_s1_replay_matches_note_s1d():
     assert profile.desorption.solar_w_m2[0] == 800.0
     assert profile.absorption.relative_humidity[0] == 0.5
 
-    config = DeviceConfig.comsol_table_s3()
+    config = DeviceConfig.comsol_table_s3(g_conv_m_s=WILSON_TABLE_S3_G_CHAMBER_M_S)
     c_w0 = fig_s1_initial_c_w(h_m=config.hydrogel_thickness_m)
     y, eta, abs_res, des_res = run_daily_cycle(
         profile, config, c_w_initial=c_w0

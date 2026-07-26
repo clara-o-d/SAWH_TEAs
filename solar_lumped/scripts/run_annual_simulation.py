@@ -13,15 +13,15 @@ _SRC = _REPO / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from solar_lumped.physics.adsorbent import DEFAULT_MOF_NAME
-from solar_lumped.physics.salt_properties import get_salt
-from solar_lumped.simulation.annual_yield import (
+from solar_lumped.physics import DEFAULT_MOF_NAME
+from solar_lumped.physics import get_salt
+from solar_lumped.simulation import (
     simulate_annual_year,
     write_daily_summary_csv,
 )
-from solar_lumped.simulation.device_config import DeviceConfig
-from solar_lumped.weather.client import WeatherClient
-from solar_lumped.weather.profiles import real_weather_days_from_df
+from solar_lumped.simulation import DeviceConfig
+from solar_lumped.weather import WeatherClient
+from solar_lumped.weather import real_weather_days_from_df
 
 
 def build_device_config(

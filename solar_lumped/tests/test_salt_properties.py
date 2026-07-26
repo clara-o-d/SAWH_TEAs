@@ -6,7 +6,7 @@ import math
 
 import pytest
 
-from solar_lumped.physics.salt_properties import (
+from solar_lumped.physics import (
     DRY_COMPOSITE_DENSITY_KG_M3,
     chamber_c_s_from_synthesis,
     chamber_c_s_with_constant_density,
@@ -16,7 +16,7 @@ from solar_lumped.physics.salt_properties import (
     salt_molarity_from_composite,
     water_activity_from_c_w,
 )
-from solar_lumped.simulation.device_config import DeviceConfig
+from solar_lumped.simulation import DeviceConfig
 
 
 def test_chamber_pour_volume_ml_pam_licl_2gg():
@@ -107,7 +107,7 @@ def test_desorption_water_activity_decreases_with_gel_temp():
 
 
 def test_gravimetric_uptake_component_basis_matches_dvs_density():
-    from solar_lumped.physics.salt_properties import pam_licl_gravimetric_uptake_g_g
+    from solar_lumped.physics import pam_licl_gravimetric_uptake_g_g
 
     config = DeviceConfig.baseline()
     mass = config.mass_params()
@@ -127,7 +127,7 @@ def test_gravimetric_uptake_component_basis_matches_dvs_density():
 
 
 def test_salt_weight_factor_scales_gravimetric_uptake():
-    from solar_lumped.physics.salt_properties import pam_licl_gravimetric_uptake_g_g
+    from solar_lumped.physics import pam_licl_gravimetric_uptake_g_g
 
     config = DeviceConfig.baseline()
     mass = config.mass_params()

@@ -16,33 +16,32 @@ _SRC = _REPO / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from solar_lumped.economics.lcow import (
+from solar_lumped.economics import (
     LcowCostBreakdown,
     lcow_cost_breakdown_from_daily_yield,
     lcow_from_daily_yield,
 )
-from solar_lumped.economics.params import LCOEconomicParams
-from solar_lumped.simulation.device_config import DeviceConfig
-from solar_lumped.simulation.ode_system import run_daily_cycle
-from solar_lumped.simulation.detailed_plots import (
+from solar_lumped.economics import LCOEconomicParams
+from solar_lumped.simulation import DeviceConfig
+from solar_lumped.simulation import run_daily_cycle
+from solar_lumped.simulation import (
     detailed_series,
     plot_detailed_diagnostics,
     write_detailed_csv,
 )
-from solar_lumped.simulation.water_inventory import (
+from solar_lumped.simulation import (
     plot_water_inventory,
     water_inventory_series,
     write_water_inventory_csv,
 )
-from solar_lumped.weather.profiles import (
+from solar_lumped.weather import (
     baseline_initial_c_w,
     baseline_profile,
     representative_mean_day_profile,
     replay_profile,
 )
-from solar_lumped.physics import table_s3
-from solar_lumped.physics.adsorbent import DEFAULT_MOF_NAME
-from solar_lumped.physics.salt_properties import (
+from solar_lumped.physics import DEFAULT_MOF_NAME
+from solar_lumped.physics import (
     DRY_COMPOSITE_DENSITY_KG_M3,
     GAS_CONSTANT_J_MOL_K,
     WATER_MOLAR_MASS_KG_MOL,
@@ -54,9 +53,10 @@ from solar_lumped.physics.salt_properties import (
     saturation_vapor_pressure_pa,
     water_activity_from_c_w,
 )
-from solar_lumped.physics.mass_transfer import C_W_MAX_MOL_M3, C_W_MIN_MOL_M3
-from solar_lumped.physics.sorbent import SorbentKind, inventory_label, inventory_prefix
-from solar_lumped.weather.fig_s1 import c_w_from_water_in_gel_l_m2, fig_s1_initial_c_w
+from solar_lumped.physics import C_W_MAX_MOL_M3, C_W_MIN_MOL_M3
+from solar_lumped.physics import SorbentKind, inventory_label, inventory_prefix
+from solar_lumped.physics import c_w_from_water_in_gel_l_m2
+from solar_lumped.weather import fig_s1_initial_c_w
 
 
 def _lcow_kwargs(config: DeviceConfig) -> dict:
@@ -139,7 +139,7 @@ def build_device_config(
     """Construct a ``DeviceConfig`` (shared by CLI and chamber-kinetics callers).
 
     Sorption/brine state uses ``DeviceConfig``'s default dry-basis composite density
-    (DVS isotherm); gel thermal mass in the ODE uses ``table_s3.RHO_COMPOSITE_KG_M3``.
+    (DVS isotherm); gel thermal mass in the ODE uses ``RHO_COMPOSITE_KG_M3``.
     """
     get_salt(salt)
     kwargs: dict[str, object] = {

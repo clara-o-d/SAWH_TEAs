@@ -19,7 +19,7 @@ _SRC = _REPO / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from solar_lumped.plotting.matlab_style import plot_defaults_slides, print_figure
+from solar_lumped.plotting import plot_defaults_slides, print_figure
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:

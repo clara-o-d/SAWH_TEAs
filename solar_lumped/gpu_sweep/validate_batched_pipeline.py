@@ -25,12 +25,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import numpy as np  # noqa: E402
 
-from solar_lumped.physics.device_balances import DeviceThermalParams  # noqa: E402
-from solar_lumped.physics.sorbent import initial_loading  # noqa: E402
-from solar_lumped.simulation.device_config import DeviceConfig  # noqa: E402
-from solar_lumped.weather.client import WeatherClient  # noqa: E402
-from solar_lumped.weather.climate import representative_mean_day_df  # noqa: E402
-from solar_lumped.weather.profiles import profile_from_day_df  # noqa: E402
+from solar_lumped.physics import DeviceThermalParams  # noqa: E402
+from solar_lumped.physics import initial_loading  # noqa: E402
+from solar_lumped.simulation import DeviceConfig  # noqa: E402
+from solar_lumped.weather import WeatherClient  # noqa: E402
+from solar_lumped.weather import representative_mean_day_df  # noqa: E402
+from solar_lumped.weather import profile_from_day_df  # noqa: E402
 
 from jax_daily_cycle import (  # noqa: E402
     build_batch_arrays,

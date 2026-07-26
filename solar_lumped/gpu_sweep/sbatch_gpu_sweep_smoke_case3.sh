@@ -1,6 +1,6 @@
 #!/bin/bash
 # Case 3 ("optical material limits") smoke test -- 10 real sites, eps_abs=1.0/
-# tau_glass=1.0 fixed (not swept lists), eps_abs_ir=0.0/eps_glass_ir=0.0. Run
+# tau_glass=1.0 fixed constants, eps_abs_ir=0.0/eps_glass_ir=0.0. Run
 # this and sanity-check the output before submitting
 # sbatch_gpu_sweep_array_case3.sh for the full 1,405-site grid -- eps=0 is a
 # genuinely different numerical regime than Case 1/2, worth confirming here

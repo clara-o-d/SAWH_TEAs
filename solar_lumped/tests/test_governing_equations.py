@@ -5,14 +5,14 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from solar_lumped.physics.correlations import (
+from solar_lumped.physics import (
     condenser_h_conv_w_m2_k,
     mass_transfer_g_from_h_conv_m_s,
     parallel_plate_emissivity,
     radiative_exchange_w_m2,
 )
-from solar_lumped.physics.device_balances import DeviceThermalParams, _residuals, solve_steady_thermal
-from solar_lumped.physics.mass_transfer import (
+from solar_lumped.physics import DeviceThermalParams, _residuals, solve_steady_thermal
+from solar_lumped.physics import (
     concentration_ratio_absorption,
     concentration_ratio_desorption,
     dH_dt,
@@ -20,15 +20,15 @@ from solar_lumped.physics.mass_transfer import (
     mass_transfer_g_m_s,
     m_des_kg_s_m2_from_state,
 )
-from solar_lumped.physics.salt_properties import (
+from solar_lumped.physics import (
     GAS_CONSTANT_J_MOL_K,
     WATER_MOLAR_MASS_KG_MOL,
     saturation_vapor_pressure_pa,
 )
-from solar_lumped.simulation.coupled_dynamics import evaluate_coupled_rates
-from solar_lumped.simulation.device_config import DeviceConfig
-from solar_lumped.simulation.ode_system import run_daily_cycle
-from solar_lumped.weather.profiles import baseline_profile
+from solar_lumped.simulation import evaluate_coupled_rates
+from solar_lumped.simulation import DeviceConfig
+from solar_lumped.simulation import run_daily_cycle
+from solar_lumped.weather import baseline_profile
 
 
 @pytest.fixture
@@ -48,7 +48,7 @@ def thermal(config: DeviceConfig):
 
 def test_eq5_mass_transfer_formula_absorption(config: DeviceConfig, mass):
     """dc_w/dt = (g/H₀) · P_sat/(RT) · (C_R − a_w) during absorption."""
-    from solar_lumped.physics.mass_transfer import _absorption_effective_water_activity
+    from solar_lumped.physics import _absorption_effective_water_activity
 
     h0 = config.hydrogel_thickness_m
     t_gel = 25.0
@@ -122,7 +122,7 @@ def test_desorption_g_uses_lewis_analogy(config: DeviceConfig, mass):
     """Note S1 Eq. S5: g = h_conv · D_air / k_air in desorption."""
     h0 = config.hydrogel_thickness_m
     t_gel, t_cond = 50.0, 30.0
-    from solar_lumped.physics.correlations import hollands_vapor_gap_h_conv_w_m2_k
+    from solar_lumped.physics import hollands_vapor_gap_h_conv_w_m2_k
 
     gap = max(config.vapor_gap_m - h0, 1e-4)
     h_conv = hollands_vapor_gap_h_conv_w_m2_k(
@@ -207,7 +207,7 @@ def test_absorption_coupled_rates_match_doc(config: DeviceConfig, mass, thermal)
 
 def test_desorption_m_des_self_consistent(config: DeviceConfig, mass, thermal):
     """Desorption root find: ṁ_des matches Note S1 flux (Eq. 5 with H₀)."""
-    from solar_lumped.physics.mass_transfer import m_des_kg_s_m2_from_dc_w
+    from solar_lumped.physics import m_des_kg_s_m2_from_dc_w
 
     h0 = config.hydrogel_thickness_m
     rates = evaluate_coupled_rates(

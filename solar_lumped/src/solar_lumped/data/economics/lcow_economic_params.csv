@@ -23,6 +23,6 @@ c_acrylamide_usd_per_kg,1.1,Polymer matrix acrylamide (Table S1)
 c_additives_usd_per_kg_composite,0.0072148,"APS, MBAA, TEMED per kg composite (Table S1)"
 electricity_price_usd_per_kwh,0.10,Grid electricity for optional Q_elec
 desorption_hours_per_day,12.0,Active desorption window (hours/day)
-mass_transfer_convection_coefficient_m_s,0.0085,g_chamber (m/s); Wilson Table S3 / Note S1 Fig S1
+mass_transfer_convection_coefficient_m_s,0.015,g_chamber (m/s); Wilson Table S3 / Note S1 Fig S1
 max_electric_heat_w_per_m2,1500.0,Upper bound on optimized electric heat (W/m²)
 include_desorption_enthalpy,true,Solve gel T from heat balance (solar + Q_elec = losses + m_des h_des)

@@ -42,7 +42,7 @@ from run_solar_sim import (  # noqa: E402
     register_solar_sim_arguments,
     resolve_solar_sim_arguments,
 )
-from solar_lumped.economics.params import LCOEconomicParams  # noqa: E402
+from solar_lumped.economics import LCOEconomicParams  # noqa: E402
 
 
 def main() -> None:

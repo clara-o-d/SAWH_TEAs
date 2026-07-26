@@ -5,11 +5,11 @@ from datetime import date
 import pandas as pd
 import pytest
 
-from solar_lumped.weather.climate import (
+from solar_lumped.weather import (
     STEPS_PER_DAY,
     representative_mean_day_df,
 )
-from solar_lumped.weather.profiles import profile_from_day_df
+from solar_lumped.weather import profile_from_day_df
 
 
 def _synthetic_year_15min() -> pd.DataFrame:

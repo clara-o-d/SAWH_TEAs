@@ -12,3 +12,5 @@ outputs/
 
 *.png
 !**/tornado_plots/.gitkeep
+
+*.mph

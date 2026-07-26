@@ -20,8 +20,8 @@ _SRC = _REPO / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from solar_lumped.weather.client import WeatherClient  # noqa: E402
-from solar_lumped.weather.land_grid import grid_land_points  # noqa: E402
+from solar_lumped.weather import WeatherClient  # noqa: E402
+from solar_lumped.weather import grid_land_points  # noqa: E402
 
 
 def main(argv: list[str] | None = None) -> int:

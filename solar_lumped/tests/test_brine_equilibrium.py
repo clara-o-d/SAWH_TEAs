@@ -6,12 +6,12 @@ import math
 
 import pytest
 
-from solar_lumped.physics.brine_equilibrium import (
+from solar_lumped.physics import (
     equilibrate_salt_mf,
     mf_NaCl,
     water_activity_at_brine_fraction,
 )
-from solar_lumped.physics.salt_properties import get_salt
+from solar_lumped.physics import get_salt
 
 
 def test_mf_nacl_finite_at_high_rh():
