@@ -99,11 +99,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+# design_space.to_unit_cube divides by (hi - lo) -- an exact lo == hi point
+# for a "fixed" dim makes that a division by zero (NaN in every normalized
+# coordinate, which then blows up the GP fit). A span this small relative to
+# any real bound (~1e-3 to tens) samples as indistinguishable from the exact
+# fixed value while keeping the normalization finite.
+_FIXED_DIM_EPS = 1e-9
+
+
 def _bounds(args: argparse.Namespace) -> DesignBounds:
     """Box bounds for the 3 optimized dims from the sweep's own combo lists
-    (min/max, mm -> m); the other 3 DesignBounds dims collapse to a point at
-    the fixed CLI value -- from_unit_cube handles low==high with no special
-    case needed.
+    (min/max, mm -> m); the other 3 DesignBounds dims collapse to a tiny span
+    around the fixed CLI value (see _FIXED_DIM_EPS).
     """
     salt_ratio = args.salt_loading
     insulation_m = args.insulation_gap_mm / 1000.0
@@ -111,10 +118,10 @@ def _bounds(args: argparse.Namespace) -> DesignBounds:
     return DesignBounds(
         hydrogel_thickness_m=(min(args.hydrogel_thickness_mm) / 1000.0, max(args.hydrogel_thickness_mm) / 1000.0),
         vapor_gap_m=(min(args.vapor_gap_mm) / 1000.0, max(args.vapor_gap_mm) / 1000.0),
-        insulation_gap_m=(insulation_m, insulation_m),
+        insulation_gap_m=(insulation_m, insulation_m + _FIXED_DIM_EPS),
         fin_area_ratio=(min(args.fin_area_ratio), max(args.fin_area_ratio)),
-        tilt_deg=(tilt, tilt),
-        salt_to_polymer_ratio=(salt_ratio, salt_ratio),
+        tilt_deg=(tilt, tilt + _FIXED_DIM_EPS),
+        salt_to_polymer_ratio=(salt_ratio, salt_ratio + _FIXED_DIM_EPS),
     )
 
 
