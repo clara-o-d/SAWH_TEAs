@@ -14,6 +14,7 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from solar_lumped.physics import DEFAULT_MOF_NAME
+from solar_lumped.physics import TILT_DEG
 from solar_lumped.physics import get_salt
 from solar_lumped.simulation import (
     simulate_annual_year,
@@ -33,7 +34,7 @@ def build_device_config(
     hydrogel_thickness_mm: float = 4.0,
     vapor_gap_mm: float = 40.0,
     insulation_gap_mm: float = 5.0,
-    tilt_deg: float = 35.0,
+    tilt_deg: float = TILT_DEG,
     fin_area_ratio: float = 7.1,
 ) -> DeviceConfig:
     get_salt(salt)
@@ -81,7 +82,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--hydrogel-thickness-mm", type=float, default=4.0)
     p.add_argument("--vapor-gap-mm", type=float, default=40.0)
     p.add_argument("--insulation-gap-mm", type=float, default=5.0)
-    p.add_argument("--tilt-deg", type=float, default=35.0)
+    p.add_argument("--tilt-deg", type=float, default=TILT_DEG)
     p.add_argument("--fin-area-ratio", type=float, default=7.1)
     return p.parse_args(argv)
 

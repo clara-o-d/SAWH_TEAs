@@ -71,7 +71,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--hydrogel-thickness-mm", type=float, default=4.0)
     p.add_argument("--vapor-gap-mm", type=float, default=40.0)
     p.add_argument("--insulation-gap-mm", type=float, default=5.0)
-    p.add_argument("--tilt-deg", type=float, default=35.0)
+    p.add_argument("--tilt-deg", type=float, default=30.0)
     p.add_argument("--fin-area-ratio", type=float, default=7.1)
     p.add_argument(
         "--output-csv",

@@ -14,6 +14,9 @@ from typing import Any
 import numpy as np
 from scipy.stats import qmc
 
+from solar_lumped.physics import EPS_ABS_IR_CASE2, EPS_GLASS_IR_CASE2
+from solar_lumped.physics import VAPOR_GAP_TRANSPORT_MIN_M as _VAPOR_GAP_TRANSPORT_MIN_M
+
 VAR_ORDER: tuple[str, ...] = (
     "hydrogel_thickness_m",
     "vapor_gap_m",
@@ -27,7 +30,7 @@ VAR_ORDER: tuple[str, ...] = (
 # (VAPOR_GAP_TRANSPORT_MIN_M); used only to avoid wasting expensive
 # initial samples on designs the physics already handles gracefully as
 # near-zero yield.
-VAPOR_GAP_TRANSPORT_MIN_M: float = 0.007
+VAPOR_GAP_TRANSPORT_MIN_M: float = _VAPOR_GAP_TRANSPORT_MIN_M
 
 # Absorber/glass IR emissivity pairs for solar_lumped's modified Eqs. 3/4
 # radiative-exchange term (device_balances.py::DeviceThermalParams.eps_abs_ir/
@@ -45,7 +48,7 @@ VAPOR_GAP_TRANSPORT_MIN_M: float = 0.007
 # entries -- see evaluator.py::design_vector_hash.
 CASE_EPS_IR: dict[str, tuple[float | None, float | None]] = {
     "case1": (1.0, 1.0),
-    "case2": (0.05, 0.95),
+    "case2": (EPS_ABS_IR_CASE2, EPS_GLASS_IR_CASE2),
     "case3": (0.0, 0.0),
 }
 

@@ -41,6 +41,7 @@ from solar_lumped.weather import (
     replay_profile,
 )
 from solar_lumped.physics import DEFAULT_MOF_NAME
+from solar_lumped.physics import TILT_DEG
 from solar_lumped.physics import (
     DRY_COMPOSITE_DENSITY_KG_M3,
     GAS_CONSTANT_J_MOL_K,
@@ -163,10 +164,8 @@ def _build_config(args: argparse.Namespace) -> DeviceConfig:
     if fin_ratio is None:
         fin_ratio = 5.0 if args.weather_mode == "atacama-replay" else 7.1
     tilt = args.tilt_deg
-    if args.weather_mode == "atacama-replay" and tilt == 35.0:
-        tilt = 25.0
-    elif args.weather_mode in ("baseline", "fig-s1-replay") and tilt == 35.0:
-        tilt = 30.0
+    if tilt is None:
+        tilt = 25.0 if args.weather_mode == "atacama-replay" else TILT_DEG
     return build_device_config(
         sorbent=args.sorbent,
         mof=args.mof,
@@ -510,7 +509,12 @@ def register_solar_sim_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument("--hydrogel-thickness-mm", type=float, default=4.0)
     p.add_argument("--vapor-gap-mm", type=float, default=40.0)
     p.add_argument("--insulation-gap-mm", type=float, default=5.0)
-    p.add_argument("--tilt-deg", type=float, default=35.0)
+    p.add_argument(
+        "--tilt-deg",
+        type=float,
+        default=None,
+        help="Device tilt (default: 25 for atacama-replay, 30 (Wilson baseline) otherwise)",
+    )
     p.add_argument(
         "--fin-area-ratio",
         type=float,

@@ -27,10 +27,11 @@ _ECON_FIELD_ROWS: dict[str, str] = {
     "maintenance_cost_fraction": "Maintenance cost fraction (f_maint)",
     "utilization_factor": "Utilization factor (f_util)",
     "hydrogel_lifetime_years": "Hydrogel lifetime (L_gel)",
-    "energy_cost_usd_per_year": "Fixed annual energy cost (C_energy,fixed)",
-    "energy_cost_usd_per_extra_half_cycle_per_day": "Extra half-cycle energy cost",
-    "c_acrylamide_usd_per_kg": "Acrylamide price (c_acrylamide)",
-    "c_additives_usd_per_kg_composite": "Additives price, composite basis (c_additives)",
+    "c_am_usd_per_kg": "Acrylamide price, AM (c_AM)",
+    "c_aps_usd_per_kg": "Ammonium persulfate price, APS (c_APS)",
+    "c_mba_usd_per_kg": "N,N'-methylenebisacrylamide price, MBA (c_MBA)",
+    "c_temed_usd_per_kg": "Tetramethylethylenediamine price, TEMED (c_TEMED)",
+    "c_water_gel_usd_per_kg": "De-ionized water price, hydrogel manufacturing (c_water_gel)",
     "electricity_price_usd_per_kwh": "Electricity price (p_elec)",
     "desorption_hours_per_day": "Desorption hours per day (t_des)",
     "max_electric_heat_w_per_m2": "Max electric heat, optimizer bound (Q_elec,max)",
@@ -62,7 +63,7 @@ def _load_economic_data() -> tuple[dict[str, Any], tuple[tuple[str, float], ...]
     scalars["hydrogel_thickness_m"] = float(h0_row["value"]) / 1000.0
     scalars["hydrogel_thickness_min_m"] = float(h0_row["lower"]) / 1000.0
     scalars["hydrogel_thickness_max_m"] = float(h0_row["upper"]) / 1000.0
-    scalars["hydrogel_density_kg_m3"] = _pv("Solution/brine density, LiCl (rho_sol)")
+    scalars["hydrogel_density_kg_m3"] = _pv("Composite (hydrogel) density at 20% RH (rho_gel)")
     scalars["mass_transfer_convection_coefficient_m_s"] = _pv(
         "Chamber convection coefficient, absorption (g_chamber)"
     )
@@ -103,10 +104,11 @@ class LCOEconomicParams:
     maintenance_cost_fraction: float
     utilization_factor: float
     hydrogel_lifetime_years: float
-    energy_cost_usd_per_year: float
-    energy_cost_usd_per_extra_half_cycle_per_day: float
-    c_acrylamide_usd_per_kg: float
-    c_additives_usd_per_kg_composite: float
+    c_am_usd_per_kg: float
+    c_aps_usd_per_kg: float
+    c_mba_usd_per_kg: float
+    c_temed_usd_per_kg: float
+    c_water_gel_usd_per_kg: float
     electricity_price_usd_per_kwh: float
     desorption_hours_per_day: float
     max_electric_heat_w_per_m2: float
@@ -117,10 +119,6 @@ class LCOEconomicParams:
         for f in fields(self):
             value = kwargs[f.name] if f.name in kwargs else defaults[f.name]
             object.__setattr__(self, f.name, value)
-
-    def annual_extra_cycle_energy_cost_usd(self, cycles_per_day: float) -> float:
-        extra = max(0.0, float(cycles_per_day) - 1.0)
-        return extra * 365.0 * float(self.energy_cost_usd_per_extra_half_cycle_per_day)
 
     def capital_recovery_factor(self) -> float:
         i = self.discount_rate
@@ -143,6 +141,33 @@ KG_WATER_PER_M3: float = _ev("Water density (rho_w)")
 DEVICE_BOM_USD_PER_M2: tuple[tuple[str, float], ...] = _DEVICE_BOM_ROWS
 C_DEVICE_USD: float = sum(cost for _, cost in DEVICE_BOM_USD_PER_M2)
 _LCOW_DEFAULTS: dict[str, Any] = {f.name: _SCALARS[f.name] for f in fields(LCOEconomicParams)}
+
+# Polymer sub-mix (AM/APS/MBA/TEMED) blended price and water-to-dry-composite
+# ratio, derived from Table S1's whole-batch mass fractions (each tracked as
+# its own parameters.xlsx Economics-sheet row). Renormalized because those
+# four items' fractions don't sum to 1 on their own (the batch also contains
+# salt and water).
+_POLYMER_ITEMS: tuple[tuple[str, str], ...] = (
+    ("Acrylamide price, AM (c_AM)", "Acrylamide mass fraction, AM (Table S1 recipe)"),
+    ("Ammonium persulfate price, APS (c_APS)", "Ammonium persulfate mass fraction, APS (Table S1 recipe)"),
+    (
+        "N,N'-methylenebisacrylamide price, MBA (c_MBA)",
+        "N,N'-methylenebisacrylamide mass fraction, MBA (Table S1 recipe)",
+    ),
+    (
+        "Tetramethylethylenediamine price, TEMED (c_TEMED)",
+        "Tetramethylethylenediamine mass fraction, TEMED (Table S1 recipe)",
+    ),
+)
+_polymer_fractions = tuple(float(_ev(frac_row)) for _price_row, frac_row in _POLYMER_ITEMS)
+_polymer_fraction_sum = sum(_polymer_fractions)
+POLYMER_BLENDED_PRICE_USD_PER_KG: float = sum(
+    frac * float(_ev(price_row))
+    for (price_row, _frac_row), frac in zip(_POLYMER_ITEMS, _polymer_fractions)
+) / _polymer_fraction_sum
+
+_water_gel_fraction = float(_ev("De-ionized water mass fraction (Table S1 recipe)"))
+WATER_RATIO_PER_KG_DRY_COMPOSITE: float = _water_gel_fraction / (1.0 - _water_gel_fraction)
 
 # =============================================================================
 # Levelized cost of water (LCOW)
@@ -192,15 +217,11 @@ def lcow_from_daily_yield(
         * 365.0
         / 1000.0
     )
-    annual_extra_cycle_energy = econ.annual_extra_cycle_energy_cost_usd(cycles_per_day)
-
     annual_cost_usd = (
         econ.capital_recovery_factor() * econ.total_investment_factor * C_DEVICE_USD
         + sorbent_replacement
         + econ.maintenance_cost_fraction * econ.total_investment_factor * C_DEVICE_USD
-        + econ.energy_cost_usd_per_year
         + annual_electricity_cost
-        + annual_extra_cycle_energy
     )
     if not math.isfinite(annual_cost_usd):
         return FAIL_LCO
@@ -232,8 +253,8 @@ def _sorbent_replacement_annual_usd(
         else get_salt_price_usd_per_kg(salt_name)
     )
     hydrogel_cost_per_kg = (
-        (salt_price * sl + econ.c_acrylamide_usd_per_kg) / (1.0 + sl)
-        + econ.c_additives_usd_per_kg_composite
+        (salt_price * sl + POLYMER_BLENDED_PRICE_USD_PER_KG) / (1.0 + sl)
+        + WATER_RATIO_PER_KG_DRY_COMPOSITE * econ.c_water_gel_usd_per_kg
     )
     return hydrogel_cost_per_kg * dry_mass / gel_lifetime
 
@@ -315,11 +336,21 @@ def lcow_cost_breakdown_from_daily_yield(
             else get_salt_price_usd_per_kg(salt_name)
         )
         salt_annual = salt_price * sl / (1.0 + sl) * dry_mass / gel_lifetime
-        acrylamide_annual = econ.c_acrylamide_usd_per_kg / (1.0 + sl) * dry_mass / gel_lifetime
-        additives_annual = econ.c_additives_usd_per_kg_composite * dry_mass / gel_lifetime
         segments.append(("Hydrogel: salt", _lcow_seg(salt_annual)))
-        segments.append(("Hydrogel: acrylamide", _lcow_seg(acrylamide_annual)))
-        segments.append(("Hydrogel: additives", _lcow_seg(additives_annual)))
+        # Split the polymer sub-mix's blended cost back out into its four
+        # ingredients using each one's share of the renormalized Table S1 mix.
+        for frac, econ_price, label in (
+            (_polymer_fractions[0], econ.c_am_usd_per_kg, "Hydrogel: acrylamide (AM)"),
+            (_polymer_fractions[1], econ.c_aps_usd_per_kg, "Hydrogel: APS"),
+            (_polymer_fractions[2], econ.c_mba_usd_per_kg, "Hydrogel: MBA"),
+            (_polymer_fractions[3], econ.c_temed_usd_per_kg, "Hydrogel: TEMED"),
+        ):
+            ingredient_annual = (
+                (frac / _polymer_fraction_sum) * econ_price / (1.0 + sl) * dry_mass / gel_lifetime
+            )
+            segments.append((label, _lcow_seg(ingredient_annual)))
+        water_annual = WATER_RATIO_PER_KG_DRY_COMPOSITE * econ.c_water_gel_usd_per_kg * dry_mass / gel_lifetime
+        segments.append(("Hydrogel: water", _lcow_seg(water_annual)))
 
     annual_electricity_cost = (
         econ.electricity_price_usd_per_kwh
@@ -328,10 +359,7 @@ def lcow_cost_breakdown_from_daily_yield(
         * 365.0
         / 1000.0
     )
-    annual_extra = econ.annual_extra_cycle_energy_cost_usd(cycles_per_day)
-    segments.append(("Fixed energy", _lcow_seg(econ.energy_cost_usd_per_year)))
     segments.append(("Electricity (active heat)", _lcow_seg(annual_electricity_cost)))
-    segments.append(("Extra cycling energy", _lcow_seg(annual_extra)))
 
     return LcowCostBreakdown(items=tuple(segments))
 
@@ -394,15 +422,11 @@ def npv_from_daily_yield(
         * 365.0
         / 1000.0
     )
-    annual_extra_cycle_energy = econ.annual_extra_cycle_energy_cost_usd(cycles_per_day)
-
     capex = econ.total_investment_factor * C_DEVICE_USD
     annual_opex = (
         sorbent_replacement
         + econ.maintenance_cost_fraction * econ.total_investment_factor * C_DEVICE_USD
-        + econ.energy_cost_usd_per_year
         + annual_electricity_cost
-        + annual_extra_cycle_energy
     )
     annual_revenue = gross_annual_water_m3 * float(water_price_usd_per_m3)
     annual_net_cash_flow = annual_revenue - annual_opex

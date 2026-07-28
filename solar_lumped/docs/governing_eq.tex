@@ -124,10 +124,6 @@ not Wilson's typeset Eqs.~3--4 blackbody/cavity approximation ($\varepsilon=1$).
 $1.0$ (Case~1) reproduces Wilson's original paper physics exactly; setting both to $0.0$ (Case~3)
 gives the idealized optical-material-limits sensitivity variant. See
 Section~\ref{sec:radiative}.
-\item \textbf{Radiative sink temperature:} the default sink for the outermost surface is ambient
-air temperature; an optional \code{sky\_temp\_depression\_c} lowers the effective radiant sky
-temperature below air temperature, needed to reproduce the COMSOL Atacama field-test curves
-(surface-to-ambient radiation with a real sky, not blackbody air).
 \item \textbf{Water inventory basis:} $c_w$ and $H$ are tracked as separate states, but the
 sorbate mass used for activity/uptake calculations is referenced to the fixed fabrication
 thickness $H_0$, not the swollen $H(t)$ -- swelling only feeds back into vapor-gap convection
@@ -170,7 +166,7 @@ U_{gel}(T_{abs} - T_g)
 k_{air}\frac{T_{abs} - T_{gl}}{L_{ins}}
 + \varepsilon_{ag}\sigma(T_{abs}^4 - T_{gl}^4)
 = h_{amb}(T_{gl} - T_{amb})
-+ \varepsilon_{ga}\sigma(T_{gl}^4 - T_{sky}^4)
++ \varepsilon_{ga}\sigma(T_{gl}^4 - T_{amb}^4)
 \label{eq:glass}
 \end{equation}
 
@@ -182,10 +178,15 @@ k_{air}\frac{T_{abs} - T_{gl}}{L_{ins}}
 \label{eq:absorber}
 \end{equation}
 
-where $T_{sky} = T_{amb} - \Delta T_{sky}$ (default $\Delta T_{sky}=0$). In the uncovered variant
-(\code{has\_glass=False}), Eqs.~\eqref{eq:glass}--\eqref{eq:absorber} collapse to a single
-absorber-to-sky balance $\varepsilon_{abs}Q_{solar} = h_{amb}(T_{abs}-T_{amb}) +
-\varepsilon_{abs}\sigma(T_{abs}^4 - T_{sky}^4) + U_{gel}(T_{abs}-T_g)$ with $T_{gl} \equiv T_{amb}$.
+In the uncovered variant (\code{has\_glass=False}), Eqs.~\eqref{eq:glass}--\eqref{eq:absorber}
+collapse to a single absorber-to-ambient balance $\varepsilon_{abs}Q_{solar} =
+h_{amb}(T_{abs}-T_{amb}) + \varepsilon_{abs}\sigma(T_{abs}^4 - T_{amb}^4) + U_{gel}(T_{abs}-T_g)$
+with $T_{gl} \equiv T_{amb}$.
+
+$L_{ins}$ here is Wilson's typeset Eq.~3/4 $L_c$ (the 5~mm absorber--glass insulating air gap,
+Table~S3); this document renames it to avoid confusion with the unrelated aluminum condenser/gel-backing
+plate thickness (also 5~mm in Table~S3), which the codebase also happens to call $L_c$ (\code{L\_C\_M}).
+Same value, same equation, different symbol.
 
 \textbf{Correlations (Note~S1):}
 \begin{itemize}

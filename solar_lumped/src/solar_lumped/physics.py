@@ -29,20 +29,16 @@ if TYPE_CHECKING:
 # =============================================================================
 # Table S3 / Note S1 device parameters (Wilson & Díaz-Marín *Device* 2025)
 #
-# Values below are loaded directly from docs/parameters.xlsx (Physics sheet)
-# where a row exists for them; a few device dimensions not tracked in that
-# sheet (L_c, L_glass, L_silicone) remain plain literals.
+# Values below are loaded directly from docs/parameters.xlsx (Physics sheet).
 # =============================================================================
 
 # Geometry
 H0_M: float = _pv("Hydrogel reference thickness (H0)", mm_to_m=True)  # hydrogel reference thickness H₀ (m)
 L_G_M: float = _pv("Vapor gap (L_g)", mm_to_m=True)  # vapor gap L_g (m)
 L_INS_M: float = _pv("Insulation gap (L_ins)", mm_to_m=True)  # insulation gap L_ins (m)
-L_C_M: float = 0.005  # condenser aluminum plate thickness L_c (m); not tracked in parameters.xlsx
-L_GLASS_IN: float = 0.125  # cover glass thickness (in); not tracked in parameters.xlsx
-L_GLASS_M: float = L_GLASS_IN * 0.0254
-L_AL_STACK_M: float = L_C_M  # aluminum in gel–absorber stack (Table S3 L_c)
-L_SILICONE_M: float = 0.001  # silicone coating (m); not tracked in parameters.xlsx
+L_C_M: float = _pv("Condenser aluminum plate thickness (L_c)", mm_to_m=True)  # condenser aluminum plate thickness L_c (m)
+L_AL_STACK_M: float = L_C_M  # aluminum in gel–absorber stack
+L_SILICONE_M: float = _pv("Silicone bonding-layer thickness (L_silicone)", mm_to_m=True)  # silicone coating (m)
 
 # Wilson §2.2 / Note S1: thermobuoyancy and mass transport inhibited below ~7 mm gap
 VAPOR_GAP_TRANSPORT_MIN_M: float = _pv("Vapor-gap transport floor", mm_to_m=True)
@@ -55,20 +51,16 @@ SALT_TO_POLYMER_RATIO_DEFAULT: float = _pv("Salt:polymer ratio (S/L)")
 
 # Materials / transport
 G_CHAMBER_M_S: float = _pv("Chamber convection coefficient, absorption (g_chamber)")
-RHO_SOL_KG_M3: float = _pv("Solution/brine density, LiCl (rho_sol)")  # ρ_sol brine solution density (kg/m³)
-RHO_COMPOSITE_KG_M3: float = RHO_SOL_KG_M3  # composite density at fabrication (25 °C, 20% RH) -- same xlsx cell as rho_sol
+RHO_GEL_KG_M3: float = _pv("Composite (hydrogel) density at 20% RH (rho_gel)")  # ρ_gel composite/hydrogel density (kg/m³)
+RHO_COMPOSITE_KG_M3: float = RHO_GEL_KG_M3  # alias -- composite density at fabrication (25 °C, 20% RH)
 H_DES_J_PER_KG: float = _pv("Desorption enthalpy, LiCl (h_des)")  # h_des (J/kg)
 H_FG_J_PER_KG: float = _pv("Condensation enthalpy (h_fg)")  # h_fg condensation (J/kg)
 K_AIR_W_M_K: float = _pv("Air thermal conductivity (k_air)")  # k_air (W/m·K)
 K_AL_W_M_K: float = _pv("Aluminum thermal conductivity (k_Al)")  # k_al (W/m·K) — Table S3
 K_SILICONE_W_M_K: float = _pv("Silicone bonding-layer conductivity (k_silicone)")  # k_silicone (W/m·K)
 K_GEL_W_M_K: float = _pv("Hydrogel thermal conductivity (k_gel)")  # k_w hydrogel (W/m·K) — Table S3
-K_GLASS_W_M_K: float = _pv("Cover glass thermal conductivity (k_glass)")  # k_glass (W/m·K)
 RHO_AL_KG_M3: float = _pv("Aluminum density (rho_Al)")
 CP_AL_J_KG_K: float = _pv("Aluminum specific heat (cp_Al)")
-RHO_GLASS_KG_M3: float = _pv("Cover-glass density (rho_glass)")  # borosilicate cover
-CP_GLASS_J_KG_K: float = _pv("Cover-glass specific heat (cp_glass)")
-CP_GEL_J_KG_K: float = _pv("Gel specific heat (cp_gel)")  # hydrated PAM-LiCl composite (water-dominated)
 
 # Optical / radiative
 EPS_GEL: float = _pv("Gel emissivity (eps_gel)")
@@ -108,16 +100,6 @@ U_GEL_W_M2_K: float = u_gel_w_m2_k(H0_M)
 
 # Condenser thermal mass per footprint area (ρ_al c_p L_c)
 CONDENSER_THERMAL_MASS_J_M2_K: float = RHO_AL_KG_M3 * CP_AL_J_KG_K * L_C_M
-
-# Lumped thermal capacitances per footprint area (J/m²K) for transient desorption
-# solvers. Physical (ρ c_p L) values from Table S3 — no calibration factors.
-GLASS_THERMAL_MASS_J_M2_K: float = RHO_GLASS_KG_M3 * CP_GLASS_J_KG_K * L_GLASS_M
-ABSORBER_THERMAL_MASS_J_M2_K: float = RHO_AL_KG_M3 * CP_AL_J_KG_K * L_AL_STACK_M
-
-
-def gel_thermal_mass_j_m2_k(h_m: float) -> float:
-    """(ρ c_p H)_gel — Note S1 Eq. S1 hydrogel thermal storage per footprint area."""
-    return RHO_COMPOSITE_KG_M3 * CP_GEL_J_KG_K * max(float(h_m), H0_M * 0.25)
 
 
 # =============================================================================
@@ -1068,12 +1050,6 @@ class DeviceThermalParams:
     tilt_deg: float = TILT_DEG
     h_des_j_per_kg: float = H_DES_J_PER_KG
     has_glass: bool = True
-    # Depression (K) of the effective radiant sink temperature below air temperature
-    # for the outermost surface. Wilson's typeset Eq. 3 radiates to T_amb (0 K here,
-    # used for Fig. 2 / Cambridge). Their COMSOL Atacama field model radiates the glass
-    # to a surroundings/sky temperature below air temperature (Surface-to-Ambient
-    # Radiation); reproducing the digitized field-test curves requires this term.
-    sky_temp_depression_c: float = 0.0
 
 
 def _residuals(
@@ -1116,13 +1092,11 @@ def _residuals(
         # explicit emissivity factor (cavity / blackbody approximation).
         eps_ag = 1.0
         # Glass→surroundings: Wilson Eq. 3 writes σ(T_glass⁴ − T_amb⁴) with no emissivity
-        # factor (blackbody in the IR). The sink temperature is ambient by default; the
-        # COMSOL Atacama field model uses a surroundings/sky temperature below air temp.
+        # factor (blackbody in the IR).
         eps_ga = 1.0
-    t_sky_c = t_amb_c - params.sky_temp_depression_c
 
     if not params.has_glass:
-        q_rad_abs_amb = radiative_exchange_w_m2(t_abs, t_sky_c, emissivity=params.eps_abs)
+        q_rad_abs_amb = radiative_exchange_w_m2(t_abs, t_amb_c, emissivity=params.eps_abs)
         r4 = (
             params.eps_abs * q_solar_w_m2
             - h_amb * (t_abs - t_amb_c)
@@ -1134,7 +1108,7 @@ def _residuals(
         gap_m = params.insulation_gap_m
         q_cond_ag = 0.0 if gap_m <= 0.0 else K_AIR_W_M_K / gap_m * (t_abs - t_glass)
         q_rad_ag = radiative_exchange_w_m2(t_abs, t_glass, emissivity=eps_ag)
-        q_rad_ga = radiative_exchange_w_m2(t_glass, t_sky_c, emissivity=eps_ga)
+        q_rad_ga = radiative_exchange_w_m2(t_glass, t_amb_c, emissivity=eps_ga)
         r3 = q_cond_ag + q_rad_ag - h_amb * (t_glass - t_amb_c) - q_rad_ga
         r4 = (
             params.eps_abs * params.tau_glass * q_solar_w_m2

@@ -172,10 +172,10 @@ def _apply_combo(
             econ = LCOEconomicParams(maintenance_cost_fraction=value)
         elif key == "electricity_price_usd_per_kwh":
             econ = LCOEconomicParams(electricity_price_usd_per_kwh=value)
-        elif key == "c_acrylamide_usd_per_kg":
-            econ = LCOEconomicParams(c_acrylamide_usd_per_kg=value)
-        elif key == "c_additives_usd_per_kg_composite":
-            econ = LCOEconomicParams(c_additives_usd_per_kg_composite=value)
+        elif key == "c_am_usd_per_kg":
+            econ = LCOEconomicParams(c_am_usd_per_kg=value)
+        elif key == "c_water_gel_usd_per_kg":
+            econ = LCOEconomicParams(c_water_gel_usd_per_kg=value)
         else:
             raise ValueError(f"Unknown sweep parameter: {key}")
 
@@ -259,18 +259,18 @@ def make_sweep_params(
         # --- Material ---
         SweepParam("salt_to_polymer_ratio", "Salt:polymer ratio (S/L)", 1.0, 8.0, base_args.salt_loading),
         SweepParam(
-            "c_acrylamide_usd_per_kg",
+            "c_am_usd_per_kg",
             "Acrylamide price (USD/kg)",
-            0.5 * base_econ.c_acrylamide_usd_per_kg,
-            1.5 * base_econ.c_acrylamide_usd_per_kg,
-            base_econ.c_acrylamide_usd_per_kg,
+            0.5 * base_econ.c_am_usd_per_kg,
+            1.5 * base_econ.c_am_usd_per_kg,
+            base_econ.c_am_usd_per_kg,
         ),
         SweepParam(
-            "c_additives_usd_per_kg_composite",
-            "Additives price (USD/kg composite)",
-            0.5 * base_econ.c_additives_usd_per_kg_composite,
-            1.5 * base_econ.c_additives_usd_per_kg_composite,
-            base_econ.c_additives_usd_per_kg_composite,
+            "c_water_gel_usd_per_kg",
+            "Hydrogel-manufacturing water price (USD/kg)",
+            0.5 * base_econ.c_water_gel_usd_per_kg,
+            1.5 * base_econ.c_water_gel_usd_per_kg,
+            base_econ.c_water_gel_usd_per_kg,
         ),
         # --- Heat transfer / geometry ---
         SweepParam("insulation_gap_mm", "Insulation gap (mm)", 1.0, 20.0, base_args.insulation_gap_mm),

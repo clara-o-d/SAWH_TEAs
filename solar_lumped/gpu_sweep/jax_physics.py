@@ -21,54 +21,50 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
+from solar_lumped._parameters_xlsx import physics_value as _pv
+
 jax.config.update("jax_enable_x64", True)
 
-# ---- Table S3 / Note S1 constants (solar_lumped/src/solar_lumped/physics.py) ----
-H0_M = 0.004
-L_G_M = 0.04
-L_INS_M = 0.005
-L_C_M = 0.005
-L_GLASS_M = 0.125 * 0.0254
+# ---- Table S3 / Note S1 constants -- loaded from docs/parameters.xlsx, same
+# values as solar_lumped/src/solar_lumped/physics.py. ----
+H0_M = _pv("Hydrogel reference thickness (H0)", mm_to_m=True)
+L_G_M = _pv("Vapor gap (L_g)", mm_to_m=True)
+L_INS_M = _pv("Insulation gap (L_ins)", mm_to_m=True)
+L_C_M = _pv("Condenser aluminum plate thickness (L_c)", mm_to_m=True)
 L_AL_STACK_M = L_C_M
-L_SILICONE_M = 0.001
-VAPOR_GAP_TRANSPORT_MIN_M = 0.007
+L_SILICONE_M = _pv("Silicone bonding-layer thickness (L_silicone)", mm_to_m=True)
+VAPOR_GAP_TRANSPORT_MIN_M = _pv("Vapor-gap transport floor", mm_to_m=True)
 
-RHO_SOL_KG_M3 = 1250.2
-RHO_COMPOSITE_KG_M3 = 1250.2
-H_DES_J_PER_KG = 2.32e6
-H_FG_J_PER_KG = 2.256e6
-K_AIR_W_M_K = 0.0286
-K_AL_W_M_K = 167.0
-K_SILICONE_W_M_K = 0.2
-K_GEL_W_M_K = 0.6
-K_GLASS_W_M_K = 1.2
-RHO_AL_KG_M3 = 2700.0
-CP_AL_J_KG_K = 900.0
-RHO_GLASS_KG_M3 = 2230.0
-CP_GLASS_J_KG_K = 830.0
-CP_GEL_J_KG_K = 3500.0
+RHO_GEL_KG_M3 = _pv("Composite (hydrogel) density at 20% RH (rho_gel)")
+RHO_COMPOSITE_KG_M3 = RHO_GEL_KG_M3
+H_DES_J_PER_KG = _pv("Desorption enthalpy, LiCl (h_des)")
+H_FG_J_PER_KG = _pv("Condensation enthalpy (h_fg)")
+K_AIR_W_M_K = _pv("Air thermal conductivity (k_air)")
+K_AL_W_M_K = _pv("Aluminum thermal conductivity (k_Al)")
+K_SILICONE_W_M_K = _pv("Silicone bonding-layer conductivity (k_silicone)")
+K_GEL_W_M_K = _pv("Hydrogel thermal conductivity (k_gel)")
+RHO_AL_KG_M3 = _pv("Aluminum density (rho_Al)")
+CP_AL_J_KG_K = _pv("Aluminum specific heat (cp_Al)")
 
-EPS_GEL = 1.0
-EPS_AL = 0.05
-TILT_DEG_DEFAULT = 30.0
+EPS_GEL = _pv("Gel emissivity (eps_gel)")
+EPS_AL = _pv("Condenser (Al) emissivity (eps_Al)")
+TILT_DEG_DEFAULT = _pv("Tilt angle (theta)")
 
-STEFAN_BOLTZMANN = 5.670374419e-8
-D_AIR_M2_S = 2.62e-5
-GRAVITY_M_S2 = 9.81
+STEFAN_BOLTZMANN = _pv("Stefan-Boltzmann constant (sigma)")
+D_AIR_M2_S = _pv("Water-vapor-in-air diffusivity (D_air)")
+GRAVITY_M_S2 = _pv("Gravitational acceleration (g)")
 BETA_AIR_K = 1.0 / 300.0
-NU_AIR_M2_S = 1.5e-5
+NU_AIR_M2_S = _pv("Air kinematic viscosity (nu_air)")
 RHO_AIR_KG_M3 = 1.2
 CP_AIR_J_KG_K = 1005.0
 ALPHA_AIR_M2_S = K_AIR_W_M_K / (RHO_AIR_KG_M3 * CP_AIR_J_KG_K)
 
-WATER_MOLAR_MASS_KG_MOL = 0.018015
-GAS_CONSTANT_J_MOL_K = 8.314462618
-C_W_MAX_MOL_M3 = 400000.0
-C_W_MIN_MOL_M3 = 100.0
+WATER_MOLAR_MASS_KG_MOL = _pv("Water molar mass (MW_w)")
+GAS_CONSTANT_J_MOL_K = _pv("Universal gas constant (R)")
+C_W_MAX_MOL_M3 = _pv("Gel water concentration upper bound (c_w,max)")
+C_W_MIN_MOL_M3 = _pv("Gel water concentration lower bound (c_w,min)")
 
 CONDENSER_THERMAL_MASS_J_M2_K = RHO_AL_KG_M3 * CP_AL_J_KG_K * L_C_M
-GLASS_THERMAL_MASS_J_M2_K = RHO_GLASS_KG_M3 * CP_GLASS_J_KG_K * L_GLASS_M
-ABSORBER_THERMAL_MASS_J_M2_K = RHO_AL_KG_M3 * CP_AL_J_KG_K * L_AL_STACK_M
 
 # Conde (2004) Table 3 LiCl vapour-pressure correlation parameters.
 _PI0, _PI1, _PI2, _PI3, _PI4 = 0.28, 4.30, 0.60, 0.21, 5.10
@@ -185,10 +181,6 @@ def u_gel_w_m2_k(h_m):
     return 1.0 / resistance
 
 
-def gel_thermal_mass_j_m2_k(h_m):
-    return RHO_COMPOSITE_KG_M3 * CP_GEL_J_KG_K * jnp.clip(h_m, H0_M * 0.25, None)
-
-
 def concentration_ratio_desorption(t_gel_c, t_cond_c):
     p_g = saturation_vapor_pressure_pa(t_gel_c)
     p_c = saturation_vapor_pressure_pa(t_cond_c)
@@ -238,7 +230,7 @@ def dc_dh_desorption(c_w, *, t_gel_c, t_cond_c, h_m, mass: MassParams):
     dh = (
         g
         * WATER_MOLAR_MASS_KG_MOL
-        / RHO_SOL_KG_M3
+        / RHO_GEL_KG_M3
         * (p_sat / (GAS_CONSTANT_J_MOL_K * t_k))
         * driving
     )
@@ -554,7 +546,7 @@ def dc_dh_absorption(c_w, *, t_gel_c, rh, h_m, mass: "MassParams", salt_to_polym
     dc = jnp.where((c_w >= C_W_MAX_MOL_M3) & (rate > 0.0), 0.0, rate)
     dc = jnp.where((c_w <= C_W_MIN_MOL_M3) & (dc < 0.0), 0.0, dc)
 
-    dh = g * WATER_MOLAR_MASS_KG_MOL / RHO_SOL_KG_M3 * (p_sat / (GAS_CONSTANT_J_MOL_K * t_k)) * driving
+    dh = g * WATER_MOLAR_MASS_KG_MOL / RHO_GEL_KG_M3 * (p_sat / (GAS_CONSTANT_J_MOL_K * t_k)) * driving
     dh = jnp.where(jnp.isfinite(dh), dh, 0.0)
     dh = jnp.where(h_m <= mass.h0_ref_m + 1e-12, jnp.maximum(dh, 0.0), dh)
     return dc, dh
