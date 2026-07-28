@@ -15,6 +15,17 @@ and sawh_bayesopt's run_bayesopt loop (each site's BayesOpt evaluations are
 still one batched jax.vmap call per round via evaluator.py, so this stays
 GPU-parallel the same way the brute-force sweep is).
 
+Per-site run directory gets the same artifacts and diagnostics
+scripts/hp_sweep.py writes per combination (that script's own per-combo run
+is the reference for what "a complete sawh_bayesopt run" records): history.csv,
+convergence.png, gp_state.joblib, diagnostics/de_diagnostics.json,
+report.json (verify_optimum + baseline comparison), and
+diagnostics/gp_regression_report.json + gp_slices.png (k-fold CV calibration
+of the LCOW GP, via scripts/diagnostics/gp_diagnostics.py). A site whose
+run/verify/diagnostics step raises gets an "error"/"verify_error"/
+"diagnostics_error" field in its summary row instead of killing the rest of
+this task's sites (same isolation hp_sweep.py uses per combination).
+
 Usage:
     python3 gpu_sweep/run_bayesopt_sweep.py --num-sites 10 --output-dir outputs/gpu_bayesopt_sweep/smoke
     python3 gpu_sweep/run_bayesopt_sweep.py --lat-lon -23.6 -70.4 --output-dir outputs/gpu_bayesopt_sweep/atacama
@@ -24,6 +35,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import json
 import sys
 import time
 from pathlib import Path
@@ -31,8 +43,10 @@ from pathlib import Path
 _REPO = Path(__file__).resolve().parent.parent
 _SRC = _REPO / "src"
 _SCRIPTS = _REPO / "scripts"
-_BAYESOPT_SRC = _REPO.parent / "sawh_bayesopt" / "src"
-for p in (_SRC, _SCRIPTS, _BAYESOPT_SRC):
+_BAYESOPT_REPO = _REPO.parent / "sawh_bayesopt"
+_BAYESOPT_SRC = _BAYESOPT_REPO / "src"
+_BAYESOPT_DIAG = _BAYESOPT_REPO / "scripts" / "diagnostics"
+for p in (_SRC, _SCRIPTS, _BAYESOPT_SRC, _BAYESOPT_DIAG):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -41,9 +55,16 @@ import grid_param_sweep as gps  # noqa: E402
 
 from run_gpu_sweep import _site_list  # noqa: E402
 
+import gp_diagnostics  # noqa: E402
 from sawh_bayesopt.bayesopt import BayesOptConfig, run_bayesopt  # noqa: E402
 from sawh_bayesopt.design_space import CASE_EPS_IR, DesignBounds  # noqa: E402
-from sawh_bayesopt.reporting import write_history_csv, write_run_config  # noqa: E402
+from sawh_bayesopt.reporting import (  # noqa: E402
+    write_convergence_plot,
+    write_de_diagnostics,
+    write_final_report,
+    write_history_csv,
+    write_run_config,
+)
 from sawh_bayesopt.sites import SiteSpec  # noqa: E402
 from sawh_bayesopt.surrogate import save_state  # noqa: E402
 from sawh_bayesopt.verification import verify_optimum  # noqa: E402
@@ -125,26 +146,48 @@ def _bounds(args: argparse.Namespace) -> DesignBounds:
     )
 
 
-def _existing_sites(path: Path) -> set[tuple[float, float]]:
+def _load_summary_rows(path: Path) -> list[dict]:
     if not path.is_file():
-        return set()
+        return []
     with path.open() as f:
-        return {(round(float(r["lat"]), 6), round(float(r["lon"]), 6)) for r in csv.DictReader(f)}
+        return list(csv.DictReader(f))
 
 
-def _append_summary_row(path: Path, row: dict) -> None:
+def _write_summary_rows(path: Path, rows: list[dict]) -> None:
+    """Rewrites the whole file from *rows* every call (same approach as
+    hp_sweep.py's _write_outputs) rather than appending -- a site with an
+    "error" field has far fewer columns than one with full diagnostics, so
+    appending with a header locked in from whichever row came first would
+    crash the moment a differently-shaped row showed up. Cheap: rows here is
+    at most a few thousand.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    is_new = not path.is_file()
-    with path.open("a", newline="") as f:
-        w = csv.DictWriter(f, fieldnames=list(row))
-        if is_new:
-            w.writeheader()
-        w.writerow(row)
+    fieldnames: list[str] = []
+    for r in rows:
+        for k in r:
+            if k not in fieldnames:
+                fieldnames.append(k)
+    with path.open("w", newline="") as f:
+        w = csv.DictWriter(f, fieldnames=fieldnames)
+        w.writeheader()
+        w.writerows(rows)
 
 
-def run_site(lat: float, lon: float, args: argparse.Namespace, bounds: DesignBounds, summary_csv: Path) -> None:
+def run_site(lat: float, lon: float, args: argparse.Namespace, bounds: DesignBounds) -> dict:
+    """Runs one site's full BayesOpt loop plus every diagnostic
+    scripts/hp_sweep.py records per combination (history/convergence/
+    gp_state/de_diagnostics/report/gp_regression_report) -- see this
+    module's docstring. Each stage past the core optimization loop is
+    isolated in its own try/except, same as hp_sweep.py's _run_one_combo:
+    a verification or diagnostics failure shouldn't discard an otherwise-
+    good optimization result, and shouldn't crash the rest of this task's
+    sites either.
+    """
     site = SiteSpec(name=f"{lat:+.4f}_{lon:+.4f}", lat=lat, lon=lon, year=args.year)
     run_dir = args.output_dir / site.name
+    run_dir.mkdir(parents=True, exist_ok=True)
+
+    row: dict = {"lat": lat, "lon": lon}
 
     cfg = BayesOptConfig(
         bounds=bounds,
@@ -163,31 +206,19 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, bounds: DesignBou
         de_maxiter=args.de_maxiter,
         de_popsize=args.de_popsize,
     )
-    run_dir.mkdir(parents=True, exist_ok=True)
     write_run_config(cfg, run_dir / "config.json")
 
     t0 = time.perf_counter()
-    result = run_bayesopt(cfg, run_dir)
+    try:
+        result = run_bayesopt(cfg, run_dir)
+    except Exception as exc:  # noqa: BLE001 -- isolate one site's failure from the rest of this task's sites
+        row["error"] = f"run_bayesopt: {exc!r}"
+        print(f"  ({lat:+.4f}, {lon:+.4f}): ERROR {row['error']}", flush=True)
+        return row
     elapsed = time.perf_counter() - t0
 
-    write_history_csv(result.history, run_dir / "history.csv")
-    save_state(result.surrogate, run_dir / "gp_state.joblib")
-
-    verification = verify_optimum(
-        result, cfg, run_dir,
-        n_neighbors=args.n_verify_neighbors,
-        perturbation_frac=args.verify_perturbation_frac,
-        seed=args.seed,
-    )
-    if verification.flagged_as_surrogate_artifact:
-        print(
-            f"  ({lat:+.4f}, {lon:+.4f}): WARNING a perturbed neighbor beat the reported optimum by "
-            f"{verification.max_neighbor_improvement_frac:.2%} -- possible surrogate artifact.", flush=True,
-        )
-
     best = result.best
-    _append_summary_row(summary_csv, {
-        "lat": lat, "lon": lon,
+    row.update({
         "hydrogel_thickness_mm": best.design_vector[0] * 1000.0,
         "vapor_gap_mm": best.design_vector[1] * 1000.0,
         "fin_area_ratio": best.design_vector[3],
@@ -200,14 +231,55 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, bounds: DesignBou
         "best_combined_lcow_usd_m3": f"{best.combined_lcow:.6f}",
         "n_evals": len(result.history),
         "stopped_reason": result.stopped_reason,
-        "flagged_as_surrogate_artifact": verification.flagged_as_surrogate_artifact,
-        "max_neighbor_improvement_frac": f"{verification.max_neighbor_improvement_frac:.6f}",
         "wall_time_s": f"{elapsed:.1f}",
     })
+
+    write_history_csv(result.history, run_dir / "history.csv")
+    write_convergence_plot(result.history, run_dir / "convergence.png")
+    save_state(result.surrogate, run_dir / "gp_state.joblib")
+    write_de_diagnostics(result.de_diagnostics, run_dir / "diagnostics" / "de_diagnostics.json")
+
+    try:
+        verification = verify_optimum(
+            result, cfg, run_dir,
+            n_neighbors=args.n_verify_neighbors,
+            perturbation_frac=args.verify_perturbation_frac,
+            seed=args.seed,
+        )
+        report = write_final_report(result, cfg, run_dir, verification, run_dir / "report.json")
+        row["improvement_vs_baseline_frac"] = report["improvement_vs_baseline_frac"]
+        row["flagged_as_surrogate_artifact"] = verification.flagged_as_surrogate_artifact
+        row["max_neighbor_improvement_frac"] = f"{verification.max_neighbor_improvement_frac:.6f}"
+        if verification.flagged_as_surrogate_artifact:
+            print(
+                f"  ({lat:+.4f}, {lon:+.4f}): WARNING a perturbed neighbor beat the reported optimum by "
+                f"{verification.max_neighbor_improvement_frac:.2%} -- possible surrogate artifact.", flush=True,
+            )
+    except Exception as exc:  # noqa: BLE001
+        row["verify_error"] = f"verify_optimum/write_final_report: {exc!r}"
+
+    try:
+        gp_diagnostics.main(["--run-dir", str(run_dir), "--seed", str(args.seed)])
+        gp_report = json.loads((run_dir / "diagnostics" / "gp_regression_report.json").read_text())
+        cv = gp_report["cross_validation"]
+        row["cv_rmse"] = cv["cv_rmse"]
+        row["standardized_residual_mean"] = cv["standardized_residual_mean"]
+        row["standardized_residual_std"] = cv["standardized_residual_std"]
+        row["msll_gp_minus_trivial"] = cv["msll_gp_minus_trivial"]
+        row["n_hyperparameter_warnings"] = len(gp_report["hyperparameter_convergence_warnings"])
+        de_summary = gp_report.get("de_diagnostics_summary")
+        if de_summary and de_summary.get("n_de_calls"):
+            row["n_de_calls"] = de_summary["n_de_calls"]
+            row["frac_de_hit_maxiter"] = de_summary["frac_hit_maxiter"]
+            row["frac_de_not_success"] = de_summary["frac_not_success"]
+    except Exception as exc:  # noqa: BLE001
+        row["diagnostics_error"] = f"gp_diagnostics: {exc!r}"
+
     print(
         f"  ({lat:+.4f}, {lon:+.4f}): {len(result.history)} eval(s), stopped={result.stopped_reason}, "
         f"best_lcow={best.combined_lcow:.4f} USD/m3, {elapsed:.1f}s", flush=True,
     )
+    return row
 
 
 def main() -> int:
@@ -216,15 +288,17 @@ def main() -> int:
     print(f"{len(sites)} site(s) to run.", flush=True)
 
     summary_csv = args.output_dir / "summary.csv"
+    rows = _load_summary_rows(summary_csv)
     if args.resume:
-        done = _existing_sites(summary_csv)
+        done = {(round(float(r["lat"]), 6), round(float(r["lon"]), 6)) for r in rows}
         sites = [(lat, lon) for lat, lon in sites if (round(lat, 6), round(lon, 6)) not in done]
         print(f"{len(sites)} site(s) remaining after --resume.", flush=True)
 
     bounds = _bounds(args)
     t0 = time.perf_counter()
     for lat, lon in sites:
-        run_site(lat, lon, args, bounds, summary_csv)
+        rows.append(run_site(lat, lon, args, bounds))
+        _write_summary_rows(summary_csv, rows)  # rewritten after every site -- see _write_summary_rows
     print(f"Done: {len(sites)} site(s) in {time.perf_counter() - t0:.1f}s total.", flush=True)
     return 0
 
