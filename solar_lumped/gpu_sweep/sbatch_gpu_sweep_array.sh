@@ -46,7 +46,7 @@ NUM_TASKS=$(( SLURM_ARRAY_TASK_MAX - SLURM_ARRAY_TASK_MIN + 1 ))
 RANGE=$(python3 -c "
 import sys
 sys.path.insert(0, 'src')
-from solar_lumped.weather.land_grid import grid_land_points
+from solar_lumped.weather import grid_land_points
 total = len(grid_land_points(${STEP}))
 num_tasks = ${NUM_TASKS}
 chunk = -(-total // num_tasks)  # ceil division
