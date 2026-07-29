@@ -10,7 +10,7 @@ from solar_lumped._parameters_xlsx import ECONOMICS as _ECON_XLSX
 from solar_lumped._parameters_xlsx import PHYSICS as _PHYS_XLSX
 from solar_lumped._parameters_xlsx import economics_value as _ev
 from solar_lumped._parameters_xlsx import physics_value as _pv
-from solar_lumped.physics import get_salt_price_usd_per_kg
+from solar_lumped.physics import DRY_COMPOSITE_DENSITY_KG_M3, get_salt_price_usd_per_kg
 
 # =============================================================================
 # Economic parameter loading and defaults -- read directly from
@@ -220,7 +220,7 @@ def lcow_from_daily_yield(
     annual_cost_usd = (
         econ.capital_recovery_factor() * econ.total_investment_factor * C_DEVICE_USD
         + sorbent_replacement
-        + econ.maintenance_cost_fraction * econ.total_investment_factor * C_DEVICE_USD
+        + econ.maintenance_cost_fraction * C_DEVICE_USD
         + annual_electricity_cost
     )
     if not math.isfinite(annual_cost_usd):
@@ -260,7 +260,14 @@ def _sorbent_replacement_annual_usd(
 
 
 def dry_composite_mass_kg(hydrogel_thickness_m: float) -> float:
-    return float(hydrogel_thickness_m) * HYDROGEL_DENSITY_KG_M3
+    """Dry (solids-only) composite mass per m^2 at the given thickness.
+
+    Uses the DVS-derived dry-basis density, not the raw Table S3 rho_gel (that's
+    measured at 20% RH and already carries ~126% equilibrium water by mass --
+    see physics.py::DRY_COMPOSITE_DENSITY_KG_M3), since the recipe-based hydrogel
+    cost below is priced per kg of dry (post-synthesis) solids.
+    """
+    return float(hydrogel_thickness_m) * DRY_COMPOSITE_DENSITY_KG_M3
 
 
 @dataclass(frozen=True, slots=True)
@@ -321,9 +328,8 @@ def lcow_cost_breakdown_from_daily_yield(
     segments: list[tuple[str, float]] = []
     maintenance_annual = 0.0
     for name, line_cost in DEVICE_BOM_USD_PER_M2:
-        scaled = inv * line_cost
-        segments.append((f"CAPEX: {name}", _lcow_seg(crf * scaled)))
-        maintenance_annual += maint_frac * scaled
+        segments.append((f"CAPEX: {name}", _lcow_seg(crf * inv * line_cost)))
+        maintenance_annual += maint_frac * line_cost
     segments.append(("Maintenance", _lcow_seg(maintenance_annual)))
 
     if sorbent == "mof":
@@ -425,7 +431,7 @@ def npv_from_daily_yield(
     capex = econ.total_investment_factor * C_DEVICE_USD
     annual_opex = (
         sorbent_replacement
-        + econ.maintenance_cost_fraction * econ.total_investment_factor * C_DEVICE_USD
+        + econ.maintenance_cost_fraction * C_DEVICE_USD
         + annual_electricity_cost
     )
     annual_revenue = gross_annual_water_m3 * float(water_price_usd_per_m3)
