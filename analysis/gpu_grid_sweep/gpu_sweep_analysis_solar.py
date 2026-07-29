@@ -63,7 +63,9 @@ from tornado_plot_solar import create_tornado_plot  # noqa: E402
 _SALT_LOADING = 4.0  # fixed salt:polymer ratio used by the GPU sweep (docs/gpu_sweep_handoff.md)
 _SALT_NAME = "LiCl"
 
-_ALL_DEVICE_PARAMS: tuple[str, ...] = ("hydrogel_thickness_mm", "eps_abs", "tau_glass", "fin_area_ratio")
+_ALL_DEVICE_PARAMS: tuple[str, ...] = (
+    "hydrogel_thickness_mm", "eps_abs", "tau_glass", "fin_area_ratio", "vapor_gap_mm",
+)
 _EXOGENOUS_PARAMS: tuple[str, ...] = ("mean_solar_w_m2", "mean_rh_frac", "mean_t_amb_c")
 
 _PARAM_LABELS: dict[str, str] = {
@@ -71,6 +73,7 @@ _PARAM_LABELS: dict[str, str] = {
     "eps_abs": "Absorber emissivity\n(eps_abs)",
     "tau_glass": "Glass transmittance\n(tau_glass)",
     "fin_area_ratio": "Condenser fin\narea ratio",
+    "vapor_gap_mm": "Vapor gap\n(mm)",
     "mean_solar_w_m2": "Mean solar GHI\n(W/m²)",
     "mean_rh_frac": "Mean RH\n(frac)",
     "mean_t_amb_c": "Mean T_amb\n(°C)",
@@ -81,6 +84,7 @@ _PARAM_TITLES: dict[str, str] = {
     "eps_abs": "Absorber emissivity (eps_abs)",
     "tau_glass": "Glass transmittance (tau_glass)",
     "fin_area_ratio": "Condenser fin area ratio",
+    "vapor_gap_mm": "Vapor gap (mm)",
 }
 
 _METRIC_TITLES: dict[str, str] = {
@@ -239,6 +243,19 @@ def build_optimal_config(df: pd.DataFrame) -> pd.DataFrame:
     return df.loc[idx].reset_index(drop=True)
 
 
+def _land_mask(lon_grid: np.ndarray, lat_grid: np.ndarray) -> np.ndarray:
+    """True where a (lon, lat) fine-grid cell is on land, per the same 110m
+    Natural Earth coastline drawn on the map -- keeps interpolated color from
+    spilling into oceans, bays, and lakes that the linear/nearest fill would
+    otherwise bridge across."""
+    import shapely.vectorized
+    from shapely.ops import unary_union
+
+    _, cfeature = _import_map_stack()
+    land = unary_union(list(cfeature.NaturalEarthFeature("physical", "land", "110m").geometries()))
+    return shapely.vectorized.contains(land, lon_grid, lat_grid)
+
+
 def _interpolate_to_grid(
     lons: np.ndarray,
     lats: np.ndarray,
@@ -254,8 +271,8 @@ def _interpolate_to_grid(
     gaps between the original sample points. The scattered points sit on a
     regular ``sample_step_deg`` land grid, so their convex hull spans oceans
     between continents -- cells farther than one sample spacing from the
-    nearest real sample are masked out (NaN) to avoid smearing color across
-    open water that has no data underneath it.
+    nearest real sample, or that fall in open water per the Natural Earth
+    land polygons, are masked out (NaN) so color never spills past a coastline.
     """
     from scipy.interpolate import griddata
     from scipy.spatial import cKDTree
@@ -275,6 +292,7 @@ def _interpolate_to_grid(
     nearest_dist, _ = tree.query(query_pts)
     far = (nearest_dist > sample_step_deg * 1.05).reshape(grid.shape)
     grid[far] = np.nan
+    grid[~_land_mask(lon_grid, lat_grid)] = np.nan
     return lon_vals, lat_vals, grid
 
 
