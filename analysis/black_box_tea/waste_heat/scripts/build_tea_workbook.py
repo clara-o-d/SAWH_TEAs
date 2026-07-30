@@ -22,6 +22,7 @@ from tea_workbook_lib import compute_tea_metrics  # noqa: E402
 from waste_heat_cycle_lumped.economics import PATENT_BOM_USD_PER_M2 as BOM  # noqa: E402
 from waste_heat_cycle_lumped.economics import default_electrical_loads  # noqa: E402
 from waste_heat_cycle_lumped.economics import _load_economic_data  # noqa: E402
+from waste_heat_cycle_lumped.physics import DRY_COMPOSITE_DENSITY_KG_M3  # noqa: E402
 from waste_heat_cycle_lumped.physics import get_salt_price_usd_per_kg  # noqa: E402
 from waste_heat_cycle_lumped.simulation import DeviceConfig  # noqa: E402
 from waste_heat_cycle_lumped.simulation import run_daily_operation  # noqa: E402
@@ -64,7 +65,9 @@ def _defaults() -> dict[str, float | str]:
         "salt_to_polymer_ratio": DEFAULT_SALT_TO_POLYMER,
         "hydrogel_thickness_m": float(scalars["hydrogel_thickness_m"]),
         "salt_price_usd_per_kg": get_salt_price_usd_per_kg(DEFAULT_SALT),
-        "hydrogel_density_kg_m3": float(scalars["hydrogel_density_kg_m3"]),
+        # DVS dry-basis density, not the raw (wet, 20% RH) CSV value -- see
+        # waste_heat_cycle_lumped/physics.py::DRY_COMPOSITE_DENSITY_KG_M3.
+        "hydrogel_density_kg_m3": float(DRY_COMPOSITE_DENSITY_KG_M3),
         "hydrogel_lifetime_years": float(scalars["hydrogel_lifetime_years"]),
         "c_acrylamide_usd_per_kg": float(scalars["c_acrylamide_usd_per_kg"]),
         "c_additives_usd_per_kg_composite": float(scalars["c_additives_usd_per_kg_composite"]),

@@ -18,6 +18,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal
 
 from waste_heat_cycle_lumped.physics import (
+    DRY_COMPOSITE_DENSITY_KG_M3,
     FLUID_RHO_KG_M3,
     H_FG_J_PER_KG,
     M_F_BASE_KG_S_M2,
@@ -155,7 +156,14 @@ _LCOW_DEFAULTS: dict[str, Any] = {f.name: _SCALARS[f.name] for f in fields(LCOEc
 
 
 def dry_composite_mass_kg(hydrogel_thickness_m: float) -> float:
-    return float(hydrogel_thickness_m) * HYDROGEL_DENSITY_KG_M3
+    """Dry (solids-only) composite mass per m^2 at the given thickness.
+
+    Uses the DVS-derived dry-basis density, not the raw Table S3 rho_gel (that's
+    measured at 20% RH and already carries ~126% equilibrium water by mass --
+    see physics.py::DRY_COMPOSITE_DENSITY_KG_M3), since the recipe-based hydrogel
+    cost below is priced per kg of dry (post-synthesis) solids.
+    """
+    return float(hydrogel_thickness_m) * DRY_COMPOSITE_DENSITY_KG_M3
 
 # =============================================================================
 # Patent hardware bill of materials for waste-heat two-bed SAWH (USD per m2 footprint)

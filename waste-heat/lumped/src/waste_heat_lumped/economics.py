@@ -12,7 +12,11 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
 
-from waste_heat_lumped.physics import M_DOT_F_KG_S_M2, get_salt_price_usd_per_kg
+from waste_heat_lumped.physics import (
+    DRY_COMPOSITE_DENSITY_KG_M3,
+    M_DOT_F_KG_S_M2,
+    get_salt_price_usd_per_kg,
+)
 
 
 # =============================================================================
@@ -142,7 +146,14 @@ _LCOW_DEFAULTS: dict[str, Any] = {f.name: _SCALARS[f.name] for f in fields(LCOEc
 
 
 def dry_composite_mass_kg(hydrogel_thickness_m: float) -> float:
-    return float(hydrogel_thickness_m) * HYDROGEL_DENSITY_KG_M3
+    """Dry (solids-only) composite mass per m^2 at the given thickness.
+
+    Uses the DVS-derived dry-basis density, not the raw Table S3 rho_gel (that's
+    measured at 20% RH and already carries ~126% equilibrium water by mass --
+    see physics.py::DRY_COMPOSITE_DENSITY_KG_M3), since the recipe-based hydrogel
+    cost below is priced per kg of dry (post-synthesis) solids.
+    """
+    return float(hydrogel_thickness_m) * DRY_COMPOSITE_DENSITY_KG_M3
 
 # =============================================================================
 # Parasitic grid electricity for the fluid-heated daily-cycle SAWH's HTF loop pump

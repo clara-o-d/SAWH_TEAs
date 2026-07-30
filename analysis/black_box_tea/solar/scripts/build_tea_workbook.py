@@ -20,10 +20,10 @@ if str(_LUMPED_SRC) not in sys.path:
 from tea_workbook_lib import compute_tea_metrics  # noqa: E402
 
 from solar_lumped.economics import (  # noqa: E402
-    HYDROGEL_DENSITY_KG_M3,
     HYDROGEL_THICKNESS_M,
     _load_economic_data,
 )
+from solar_lumped.physics import DRY_COMPOSITE_DENSITY_KG_M3  # noqa: E402
 from solar_lumped.physics import get_salt_price_usd_per_kg  # noqa: E402
 from solar_lumped.simulation import DeviceConfig  # noqa: E402
 from solar_lumped.simulation import run_daily_cycle  # noqa: E402
@@ -60,7 +60,9 @@ def _defaults() -> tuple[dict[str, float | str], tuple[tuple[str, float], ...]]:
         "salt_to_polymer_ratio": DEFAULT_SALT_TO_POLYMER,
         "hydrogel_thickness_m": float(scalars["hydrogel_thickness_m"]),
         "salt_price_usd_per_kg": get_salt_price_usd_per_kg(DEFAULT_SALT),
-        "hydrogel_density_kg_m3": float(scalars["hydrogel_density_kg_m3"]),
+        # DVS dry-basis density, not the raw (wet, 20% RH) xlsx value -- see
+        # solar_lumped/physics.py::DRY_COMPOSITE_DENSITY_KG_M3.
+        "hydrogel_density_kg_m3": float(DRY_COMPOSITE_DENSITY_KG_M3),
         "hydrogel_lifetime_years": float(scalars["hydrogel_lifetime_years"]),
         "c_acrylamide_usd_per_kg": float(scalars["c_acrylamide_usd_per_kg"]),
         "c_additives_usd_per_kg_composite": float(scalars["c_additives_usd_per_kg_composite"]),

@@ -13,7 +13,11 @@ from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
 
-from waste_heat_cycle_lumped_no_loop.physics import H_FG_J_PER_KG, get_salt_price_usd_per_kg
+from waste_heat_cycle_lumped_no_loop.physics import (
+    DRY_COMPOSITE_DENSITY_KG_M3,
+    H_FG_J_PER_KG,
+    get_salt_price_usd_per_kg,
+)
 
 _COL_PARAMETER = "parameter"
 _COL_VALUE = "value"
@@ -138,7 +142,14 @@ _LCOW_DEFAULTS: dict[str, Any] = {f.name: _SCALARS[f.name] for f in fields(LCOEc
 
 
 def dry_composite_mass_kg(hydrogel_thickness_m: float) -> float:
-    return float(hydrogel_thickness_m) * HYDROGEL_DENSITY_KG_M3
+    """Dry (solids-only) composite mass per m^2 at the given thickness.
+
+    Uses the DVS-derived dry-basis density, not the raw Table S3 rho_gel (that's
+    measured at 20% RH and already carries ~126% equilibrium water by mass --
+    see physics.py::DRY_COMPOSITE_DENSITY_KG_M3), since the recipe-based hydrogel
+    cost below is priced per kg of dry (post-synthesis) solids.
+    """
+    return float(hydrogel_thickness_m) * DRY_COMPOSITE_DENSITY_KG_M3
 PATENT_BOM_USD_PER_M2: tuple[tuple[str, float], ...] = (
     ("Vacuum pump (28)", 3500.0),
     ("Chambers (22A, 22B) with door assemblies (38)", 1050.0),

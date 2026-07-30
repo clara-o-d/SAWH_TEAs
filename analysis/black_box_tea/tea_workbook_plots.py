@@ -174,7 +174,7 @@ def plot_lcow_breakdown_stacked(
     ax_leg.axis("off")
     handles = [
         Patch(facecolor=color, edgecolor="white", label=f"{label} ({value:.2f})")
-        for label, value, color in zip(labels, values, colors, strict=True)
+        for label, value, color in reversed(list(zip(labels, values, colors, strict=True)))
     ]
     ax_leg.legend(
         handles=handles,

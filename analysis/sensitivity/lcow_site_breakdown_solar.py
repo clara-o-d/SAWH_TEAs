@@ -12,6 +12,7 @@ from __future__ import annotations
 import argparse
 import csv
 import sys
+from dataclasses import replace
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent.parent / "solar_lumped"
@@ -27,6 +28,7 @@ if str(_TEA_ROOT) not in sys.path:
 
 from run_solar_sim import (  # noqa: E402
     SolarSimResult,
+    _lcow_kwargs,
     output_tag,
     register_solar_sim_arguments,
     resolve_solar_sim_arguments,
@@ -34,9 +36,11 @@ from run_solar_sim import (  # noqa: E402
 )
 from solar_lumped.economics import LcowCostBreakdown  # noqa: E402
 from solar_lumped.economics import KG_WATER_PER_M3  # noqa: E402
+from solar_lumped.economics import lcow_cost_breakdown_from_daily_yield  # noqa: E402
+from solar_lumped.economics import lcow_from_daily_yield  # noqa: E402
 from tea_workbook_plots import LcowBreakdown, plot_lcow_breakdown_stacked  # noqa: E402
 
-_DEFAULT_OUT_DIR = _REPO / "outputs" / "lcow" / "site"
+_DEFAULT_OUT_DIR = Path(__file__).resolve().parent / "outputs" / "lcow" / "site"
 
 
 def _net_annual_water_m3(result: SolarSimResult, *, cycles_per_day: float = 1.0) -> float:
@@ -55,7 +59,34 @@ def _breakdown_title(result: SolarSimResult) -> str:
         parts.append(result.config.mof_name)
     else:
         parts.append(result.config.salt_name)
-    return " ".join(parts)
+    config = result.config
+    design = (
+        f"hydrogel thickness {config.hydrogel_thickness_m * 1e3:.2f} mm, "
+        f"condenser (fin) area ratio {config.fin_area_ratio:.2f}, "
+        f"vapor gap {config.vapor_gap_m * 1e3:.1f} mm"
+    )
+    return " ".join(parts) + "\n" + design
+
+
+def _apply_yield_override(result: SolarSimResult, daily_yield_kg_m2: float) -> SolarSimResult:
+    """Recompute LCOW/breakdown for an externally supplied yield (e.g. a sweep row)."""
+    config = result.config
+    lcow_kw = _lcow_kwargs(config)
+    common = dict(
+        salt_name=config.salt_name,
+        salt_to_polymer_ratio=config.salt_to_polymer_ratio,
+        hydrogel_thickness_m=config.hydrogel_thickness_m,
+        econ=result.econ,
+        **lcow_kw,
+    )
+    lcow = lcow_from_daily_yield(daily_yield_kg_m2, **common)
+    breakdown = lcow_cost_breakdown_from_daily_yield(daily_yield_kg_m2, **common)
+    return replace(
+        result,
+        daily_yield_kg_per_m2=daily_yield_kg_m2,
+        lcow_usd_per_m3=lcow,
+        breakdown=breakdown,
+    )
 
 
 def _to_workbook_breakdown(
@@ -103,10 +134,19 @@ def main() -> None:
         default=None,
         help="Breakdown table CSV (default: outputs/lcow/site/lcow_breakdown_<tag>.csv)",
     )
+    ap.add_argument(
+        "--daily-yield-kg-m2",
+        type=float,
+        default=None,
+        help="Override the simulated daily yield (kg/m²/d) — e.g. a sweep's mean_yield_kg_m2 — "
+        "for the LCOW breakdown instead of re-simulating it",
+    )
     args = ap.parse_args()
 
     resolve_solar_sim_arguments(args, ap)
     result = run_solar_simulation(args)
+    if args.daily_yield_kg_m2 is not None:
+        result = _apply_yield_override(result, args.daily_yield_kg_m2)
 
     if result.breakdown is None:
         sys.exit("Simulation produced no LCOW breakdown (zero or invalid yield).")

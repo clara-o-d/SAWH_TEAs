@@ -581,11 +581,11 @@ def run_analysis(csv_path: Path, out_dir: Path, label: str) -> pd.DataFrame:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument(
-        "--csv", type=Path, default=_REPO / "outputs" / "gpu_grid_sweep" / "full_sweep.csv",
+        "--csv", type=Path, default=Path(__file__).resolve().parent / "full_sweep.csv",
         help="GPU sweep CSV to analyze (default: Case 1's full_sweep.csv)",
     )
     p.add_argument(
-        "--out-dir", type=Path, default=_REPO / "outputs" / "gpu_grid_sweep" / "plots",
+        "--out-dir", type=Path, default=Path(__file__).resolve().parent / "plots",
         help="Directory to write plots/tables into (default: Case 1's plots/ dir)",
     )
     p.add_argument("--label", type=str, default="Case 1", help="Label used in plot titles (e.g. 'Case 2')")

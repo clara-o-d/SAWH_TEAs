@@ -313,12 +313,15 @@ level-annuity NPV, not a full pro forma.
 \item \textbf{CAPEX} is a fixed per-footprint bill of materials (BOM), summed from six line items,
 scaled uniformly by a \code{total\_investment\_factor} (contingency / installation multiplier
 that is easy to sweep even though the underlying line items themselves are not).
-\item \textbf{Maintenance} is a fixed fraction of CAPEX per year -- not tied to any modeled
-failure or service-call process.
+\item \textbf{Maintenance} is a fixed fraction of the bare device BOM cost per year (not the
+TIC-inflated CAPEX, so it is unaffected by the total investment factor) -- not tied to any
+modeled failure or service-call process.
 \item \textbf{Sorbent replacement:} the hydrogel is replaced on a fixed interval
 (\code{hydrogel\_lifetime\_years}); its replacement cost is the dry composite mass per footprint
-area times a blended cost (catalog salt price + fixed acrylamide/additive costs, Table~S1). MOF
-sorbent instead uses mass $\times$ price / lifetime directly.
+area times a blended cost per kg. The blend price weights the salt and the polymer sub-mix
+(acrylamide/APS/MBA/TEMED) by the salt:polymer ratio, and separately adds a DI-water term sized by
+that water's mass fraction of the whole synthesis batch (Table~S1 recipe) -- not a fixed
+per-ingredient cost. MOF sorbent instead uses mass $\times$ price / lifetime directly.
 \item \textbf{Utilization factor} is a single multiplicative derating of the physics-simulated
 gross annual yield (daily yield $\times$ 365 $\times$ cycles/day), meant to stand in for real-world
 downtime / non-ideal weather years -- not a modeled reliability/availability process.
@@ -344,16 +347,44 @@ where $i$ is the discount rate and $L$ the device lifetime (years).
 \textbf{Sorbent (hydrogel) replacement, annualized:}
 \begin{equation}
 C_{sorbent} = \frac{c_{gel}\,m_{dry}}{L_{gel}}, \qquad
-c_{gel} = \frac{c_{salt}\,(S/L) + c_{acrylamide}}{1 + S/L} + c_{additives}
+c_{gel} = \frac{c_{salt}\,(S/L) + c_{polymer}}{1 + S/L} + \frac{\phi_{water}}{1-\phi_{water}}\,c_{water}
 \label{eq:sorbent}
 \end{equation}
-where $m_{dry} = H_0\,\rho_{gel}$ is the dry composite mass per footprint area, $S/L$ is the
-salt:polymer ratio, and $L_{gel}$ is the hydrogel replacement interval (years). (MOF sorbent:
+\begin{equation}
+c_{polymer} = \frac{\displaystyle\sum_{k \in \{AM,APS,MBA,TEMED\}} \phi_k\,c_k}
+{\displaystyle\sum_{k \in \{AM,APS,MBA,TEMED\}} \phi_k}
+\label{eq:polymer-blend}
+\end{equation}
+where $m_{dry} = H_0\,\rho_{gel,dry}$ is the dry (solids-only) composite mass per footprint area.
+$H_0$ is the \code{Hydrogel reference thickness (H0)} row (\SI{4}{\milli\metre}, Physics sheet).
+$\rho_{gel,dry}$ is \emph{not} the Table~S3 \code{Composite (hydrogel) density at 20\% RH
+(rho\_gel)} row (\SI{1250.2}{\kilo\gram\per\cubic\metre}) directly -- that density is measured on
+the composite already equilibrated at \SI{20}{\percent} RH, which the PAM--LiCl DVS isotherm
+(\code{physics.py::pam\_licl\_uptake\_g\_g\_at\_rh}) puts at $\approx$\SI{126}{\percent} bound
+water by dry mass, i.e.\ using it as-is would overstate the purchased dry-solids mass (and hence
+$C_{sorbent}$) by $1+u_{20} \approx 2.26\times$. Instead
+$\rho_{gel,dry} = \rho_{gel}/(1+u_{20})$
+(\code{physics.py::DRY\_COMPOSITE\_DENSITY\_KG\_M3}, $\approx$\SI{553}{\kilo\gram\per\cubic\metre}),
+the same dry-basis density physics.py already uses for its own gravimetric-uptake and
+initial-$c_w$ calculations -- \code{economics.py::dry\_composite\_mass\_kg} now imports it rather
+than reading \code{rho\_gel} directly, to keep the two files' notions of "dry mass" consistent.
+$\phi_{water}$ below is a separate quantity: the DI water mixed in during synthesis (Table~S1),
+not water later absorbed from ambient. $S/L$ is the
+salt:polymer ratio, $L_{gel}$ is the hydrogel replacement interval (years), $\phi_k$ is ingredient
+$k$'s mass fraction in the whole synthesis batch (Table~S1 recipe: AM, APS, MBA, TEMED, salt, and
+DI water), and $c_k$ its catalog price. $c_{polymer}$ (Eq.~\eqref{eq:polymer-blend}) is the
+acrylamide/APS/MBA/TEMED sub-mix price, mass-fraction-weighted and renormalized over just those
+four ingredients (their $\phi_k$ do not sum to 1 alone -- the batch also contains salt and water).
+The $\phi_{water}/(1-\phi_{water})$ term converts the DI-water mass fraction of the whole batch
+into a ratio against the batch's dry (non-water) mass, since $m_{dry}$ already excludes water.
+The cost breakdown (\code{lcow\_cost\_breakdown\_from\_daily\_yield}) further splits
+$c_{polymer}/(1+S/L)$ back into its four per-ingredient terms
+$\frac{\phi_k}{\sum_k \phi_k}\,\frac{c_k}{1+S/L}$ for reporting. (MOF sorbent:
 $C_{sorbent} = m_{MOF}\,c_{MOF} / L_{gel}$ directly.)
 
 \textbf{Annualized device cost:}
 \begin{equation}
-C_{annual} = CRF \cdot f_{inv}\,C_{device} + C_{sorbent} + f_{maint}\,f_{inv}\,C_{device}
+C_{annual} = CRF \cdot f_{inv}\,C_{device} + C_{sorbent} + f_{maint}\,C_{device}
 + C_{energy,fixed} + C_{elec} + C_{cycle,extra}
 \label{eq:annual-cost}
 \end{equation}
@@ -373,6 +404,13 @@ half-cycles per day, $\rho_w$ the density of water (kg/m$^3$), and $f_{util}$ th
 factor. The cost breakdown (\code{lcow\_cost\_breakdown\_from\_daily\_yield}) reports each term
 of Eq.~\eqref{eq:annual-cost} individually, divided by the same denominator, so CAPEX / sorbent /
 maintenance / energy segments sum exactly to $LCOW$.
+
+\textbf{Yes, hydrogel lifetime is in LCOW:} $L_{gel}$ (\code{hydrogel\_lifetime\_years}) enters
+through $C_{sorbent}$ (Eq.~\eqref{eq:sorbent}), which is a summand of $C_{annual}$
+(Eq.~\eqref{eq:annual-cost}), the numerator of Eq.~\eqref{eq:lcow}. A shorter $L_{gel}$
+(more frequent hydrogel replacement) raises $C_{sorbent}$ and therefore raises LCOW, all else
+equal; it does not otherwise affect device physics or yield -- \code{lcow\_from\_daily\_yield}
+(\code{economics.py::\_sorbent\_replacement\_annual\_usd}) is the code path.
 
 \textbf{NPV and payback:}
 \begin{align}

@@ -188,7 +188,6 @@ WATER_MOLAR_MASS_KG_MOL: float = 0.018015
 GAS_CONSTANT_J_MOL_K: float = 8.314462618
 C_W_MAX_MOL_M3: float = 400000.0
 C_W_MIN_MOL_M3: float = 100.0
-DRY_COMPOSITE_DENSITY_KG_M3: float = 1000.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -269,6 +268,23 @@ def _load_pam_licl_dvs_isotherm() -> tuple[np.ndarray, np.ndarray]:
     uptake = np.array(uptake_g_g, dtype=float)[order]
     return rh, uptake
 
+
+def pam_licl_uptake_g_g_at_rh(rh_fraction: float) -> float:
+    """Forward DVS isotherm: equilibrium uptake (g/g) at relative humidity."""
+    rh_pct, uptake = _load_pam_licl_dvs_isotherm()
+    r = max(0.0, min(100.0, float(rh_fraction) * 100.0))
+    return float(np.interp(r, rh_pct, uptake))
+
+
+# Dry-basis composite density for all gravimetric-uptake <-> c_w conversions.
+# Table S3 reports the composite density at fabrication (25 °C, 20% RH); the DVS
+# isotherm uptake is gravimetric per gram of *dry* composite, so the dry-basis
+# density is rho_composite(20% RH) / (1 + uptake(20% RH)). Using the wet (20% RH)
+# density here would over-count the sorbent dry mass by (1 + u20) ≈ 2.26x and
+# inflate the absolute water inventory / desorption swing accordingly.
+DRY_COMPOSITE_DENSITY_KG_M3: float = RHO_COMPOSITE_KG_M3 / (
+    1.0 + pam_licl_uptake_g_g_at_rh(0.20)
+)
 
 
 def pam_licl_dry_mass_kg_m2(
