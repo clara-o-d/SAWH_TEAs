@@ -56,12 +56,34 @@ _PARAM_TITLES = {
     "vapor_gap_mm": "Vapor gap (mm)",
     "fin_area_ratio": "Condenser fin area ratio",
 }
-_TOTAL_LAND_SITES = 1404  # analysis/gpu_grid_sweep/full_sweep.csv's own site count, --step 3.0
+_TOTAL_LAND_SITES = 1405  # analysis/gpu_grid_sweep/full_sweep_case2.csv's own site count, --step 3.0
 
 
-def load_data(csv_path: Path) -> pd.DataFrame:
+def load_data(csv_path: Path, corrected_csv_path: Path | None = None) -> pd.DataFrame:
+    """Load the sweep summary, with LCOW/design overridden by
+    recompute_lcow_from_cache.py's corrected values when available (see that
+    script's module docstring -- economics.py's LCOW formula had a real bug,
+    fixed after this sweep ran; the corrected file re-picks each site's best
+    already-cached design under the fixed formula, no GPU re-run needed).
+    Diagnostic columns (stopped_reason, cv_rmse, ...) are about the search
+    process itself, unaffected by the LCOW-formula fix, so those still come
+    from the original summary.
+    """
     df = pd.read_csv(csv_path)
-    return df[df["error"].isna()] if "error" in df.columns else df
+    df = df[df["error"].isna()] if "error" in df.columns else df
+    if corrected_csv_path is None or not corrected_csv_path.is_file():
+        return df
+    corrected = pd.read_csv(corrected_csv_path)[
+        ["lat", "lon", "corrected_best_combined_lcow_usd_m3", "corrected_hydrogel_thickness_mm",
+         "corrected_vapor_gap_mm", "corrected_fin_area_ratio"]
+    ].rename(columns={
+        "corrected_best_combined_lcow_usd_m3": "best_combined_lcow_usd_m3",
+        "corrected_hydrogel_thickness_mm": "hydrogel_thickness_mm",
+        "corrected_vapor_gap_mm": "vapor_gap_mm",
+        "corrected_fin_area_ratio": "fin_area_ratio",
+    })
+    df = df.drop(columns=["best_combined_lcow_usd_m3", "hydrogel_thickness_mm", "vapor_gap_mm", "fin_area_ratio"])
+    return df.merge(corrected, on=["lat", "lon"], how="inner")
 
 
 def plot_optimal_lcow_map(df: pd.DataFrame, out_dir: Path, label: str) -> None:
@@ -171,6 +193,44 @@ def _infer_grid_case(grid_df: pd.DataFrame) -> str:
     return "unknown"
 
 
+def plot_improvement_map(merged: pd.DataFrame, out_dir: Path, label: str) -> None:
+    ccrs, cfeature = _import_map_stack()
+
+    pct = (merged["improvement_frac"] * 100).to_numpy()
+    from matplotlib.colors import TwoSlopeNorm
+
+    # Centered at 0% (diverging) rather than min/max -- "no improvement" is a
+    # meaningful reference point here, not just an arbitrary low end.
+    vmax = max(float(np.abs(pct).max()), 0.1)
+    norm = TwoSlopeNorm(vcenter=0.0, vmin=-vmax, vmax=vmax)
+
+    fig = plt.figure(figsize=(14, 7))
+    ax = _world_ax(fig, (1, 1, 1), ccrs=ccrs, cfeature=cfeature)
+    ax.gridlines(crs=ccrs.PlateCarree(), draw_labels=False, linewidth=0.35, color="0.45", alpha=0.45, linestyle="--")
+
+    lons, lats = merged["lon"].to_numpy(), merged["lat"].to_numpy()
+    sample_step_deg = max(_infer_grid_step(lons), _infer_grid_step(lats))
+    lon_vals, lat_vals, grid = _interpolate_to_grid(lons, lats, pct, sample_step_deg=sample_step_deg)
+    sc = ax.pcolormesh(
+        lon_vals, lat_vals, grid, shading="gouraud", transform=ccrs.PlateCarree(), zorder=4,
+        cmap="RdYlGn", norm=norm,
+    )
+    cbar = fig.colorbar(sc, ax=ax, fraction=0.03, pad=0.04)
+    cbar.set_label("LCOW improvement of BayesOpt over grid-sweep best combo (%)", fontsize=10)
+    ax.set_title(
+        f"{label}: BayesOpt vs. brute-force grid-sweep LCOW, {len(merged)} shared sites\n"
+        f"green = BayesOpt found a cheaper design; red = grid-sweep combo was cheaper",
+        fontsize=12, pad=10,
+    )
+
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = out_dir / "bayesopt_vs_grid_improvement_map.png"
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=160, bbox_inches="tight")
+    plt.close(fig)
+    print(f"Wrote {out_path}", flush=True)
+
+
 def compare_vs_grid_sweep(bo_df: pd.DataFrame, grid_csv: Path, out_dir: Path, label: str) -> None:
     """BayesOpt searches a continuous box that contains the brute-force
     grid's 5x5x5 discrete combos -- so at any site both ran under the *same*
@@ -228,10 +288,12 @@ def compare_vs_grid_sweep(bo_df: pd.DataFrame, grid_csv: Path, out_dir: Path, la
     plt.close(fig)
     print(f"Wrote {out_path}", flush=True)
 
+    plot_improvement_map(merged, out_dir, label)
 
-def run_analysis(csv_path: Path, grid_csv: Path, out_dir: Path, label: str) -> pd.DataFrame:
+
+def run_analysis(csv_path: Path, grid_csv: Path, out_dir: Path, label: str, corrected_csv_path: Path | None = None) -> pd.DataFrame:
     print(f"Loading {csv_path} ...", flush=True)
-    df = load_data(csv_path)
+    df = load_data(csv_path, corrected_csv_path)
     print(f"  {len(df)}/{_TOTAL_LAND_SITES} land sites completed so far", flush=True)
 
     print("\n--- 1. Optimized LCOW map ---", flush=True)
@@ -255,9 +317,10 @@ def run_analysis(csv_path: Path, grid_csv: Path, out_dir: Path, label: str) -> p
 def main() -> int:
     run_analysis(
         csv_path=_HERE / "full_sweep_summary.csv",
-        grid_csv=_GRID_SWEEP_DIR / "full_sweep.csv",
+        corrected_csv_path=_HERE / "full_sweep_summary_corrected.csv",
+        grid_csv=_GRID_SWEEP_DIR / "full_sweep_case2.csv",
         out_dir=_HERE / "plots",
-        label="BayesOpt sweep",
+        label="BayesOpt sweep (case2, corrected LCOW)",
     )
     return 0
 
