@@ -44,7 +44,7 @@ from run_annual_simulation import build_device_config  # noqa: E402
 
 from solar_lumped.simulation import simulate_annual_year  # noqa: E402
 from solar_lumped.simulation import find_cyclic_state, run_daily_cycle  # noqa: E402
-from solar_lumped.weather import WeatherClient  # noqa: E402
+from solar_lumped.weather import fetch_year_weather  # noqa: E402
 from solar_lumped.weather import representative_mean_day_df  # noqa: E402
 from solar_lumped.weather import (  # noqa: E402
     profile_from_day_df,
@@ -183,13 +183,7 @@ def main(argv: list[str] | None = None) -> int:
         f"[cache={args.cache_dir}]…",
         flush=True,
     )
-    client = WeatherClient(cache_dir=args.cache_dir)
-    start = f"{args.year}-01-01"
-    end = f"{args.year}-12-31"
-    try:
-        _, df = client.get_historical_forecast_site_weather(args.lat, args.lon, start, end)
-    except Exception:
-        df = client.get_historical(args.lat, args.lon, start, end)
+    df = fetch_year_weather(args.lat, args.lon, args.year, cache_dir=args.cache_dir)
 
     n_days_simulated: int | None = None
     annual_min = annual_max = None

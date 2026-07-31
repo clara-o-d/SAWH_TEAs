@@ -243,6 +243,11 @@ class CoupledRates:
     thermal: ThermalState
 
 
+def _thermal_guess(thermal: ThermalState) -> tuple[float, float, float]:
+    """(T_gel, T_abs, T_glass) warm-start tuple for the next ``solve_steady_thermal`` call."""
+    return thermal.t_gel_c, thermal.t_abs_c, thermal.t_glass_c
+
+
 def _m_des_calc(
     m_des: float,
     *,
@@ -533,11 +538,7 @@ def _integrate_absorption(
         dh = rates.dH_dt if h_m > h_min + 1e-12 else max(0.0, rates.dH_dt)
         if h_m >= h_max and dh > 0.0:
             dh = 0.0
-        t_guess = (
-            rates.thermal.t_gel_c,
-            rates.thermal.t_abs_c,
-            rates.thermal.t_glass_c,
-        )
+        t_guess = _thermal_guess(rates.thermal)
         return np.array([rates.dc_w_dt, dh])
 
     sol = solve_ivp(
@@ -575,11 +576,7 @@ def _integrate_absorption(
             config=config,
             t_guess=guess,
         )
-        guess = (
-            rates.thermal.t_gel_c,
-            rates.thermal.t_abs_c,
-            rates.thermal.t_glass_c,
-        )
+        guess = _thermal_guess(rates.thermal)
         t_gel_hist.append(rates.t_gel_c)
 
     c_w_out = np.array([clip_loading(float(v), config=config) for v in sol.y[0]])
@@ -655,11 +652,7 @@ def _integrate_desorption(
         dh = rates.dH_dt if h_m > h_min + 1e-12 else 0.0
         dc = min(0.0, rates.dc_w_dt)
         dh = min(0.0, dh)
-        t_guess = (
-            rates.thermal.t_gel_c,
-            rates.thermal.t_abs_c,
-            rates.thermal.t_glass_c,
-        )
+        t_guess = _thermal_guess(rates.thermal)
         return np.array([dc, dh, rates.dT_cond_dt])
 
     sol = solve_ivp(
@@ -706,11 +699,7 @@ def _integrate_desorption(
                 else None
             ),
         )
-        guess = (
-            rates.thermal.t_gel_c,
-            rates.thermal.t_abs_c,
-            rates.thermal.t_glass_c,
-        )
+        guess = _thermal_guess(rates.thermal)
         if k == 0 and surface_ic is not None:
             t_gel_hist.append(t_gel_ic)
             t_abs_hist.append(t_abs_ic)
@@ -722,10 +711,7 @@ def _integrate_desorption(
         t_cond_hist.append(float(sol.y[2, k]))
         m_des_hist.append(rates.m_des_kg_s_m2)
 
-    water = 0.0
-    for k in range(len(sol.t) - 1):
-        dt_step = float(sol.t[k + 1] - sol.t[k])
-        water += 0.5 * (m_des_hist[k] + m_des_hist[k + 1]) * dt_step
+    water = float(cumulative_desorption_yield_l_m2(sol.t, m_des_hist)[-1])
 
     c_w_out = np.array([clip_loading(float(v), config=config) for v in sol.y[0]])
     h_out = np.maximum(sol.y[1], h_min)
@@ -1026,11 +1012,7 @@ def detailed_series(
                 config=config,
                 t_guess=guess,
             )
-            guess = (
-                rates.thermal.t_gel_c,
-                rates.thermal.t_abs_c,
-                rates.thermal.t_glass_c,
-            )
+            guess = _thermal_guess(rates.thermal)
             t_abs.append(rates.thermal.t_abs_c)
             t_glass.append(rates.thermal.t_glass_c)
             t_cond.append(t_amb)
@@ -1087,11 +1069,7 @@ def detailed_series(
                     else None
                 ),
             )
-            guess = (
-                rates.thermal.t_gel_c,
-                rates.thermal.t_abs_c,
-                rates.thermal.t_glass_c,
-            )
+            guess = _thermal_guess(rates.thermal)
             t_abs.append(rates.thermal.t_abs_c)
             t_glass.append(rates.thermal.t_glass_c)
 

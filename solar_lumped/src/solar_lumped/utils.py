@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import math
 from collections.abc import Callable
+from pathlib import Path
 
+import numpy as np
 from scipy.optimize import brentq
 
 
@@ -36,3 +38,12 @@ def find_root_bracketed(
     if not (fa * fb < 0) or math.isnan(fa) or math.isnan(fb):
         return float("nan")
     return float(brentq(f, x_min, x_max, maxiter=maxiter))
+
+
+def load_two_column_csv(path: Path) -> tuple[np.ndarray, np.ndarray]:
+    """Read a header-less two-column ``(x, y)`` CSV, sorted by the first column."""
+    data = np.loadtxt(path, delimiter=",", ndmin=2)
+    if data.size == 0:
+        raise ValueError(f"No data in {path}")
+    order = np.argsort(data[:, 0])
+    return data[order, 0], data[order, 1]

@@ -21,7 +21,7 @@ from solar_lumped.simulation import (
     write_daily_summary_csv,
 )
 from solar_lumped.simulation import DeviceConfig
-from solar_lumped.weather import WeatherClient
+from solar_lumped.weather import fetch_year_weather
 from solar_lumped.weather import real_weather_days_from_df
 
 
@@ -108,13 +108,7 @@ def main(argv: list[str] | None = None) -> int:
         f"Fetching {args.year} weather for ({args.lat:+.4f}, {args.lon:+.4f})…",
         flush=True,
     )
-    client = WeatherClient(cache_dir=args.cache_dir)
-    start = f"{args.year}-01-01"
-    end = f"{args.year}-12-31"
-    try:
-        _, df = client.get_historical_forecast_site_weather(args.lat, args.lon, start, end)
-    except Exception:
-        df = client.get_historical(args.lat, args.lon, start, end)
+    df = fetch_year_weather(args.lat, args.lon, args.year, cache_dir=args.cache_dir)
 
     day_items = real_weather_days_from_df(df, stride=args.stride)
     if not day_items:

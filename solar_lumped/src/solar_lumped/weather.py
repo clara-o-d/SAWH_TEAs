@@ -178,6 +178,23 @@ def _raise_for_openmeteo_error(response: requests.Response) -> None:
         response=response,
     )
 
+
+def fetch_year_weather(
+    lat: float,
+    lon: float,
+    year: int,
+    *,
+    cache_dir: str | None = None,
+) -> pd.DataFrame:
+    """One calendar year of minutely-15 weather, falling back to hourly archive data."""
+    client = WeatherClient(cache_dir=cache_dir)
+    start, end = f"{year}-01-01", f"{year}-12-31"
+    try:
+        _, df = client.get_historical_forecast_site_weather(lat, lon, start, end)
+        return df
+    except Exception:
+        return client.get_historical(lat, lon, start, end)
+
 # =============================================================================
 # Real-weather day statistics (solar/temperature/RH day summaries)
 # =============================================================================
@@ -240,19 +257,24 @@ def representative_mean_day_df(
     return out
 
 
+def _grouped_mean_fill(series: pd.Series, key: np.ndarray | pd.Index, n: int) -> tuple[float, ...]:
+    """Per-key mean of *series* (grouped by *key*), filled for 0..n-1 with the overall mean."""
+    grouped = series.groupby(key).mean()
+    fallback = float(grouped.mean()) if len(grouped) else 0.0
+    return tuple(float(grouped.get(k, fallback)) for k in range(n))
+
+
+def _mean_by_slot(df: pd.DataFrame, col: str) -> tuple[float, ...]:
+    slot = df.index.hour * STEPS_PER_HOUR + df.index.minute // 15  # 15-min slot 0..95
+    return _grouped_mean_fill(df[col], slot, STEPS_PER_DAY)
+
+
 def representative_kinetics_rh_from_minutely_15(df: pd.DataFrame) -> tuple[float, ...]:
     """Mean relative humidity (fraction 0–1) for each 15-min slot 0..95 within a day."""
     if "relative_humidity_2m" not in df.columns:
         raise KeyError("DataFrame must contain column 'relative_humidity_2m'")
     rh_pct = _mean_by_slot(df, "relative_humidity_2m")
     return tuple(r / 100.0 for r in rh_pct)
-
-
-def _mean_by_slot(df: pd.DataFrame, col: str) -> tuple[float, ...]:
-    slot = df.index.hour * STEPS_PER_HOUR + df.index.minute // 15  # 15-min slot 0..95
-    grouped = df[col].groupby(slot).mean()
-    fallback = float(grouped.mean()) if len(grouped) else 0.0
-    return tuple(float(grouped.get(s, fallback)) for s in range(STEPS_PER_DAY))
 
 
 def representative_kinetics_temperature_from_minutely_15(df: pd.DataFrame) -> tuple[float, ...]:
@@ -284,8 +306,7 @@ def representative_hourly_rh_from_hourly(df: pd.DataFrame) -> tuple[float, ...]:
     """Mean relative humidity (fraction 0–1) for each hour-of-day 0..23."""
     if "relative_humidity_2m" not in df.columns:
         raise KeyError("DataFrame must contain column 'relative_humidity_2m'")
-    hourly = df["relative_humidity_2m"].groupby(df.index.hour).mean() / 100.0
-    return tuple(float(hourly.get(h, hourly.mean())) for h in range(24))
+    return _grouped_mean_fill(df["relative_humidity_2m"] / 100.0, df.index.hour, 24)
 
 
 def representative_hourly_temperature_from_hourly(df: pd.DataFrame) -> tuple[float, ...]:
@@ -293,8 +314,7 @@ def representative_hourly_temperature_from_hourly(df: pd.DataFrame) -> tuple[flo
     col = "temperature_2m"
     if col not in df.columns:
         raise KeyError(f"DataFrame must contain column {col!r}")
-    hourly = df[col].groupby(df.index.hour).mean()
-    return tuple(float(hourly.get(h, hourly.mean())) for h in range(24))
+    return _grouped_mean_fill(df[col], df.index.hour, 24)
 
 
 def representative_hourly_solar_from_hourly(df: pd.DataFrame) -> tuple[float, ...]:
@@ -302,8 +322,7 @@ def representative_hourly_solar_from_hourly(df: pd.DataFrame) -> tuple[float, ..
     col = "shortwave_radiation"
     if col not in df.columns:
         raise KeyError(f"DataFrame must contain column {col!r}")
-    hourly = df[col].groupby(df.index.hour).mean()
-    return tuple(float(max(0.0, hourly.get(h, hourly.mean()))) for h in range(24))
+    return tuple(max(0.0, s) for s in _grouped_mean_fill(df[col], df.index.hour, 24))
 
 
 def representative_hourly_wind_from_hourly(df: pd.DataFrame) -> tuple[float, ...]:
@@ -311,8 +330,7 @@ def representative_hourly_wind_from_hourly(df: pd.DataFrame) -> tuple[float, ...
     col = "wind_speed_10m"
     if col not in df.columns:
         return (0.5,) * 24
-    hourly = df[col].groupby(df.index.hour).mean()
-    return tuple(float(hourly.get(h, hourly.mean())) for h in range(24))
+    return _grouped_mean_fill(df[col], df.index.hour, 24)
 
 
 def _expand_hourly_to_15min(hourly: tuple[float, ...]) -> tuple[float, ...]:
@@ -662,14 +680,7 @@ def representative_mean_day_profile(
     cache_dir: str | None = None,
 ) -> DailyWeatherProfile:
     """Fetch one calendar year and return a single mean diurnal profile."""
-    client = WeatherClient(cache_dir=cache_dir)
-    start = f"{year}-01-01"
-    end = f"{year}-12-31"
-    try:
-        _, df_min15 = client.get_historical_forecast_site_weather(lat, lon, start, end)
-        df = df_min15
-    except Exception:
-        df = client.get_historical(lat, lon, start, end)
+    df = fetch_year_weather(lat, lon, year, cache_dir=cache_dir)
     mean_day = representative_mean_day_df(df, reference_day=date(year, 6, 15))
     return profile_from_day_df(mean_day)
 
@@ -685,14 +696,7 @@ def real_weather_days(
 ) -> list[tuple[date, DailyWeatherProfile]]:
     """Build per-day profiles for a full year from minutely_15 (or hourly fallback)."""
     if df is None:
-        client = WeatherClient(cache_dir=cache_dir)
-        start = f"{year}-01-01"
-        end = f"{year}-12-31"
-        try:
-            _, df_min15 = client.get_historical_forecast_site_weather(lat, lon, start, end)
-            df = df_min15
-        except Exception:
-            df = client.get_historical(lat, lon, start, end)
+        df = fetch_year_weather(lat, lon, year, cache_dir=cache_dir)
 
     return [(day_key, prof) for day_key, prof, _ in real_weather_days_from_df(df, stride=stride)]
 
