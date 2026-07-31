@@ -181,6 +181,16 @@ WATER_RATIO_PER_KG_DRY_COMPOSITE: float = _water_gel_fraction / (1.0 - _water_ge
 FAIL_LCO: float = 1e30
 
 
+def _annual_electricity_cost_usd(econ: LCOEconomicParams, electric_heat_w_per_m2: float) -> float:
+    return (
+        econ.electricity_price_usd_per_kwh
+        * float(electric_heat_w_per_m2)
+        * econ.desorption_hours_per_day
+        * 365.0
+        / 1000.0
+    )
+
+
 def lcow_from_daily_yield(
     daily_yield_kg_per_m2: float,
     *,
@@ -222,13 +232,7 @@ def lcow_from_daily_yield(
         simplified=simplified,
     )
 
-    annual_electricity_cost = (
-        econ.electricity_price_usd_per_kwh
-        * float(electric_heat_w_per_m2)
-        * econ.desorption_hours_per_day
-        * 365.0
-        / 1000.0
-    )
+    annual_electricity_cost = _annual_electricity_cost_usd(econ, electric_heat_w_per_m2)
     annual_cost_usd = (
         econ.capital_recovery_factor() * econ.total_investment_factor * C_DEVICE_USD
         + sorbent_replacement
@@ -390,13 +394,7 @@ def lcow_cost_breakdown_from_daily_yield(
             )
             segments.append(("Hydrogel: water", _lcow_seg(water_annual)))
 
-    annual_electricity_cost = (
-        econ.electricity_price_usd_per_kwh
-        * float(electric_heat_w_per_m2)
-        * econ.desorption_hours_per_day
-        * 365.0
-        / 1000.0
-    )
+    annual_electricity_cost = _annual_electricity_cost_usd(econ, electric_heat_w_per_m2)
     segments.append(("Electricity (active heat)", _lcow_seg(annual_electricity_cost)))
 
     return LcowCostBreakdown(items=tuple(segments))
@@ -453,13 +451,7 @@ def npv_from_daily_yield(
         econ=econ,
         salt_price_usd_per_kg=salt_price_usd_per_kg,
     )
-    annual_electricity_cost = (
-        econ.electricity_price_usd_per_kwh
-        * float(electric_heat_w_per_m2)
-        * econ.desorption_hours_per_day
-        * 365.0
-        / 1000.0
-    )
+    annual_electricity_cost = _annual_electricity_cost_usd(econ, electric_heat_w_per_m2)
     capex = econ.total_investment_factor * C_DEVICE_USD
     annual_opex = (
         sorbent_replacement

@@ -20,7 +20,7 @@ import pandas as pd
 from scipy.optimize import root
 
 from solar_lumped._parameters_xlsx import physics_value as _pv
-from solar_lumped.utils import find_root_bracketed
+from solar_lumped.utils import find_root_bracketed, load_two_column_csv
 
 if TYPE_CHECKING:
     from solar_lumped.simulation import DeviceConfig
@@ -66,7 +66,6 @@ CP_AL_J_KG_K: float = _pv("Aluminum specific heat (cp_Al)")
 EPS_GEL: float = _pv("Gel emissivity (eps_gel)")
 EPS_AL: float = _pv("Condenser (Al) emissivity (eps_Al)")
 EPS_ABS: float = _pv("Absorber emissivity (eps_abs)")
-EPS_GLASS: float = 0.9  # not used in Wilson Eqs 3/4 (blackbody IR); reserved; not tracked in parameters.xlsx
 TAU_GLASS: float = _pv("Glass transmittance (tau_glass)")
 # This package's Case 2 ("selective surface") base-case IR emissivities -- see
 # DeviceConfig.thermal_params() in simulation.py, which is where these are applied.
@@ -76,9 +75,6 @@ EPS_GLASS_IR_CASE2: float = _pv("Glass IR emissivity (eps_glass_ir)")
 # Device orientation / condenser fins
 TILT_DEG: float = _pv("Tilt angle (theta)")
 FIN_AREA_RATIO: float = _pv("Condenser fin area ratio (A_r)")  # A_r
-
-# Backward-compatible aliases
-L_AL_M: float = L_C_M
 
 
 def u_gel_w_m2_k(h_m: float) -> float:
@@ -585,22 +581,7 @@ def chamber_c_s_with_constant_density(
 def _load_pam_licl_dvs_isotherm() -> tuple[np.ndarray, np.ndarray]:
     """Note S2 DVS isotherm: RH (%), gravimetric uptake (g water / g dry composite)."""
     path = Path(__file__).resolve().parent / "data" / "materials" / "PAM-LiCL_isotherm.csv"
-    rh_pct: list[float] = []
-    uptake_g_g: list[float] = []
-    with path.open() as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            parts = line.split(",")
-            rh_pct.append(float(parts[0].strip()))
-            uptake_g_g.append(float(parts[1].strip()))
-    if not rh_pct:
-        raise ValueError(f"No isotherm data in {path}")
-    order = np.argsort(rh_pct)
-    rh = np.array(rh_pct, dtype=float)[order]
-    uptake = np.array(uptake_g_g, dtype=float)[order]
-    return rh, uptake
+    return load_two_column_csv(path)
 
 
 def pam_licl_uptake_g_g_at_rh(rh_fraction: float) -> float:
@@ -770,9 +751,7 @@ def water_activity_from_c_w(
         total = mass_salt + mass_water
         f_b = 1.0 if total <= 0.0 else mass_salt / total
         aw = licl_water_activity_at_brine_fraction(f_b, temperature_c)
-        if math.isfinite(aw):
-            return aw
-        return float("nan")
+        return aw if math.isfinite(aw) else float("nan")
 
     # Brine salt mass fraction from gel water/salt molarities (mol/m³ gel).
     if not all(map(math.isfinite, (c_w, c_s, mw_eff))) or c_w < 0.0 or c_s < 0.0:
@@ -784,9 +763,7 @@ def water_activity_from_c_w(
         return float("nan")
     f_b = float(mass_salt / total)
     aw = water_activity_at_brine_fraction(salt_name, f_b, temperature_c)
-    if math.isfinite(aw):
-        return aw
-    return float("nan")
+    return aw if math.isfinite(aw) else float("nan")
 
 
 def equilibrium_c_w_at_rh(
@@ -908,23 +885,32 @@ def fabrication_c_w_initial(
 # =============================================================================
 
 
+def _aw_polynomial(salt_fraction: float, coeffs: tuple[float, ...]) -> float:
+    """a_w(ξ) = Σ coeffs[k]·ξ^k (coeffs[0] first, i.e. increasing powers)."""
+    if not (0.0 <= salt_fraction < 1.0) or not math.isfinite(salt_fraction):
+        return float("nan")
+    a_w = 0.0
+    for k, coeff in enumerate(coeffs):
+        a_w += coeff * (salt_fraction**k)
+    return float(a_w)
+
+
+# a_w(ξ) polynomial coefficients (increasing powers of ξ), used both as a
+# forward isotherm (water_activity_at_brine_fraction) and, inverted via
+# find_root_bracketed, as the equilibrium brine fraction (mf_NaCl/mf_MgCl2).
+_NACL_AW_COEFFS: tuple[float, ...] = (0.9998, -0.5597, -0.332, -5.545, 5.863)
+_MGCL2_AW_COEFFS: tuple[float, ...] = (1.16231287, -4.86704441, 38.21982328, -153.67496570, 186.32487108)
+
+
 def mf_NaCl(relative_humidity: float) -> float:
     """Equilibrium brine salt fraction for NaCl at 25°C."""
     if not (0.0 < relative_humidity < 1.0):
         return float("nan")
-    a4, a3, a2, a1, a0 = 5.863, -5.545, -0.332, -0.5597, 0.9998
-
-    def residual(salt_fraction: float) -> float:
-        return (
-            relative_humidity
-            - a0
-            - a1 * salt_fraction
-            - a2 * salt_fraction**2
-            - a3 * salt_fraction**3
-            - a4 * salt_fraction**4
-        )
-
-    return find_root_bracketed(residual, 0.0116, 0.264)
+    return find_root_bracketed(
+        lambda xi: relative_humidity - _aw_polynomial(xi, _NACL_AW_COEFFS),
+        0.0116,
+        0.264,
+    )
 
 
 def mf_LiCl(relative_humidity: float, temperature_c: float = 25.0) -> float:
@@ -945,19 +931,13 @@ def mf_MgCl2(relative_humidity: float) -> float:
     """Equilibrium brine salt fraction for MgCl2 (polynomial fit)."""
     if not (0.0 < relative_humidity < 1.0):
         return float("nan")
-    a4, a3, a2, a1, a0 = 186.32487108, -153.67496570, 38.21982328, -4.86704441, 1.16231287
-
-    def residual(salt_fraction: float) -> float:
-        return (
-            relative_humidity
-            - a0
-            - a1 * salt_fraction
-            - a2 * salt_fraction**2
-            - a3 * salt_fraction**3
-            - a4 * salt_fraction**4
-        )
-
-    return find_root_bracketed(residual, 0.01, 0.75, scan=True, n_intervals=19)
+    return find_root_bracketed(
+        lambda xi: relative_humidity - _aw_polynomial(xi, _MGCL2_AW_COEFFS),
+        0.01,
+        0.75,
+        scan=True,
+        n_intervals=19,
+    )
 
 
 _isotherm_by_salt: dict[str, Callable[[float, float], float]] = {
@@ -982,15 +962,6 @@ def equilibrate_salt_mf(
     return float(_isotherm_by_salt[rec.name](relative_humidity, temperature_c))
 
 
-def _aw_polynomial(salt_fraction: float, coeffs: tuple[float, ...]) -> float:
-    if not (0.0 <= salt_fraction < 1.0) or not math.isfinite(salt_fraction):
-        return float("nan")
-    a_w = 0.0
-    for k, coeff in enumerate(coeffs):
-        a_w += coeff * (salt_fraction**k)
-    return float(a_w)
-
-
 def water_activity_at_brine_fraction(
     salt_name: str,
     brine_salt_fraction: float,
@@ -1002,11 +973,9 @@ def water_activity_at_brine_fraction(
     if not (0.0 <= f < 1.0) or not math.isfinite(f):
         return float("nan")
     if rec.name == "NaCl":
-        return _aw_polynomial(f, (0.9998, -0.5597, -0.332, -5.545, 5.863))
+        return _aw_polynomial(f, _NACL_AW_COEFFS)
     if rec.name == "MgCl2":
-        return _aw_polynomial(
-            f, (1.16231287, -4.86704441, 38.21982328, -153.67496570, 186.32487108)
-        )
+        return _aw_polynomial(f, _MGCL2_AW_COEFFS)
     if rec.name == "LiCl":
         if temperature_c > 150.0:
             return float("nan")
@@ -1348,6 +1317,31 @@ def concentration_ratio_desorption(t_gel_c: float, t_cond_c: float) -> float:
     return (p_c / p_g) * (t_g_k / t_c_k)
 
 
+def _mass_transfer_rate_terms(
+    c_w: float,
+    *,
+    t_gel_c: float,
+    c_r: float,
+    params: MassTransferParams,
+    h_m: float,
+    phase: MassTransferPhase,
+    t_cond_c: float | None,
+) -> tuple[float, float, float, float]:
+    """Shared (T_k, p_sat, g, driving) terms behind Eqs. 5-6 (dc_w/dt, dH/dt)."""
+    t_k = max(t_gel_c + 273.15, 200.0)
+    p_sat = saturation_vapor_pressure_pa(t_gel_c)
+    g = mass_transfer_g_m_s(phase=phase, params=params, h_m=h_m, t_gel_c=t_gel_c, t_cond_c=t_cond_c)
+    driving = _mass_transfer_driving_force(
+        c_w,
+        t_gel_c=t_gel_c,
+        c_r=c_r,
+        params=params,
+        h_m=h_m,
+        phase=phase,
+    )
+    return t_k, p_sat, g, driving
+
+
 def dc_w_dt(
     c_w: float,
     *,
@@ -1359,21 +1353,12 @@ def dc_w_dt(
     t_cond_c: float | None = None,
 ) -> float:
     """Eq. 5: dc_w/dt (mol/m³/s); g_chamber/H₀ (abs) or heat–mass analogy (des)."""
-    t_k = max(t_gel_c + 273.15, 200.0)
-    p_sat = saturation_vapor_pressure_pa(t_gel_c)
-    g = mass_transfer_g_m_s(phase=phase, params=params, h_m=h_m, t_gel_c=t_gel_c, t_cond_c=t_cond_c)
-    pref = g / params.h0_ref_m
-    driving = _mass_transfer_driving_force(
-        c_w,
-        t_gel_c=t_gel_c,
-        c_r=c_r,
-        params=params,
-        h_m=h_m,
-        phase=phase,
+    t_k, p_sat, g, driving = _mass_transfer_rate_terms(
+        c_w, t_gel_c=t_gel_c, c_r=c_r, params=params, h_m=h_m, phase=phase, t_cond_c=t_cond_c
     )
     if not math.isfinite(driving):
         return 0.0
-    rate = pref * (p_sat / (GAS_CONSTANT_J_MOL_K * t_k)) * driving
+    rate = (g / params.h0_ref_m) * (p_sat / (GAS_CONSTANT_J_MOL_K * t_k)) * driving
     if not math.isfinite(rate):
         return 0.0
     if c_w >= C_W_MAX_MOL_M3 and rate > 0.0:
@@ -1400,30 +1385,10 @@ def dH_dt(
     This equals dc_w/dt · (MW · H₀ / ρ_sol), ensuring H and c_w evolve at
     the same timescale (both driven by the mass-transfer velocity g).
     """
-    t_k = max(t_gel_c + 273.15, 200.0)
-    p_sat = saturation_vapor_pressure_pa(t_gel_c)
-    driving = _mass_transfer_driving_force(
-        c_w,
-        t_gel_c=t_gel_c,
-        c_r=c_r,
-        params=params,
-        h_m=h_m,
-        phase=phase,
+    t_k, p_sat, g, driving = _mass_transfer_rate_terms(
+        c_w, t_gel_c=t_gel_c, c_r=c_r, params=params, h_m=h_m, phase=phase, t_cond_c=t_cond_c
     )
-    g = mass_transfer_g_m_s(
-        phase=phase,
-        params=params,
-        h_m=h_m,
-        t_gel_c=t_gel_c,
-        t_cond_c=t_cond_c,
-    )
-    return (
-        g
-        * WATER_MOLAR_MASS_KG_MOL
-        / params.rho_solution_kg_m3
-        * (p_sat / (GAS_CONSTANT_J_MOL_K * t_k))
-        * driving
-    )
+    return g * WATER_MOLAR_MASS_KG_MOL / params.rho_solution_kg_m3 * (p_sat / (GAS_CONSTANT_J_MOL_K * t_k)) * driving
 
 
 def m_des_kg_s_m2_from_state(
@@ -1486,23 +1451,8 @@ def _load_isotherm(filename: str) -> tuple[np.ndarray, np.ndarray]:
     Source columns: relative pressure (%), H2O uptake (mol/kg). Relative pressure is
     treated as RH at the measurement temperature (303 K).
     """
-    path = _materials_dir() / filename
-    rh_pct: list[float] = []
-    mol_per_kg: list[float] = []
-    with path.open() as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            parts = [p.strip() for p in line.split(",")]
-            rh_pct.append(float(parts[0]))
-            mol_per_kg.append(float(parts[1]))
-    if not rh_pct:
-        raise ValueError(f"No isotherm data in {path}")
-    order = np.argsort(rh_pct)
-    rh_frac = np.array(rh_pct, dtype=float)[order] / 100.0
-    q_kg_kg = np.array(mol_per_kg, dtype=float)[order] * WATER_MOLAR_MASS_KG_MOL
-    return rh_frac, q_kg_kg
+    rh_pct, mol_per_kg = load_two_column_csv(_materials_dir() / filename)
+    return rh_pct / 100.0, mol_per_kg * WATER_MOLAR_MASS_KG_MOL
 
 
 @lru_cache(maxsize=1)

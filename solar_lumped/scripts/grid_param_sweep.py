@@ -40,7 +40,7 @@ if str(_SRC) not in sys.path:
 from solar_lumped.physics import DeviceThermalParams, TILT_DEG  # noqa: E402
 from solar_lumped.simulation import DeviceConfig  # noqa: E402
 from solar_lumped.simulation import find_cyclic_state, run_daily_cycle  # noqa: E402
-from solar_lumped.weather import WeatherClient  # noqa: E402
+from solar_lumped.weather import fetch_year_weather  # noqa: E402
 from solar_lumped.weather import representative_mean_day_df  # noqa: E402
 from solar_lumped.weather import grid_land_points  # noqa: E402
 from solar_lumped.weather import DailyWeatherProfile, profile_from_day_df  # noqa: E402
@@ -146,6 +146,10 @@ def single_mean_profile(df) -> list[tuple[int, DailyWeatherProfile, int]]:
     return [(0, profile, n_days)]
 
 
+def _weighted_mean(values: list[float], weights: list[int]) -> float:
+    return sum(v * w for v, w in zip(values, weights)) / sum(weights)
+
+
 def combo_yield_kg_m2(
     profiles: list[tuple[int, DailyWeatherProfile, int]],
     config: DeviceConfig,
@@ -169,10 +173,7 @@ def combo_yield_kg_m2(
         yields.append(yield_kg)
         etas.append(eta)
         weights.append(n_days)
-    total_w = sum(weights)
-    mean_yield = sum(y * w for y, w in zip(yields, weights)) / total_w
-    mean_eta = sum(e * w for e, w in zip(etas, weights)) / total_w
-    return mean_yield, mean_eta
+    return _weighted_mean(yields, weights), _weighted_mean(etas, weights)
 
 
 def mean_weather_stats(
@@ -199,11 +200,11 @@ def mean_weather_stats(
         t_means.append(sum(t) / len(t))
         solar_means.append(sum(solar) / len(solar))
         weights.append(n_days)
-    total_w = sum(weights)
-    mean_rh = sum(r * w for r, w in zip(rh_means, weights)) / total_w
-    mean_t = sum(t * w for t, w in zip(t_means, weights)) / total_w
-    mean_solar = sum(s * w for s, w in zip(solar_means, weights)) / total_w
-    return mean_rh, mean_t, mean_solar
+    return (
+        _weighted_mean(rh_means, weights),
+        _weighted_mean(t_means, weights),
+        _weighted_mean(solar_means, weights),
+    )
 
 
 _CSV_COLUMNS: tuple[str, ...] = (
@@ -361,13 +362,7 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     print(f"Fetching {args.year} weather [cache={args.cache_dir}]…", flush=True)
-    client = WeatherClient(cache_dir=args.cache_dir)
-    start = f"{args.year}-01-01"
-    end = f"{args.year}-12-31"
-    try:
-        _, df = client.get_historical_forecast_site_weather(lat, lon, start, end)
-    except Exception:
-        df = client.get_historical(lat, lon, start, end)
+    df = fetch_year_weather(lat, lon, args.year, cache_dir=args.cache_dir)
 
     profiles = single_mean_profile(df) if args.resolution == "single" else monthly_mean_profiles(df)
     print(f"Built {len(profiles)} {args.resolution} mean-day profile(s)", flush=True)

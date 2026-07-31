@@ -95,14 +95,10 @@ def _metrics_from_result(
         cycles_per_day=1.0,
         **lcow_kw,
     )
-    if npv_result is None:
-        npv_usd_per_m2 = float("nan")
-        payback_years_simple = float("nan")
-        payback_years_discounted = float("nan")
-    else:
-        npv_usd_per_m2 = npv_result.npv_usd_per_m2
-        payback_years_simple = npv_result.payback_years_simple
-        payback_years_discounted = npv_result.payback_years_discounted
+    nan = float("nan")
+    npv_usd_per_m2 = npv_result.npv_usd_per_m2 if npv_result is not None else nan
+    payback_years_simple = npv_result.payback_years_simple if npv_result is not None else nan
+    payback_years_discounted = npv_result.payback_years_discounted if npv_result is not None else nan
     return {
         "daily_yield_kg_m2": result.daily_yield_kg_per_m2,
         "thermal_efficiency": result.thermal_efficiency,

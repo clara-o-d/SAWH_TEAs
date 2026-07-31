@@ -643,42 +643,26 @@ def run_solar_simulation(
             args.year,
             cache_dir=args.cache_dir,
         )
-        yield_kg, eta, inventory_abs_res, inventory_des_res = run_daily_cycle(
-            profile,
-            config,
-            c_w_initial=c_w_initial,
-            h_initial=h_initial,
-            cyclic_initial=use_cycled,
-            cyclic_warmup_cycles=n_warmup,
+        inventory_note = (
+            " (cycled initial state; mean diurnal weather; Aitken-converged steady state)"
+            if use_cycled
+            else f" (mean diurnal weather for {args.year})"
         )
-        if use_cycled:
-            inventory_note = (
-                f" (cycled initial state; mean diurnal weather; Aitken-converged steady state)"
-            )
-        else:
-            inventory_note = f" (mean diurnal weather for {args.year})"
     elif args.weather_mode == "baseline":
         profile = baseline_profile(**(baseline_profile_kwargs or {}))
-        yield_kg, eta, inventory_abs_res, inventory_des_res = run_daily_cycle(
-            profile,
-            config,
-            c_w_initial=c_w_initial,
-            h_initial=h_initial,
-            cyclic_initial=use_cycled,
-            cyclic_warmup_cycles=n_warmup,
-        )
     else:
         profile = replay_profile(args.weather_mode, cache_dir=args.cache_dir)
-        yield_kg, eta, inventory_abs_res, inventory_des_res = run_daily_cycle(
-            profile,
-            config,
-            c_w_initial=c_w_initial,
-            h_initial=h_initial,
-            cyclic_initial=use_cycled,
-            cyclic_warmup_cycles=n_warmup,
-        )
         if use_cycled:
             inventory_note = " (cycled initial state; Aitken-converged steady state)"
+
+    yield_kg, eta, inventory_abs_res, inventory_des_res = run_daily_cycle(
+        profile,
+        config,
+        c_w_initial=c_w_initial,
+        h_initial=h_initial,
+        cyclic_initial=use_cycled,
+        cyclic_warmup_cycles=n_warmup,
+    )
 
     lcow_kw = _lcow_kwargs(config)
     simplified = bool(args.simplified)

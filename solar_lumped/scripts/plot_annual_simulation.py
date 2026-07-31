@@ -47,6 +47,15 @@ def load_summary(
     return df.sort_values("date").reset_index(drop=True)
 
 
+def _plot_avg_peak(ax, dates, avg, peak, *, color: str, ylabel: str, avg_label: str, peak_label: str) -> None:
+    """Shared avg-line (solid) + peak-line (dashed, faded) panel styling."""
+    ax.plot(dates, avg, color=color, linewidth=1.6, label=avg_label)
+    ax.plot(dates, peak, color=color, linewidth=1.2, linestyle="--", alpha=0.7, label=peak_label)
+    ax.set_ylabel(ylabel)
+    ax.legend(loc="upper right", fontsize=9)
+    ax.grid(True, alpha=0.3)
+
+
 def plot_annual_summary(df: pd.DataFrame, *, title: str | None = None) -> plt.Figure:
     plot_defaults_slides()
     dates = df["date"]
@@ -84,66 +93,21 @@ def plot_annual_summary(df: pd.DataFrame, *, title: str | None = None) -> plt.Fi
     ax_temp.legend(loc="upper right", fontsize=8, ncol=2)
     ax_temp.grid(True, alpha=0.3)
 
-    ax_rh.plot(
-        dates,
-        df["rh_avg_frac"] * 100.0,
-        color="#1b9e77",
-        linewidth=1.6,
-        label="Avg RH",
+    _plot_avg_peak(
+        ax_rh, dates, df["rh_avg_frac"] * 100.0, df["rh_peak_frac"] * 100.0,
+        color="#1b9e77", ylabel="RH (%)", avg_label="Avg RH", peak_label="Peak RH",
     )
-    ax_rh.plot(
-        dates,
-        df["rh_peak_frac"] * 100.0,
-        color="#1b9e77",
-        linewidth=1.2,
-        linestyle="--",
-        alpha=0.7,
-        label="Peak RH",
-    )
-    ax_rh.set_ylabel("RH (%)")
     ax_rh.set_ylim(0.0, 100.0)
-    ax_rh.legend(loc="upper right", fontsize=9)
-    ax_rh.grid(True, alpha=0.3)
 
-    ax_solar.plot(
-        dates,
-        df["solar_avg_w_m2"],
-        color="#e6ab02",
-        linewidth=1.6,
-        label="Avg solar",
+    _plot_avg_peak(
+        ax_solar, dates, df["solar_avg_w_m2"], df["solar_peak_w_m2"],
+        color="#e6ab02", ylabel="Solar (W/m²)", avg_label="Avg solar", peak_label="Peak solar",
     )
-    ax_solar.plot(
-        dates,
-        df["solar_peak_w_m2"],
-        color="#e6ab02",
-        linewidth=1.2,
-        linestyle="--",
-        alpha=0.7,
-        label="Peak solar",
-    )
-    ax_solar.set_ylabel("Solar (W/m²)")
-    ax_solar.legend(loc="upper right", fontsize=9)
-    ax_solar.grid(True, alpha=0.3)
 
-    ax_amb.plot(
-        dates,
-        df["temp_avg_c"],
-        color="#d95f02",
-        linewidth=1.6,
-        label="Avg temp",
+    _plot_avg_peak(
+        ax_amb, dates, df["temp_avg_c"], df["temp_peak_c"],
+        color="#d95f02", ylabel="Ambient (°C)", avg_label="Avg temp", peak_label="Peak temp",
     )
-    ax_amb.plot(
-        dates,
-        df["temp_peak_c"],
-        color="#d95f02",
-        linewidth=1.2,
-        linestyle="--",
-        alpha=0.7,
-        label="Peak temp",
-    )
-    ax_amb.set_ylabel("Ambient (°C)")
-    ax_amb.legend(loc="upper right", fontsize=9)
-    ax_amb.grid(True, alpha=0.3)
 
     ax_amb.xaxis.set_major_locator(mdates.MonthLocator())
     ax_amb.xaxis.set_major_formatter(mdates.DateFormatter("%b"))
