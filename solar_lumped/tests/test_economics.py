@@ -1,3 +1,5 @@
+import pytest
+
 from solar_lumped.economics import (
     HYDROGEL_DENSITY_KG_M3,
     LCOEconomicParams,
@@ -46,3 +48,19 @@ def test_dry_composite_mass_uses_dvs_dry_basis_not_wet_20rh_density():
     dry_mass = dry_composite_mass_kg(thickness_m)
     assert dry_mass == thickness_m * DRY_COMPOSITE_DENSITY_KG_M3
     assert dry_mass < thickness_m * HYDROGEL_DENSITY_KG_M3
+
+
+def test_simplified_tea_drops_water_and_non_am_polymer_costs():
+    econ = LCOEconomicParams()
+    full = lcow_cost_breakdown_from_daily_yield(econ=econ, **_KW)
+    simple = lcow_cost_breakdown_from_daily_yield(econ=econ, simplified=True, **_KW)
+
+    full_labels = {label for label, _ in full.items}
+    simple_labels = {label for label, _ in simple.items}
+    assert full_labels >= {"Hydrogel: water", "Hydrogel: APS", "Hydrogel: MBA", "Hydrogel: TEMED"}
+    assert simple_labels.isdisjoint({"Hydrogel: water", "Hydrogel: APS", "Hydrogel: MBA", "Hydrogel: TEMED"})
+    assert "Hydrogel: acrylamide (AM)" in simple_labels
+
+    assert simple.total_usd_per_m3 < full.total_usd_per_m3
+    lcow_simple = lcow_from_daily_yield(econ=econ, simplified=True, **_KW)
+    assert simple.total_usd_per_m3 == pytest.approx(lcow_simple)

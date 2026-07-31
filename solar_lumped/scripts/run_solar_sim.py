@@ -527,6 +527,11 @@ def register_solar_sim_arguments(p: argparse.ArgumentParser) -> None:
         default=None,
         help="Initial water in gel (L/m²); overrides RH equilibrium or Fig. S1 default",
     )
+    p.add_argument(
+        "--simplified",
+        action="store_true",
+        help="Simplified TEA: drop DI-water and non-acrylamide polymer (APS/MBA/TEMED) hydrogel costs",
+    )
 
 
 def resolve_solar_sim_arguments(args: argparse.Namespace, parser: argparse.ArgumentParser) -> None:
@@ -569,6 +574,7 @@ class SolarSimResult:
     thermal_efficiency: float
     lcow_usd_per_m3: float
     breakdown: LcowCostBreakdown | None
+    simplified: bool
     lat: float | None
     lon: float | None
     year: int
@@ -675,12 +681,14 @@ def run_solar_simulation(
             inventory_note = " (cycled initial state; Aitken-converged steady state)"
 
     lcow_kw = _lcow_kwargs(config)
+    simplified = bool(args.simplified)
     lcow = lcow_from_daily_yield(
         yield_kg,
         salt_name=config.salt_name,
         salt_to_polymer_ratio=config.salt_to_polymer_ratio,
         hydrogel_thickness_m=config.hydrogel_thickness_m,
         econ=econ,
+        simplified=simplified,
         **lcow_kw,
     )
     breakdown = lcow_cost_breakdown_from_daily_yield(
@@ -689,6 +697,7 @@ def run_solar_simulation(
         salt_to_polymer_ratio=config.salt_to_polymer_ratio,
         hydrogel_thickness_m=config.hydrogel_thickness_m,
         econ=econ,
+        simplified=simplified,
         **lcow_kw,
     )
 
@@ -701,6 +710,7 @@ def run_solar_simulation(
         thermal_efficiency=float(eta),
         lcow_usd_per_m3=float(lcow),
         breakdown=breakdown,
+        simplified=simplified,
         lat=args.lat,
         lon=args.lon,
         year=int(args.year),

@@ -166,6 +166,11 @@ POLYMER_BLENDED_PRICE_USD_PER_KG: float = sum(
     for (price_row, _frac_row), frac in zip(_POLYMER_ITEMS, _polymer_fractions)
 ) / _polymer_fraction_sum
 
+# Simplified-TEA polymer price: only the acrylamide (AM) share of the renormalized
+# Table S1 polymer sub-mix is costed; APS/MBA/TEMED are treated as free.
+_AM_FRACTION_SHARE: float = _polymer_fractions[0] / _polymer_fraction_sum
+POLYMER_AM_ONLY_PRICE_USD_PER_KG: float = _AM_FRACTION_SHARE * float(_ev(_POLYMER_ITEMS[0][0]))
+
 _water_gel_fraction = float(_ev("De-ionized water mass fraction (Table S1 recipe)"))
 WATER_RATIO_PER_KG_DRY_COMPOSITE: float = _water_gel_fraction / (1.0 - _water_gel_fraction)
 
@@ -189,8 +194,14 @@ def lcow_from_daily_yield(
     sorbent: str = "hydrogel",
     mof_mass_kg_m2: float = 0.0,
     mof_price_usd_per_kg: float = 0.0,
+    simplified: bool = False,
 ) -> float:
-    """Scalar LCOW (USD/m³) — identical structure to lcow_zsr_at_sl."""
+    """Scalar LCOW (USD/m³) — identical structure to lcow_zsr_at_sl.
+
+    ``simplified=True`` drops the DI-water and non-acrylamide polymer (APS/MBA/
+    TEMED) cost terms from the hydrogel line item -- see
+    ``_sorbent_replacement_annual_usd``.
+    """
     if daily_yield_kg_per_m2 <= 0.0 or not math.isfinite(daily_yield_kg_per_m2):
         return FAIL_LCO
     if sorbent == "hydrogel" and (
@@ -208,6 +219,7 @@ def lcow_from_daily_yield(
         mof_price_usd_per_kg=mof_price_usd_per_kg,
         econ=econ,
         salt_price_usd_per_kg=salt_price_usd_per_kg,
+        simplified=simplified,
     )
 
     annual_electricity_cost = (
@@ -241,6 +253,7 @@ def _sorbent_replacement_annual_usd(
     mof_price_usd_per_kg: float,
     econ: LCOEconomicParams,
     salt_price_usd_per_kg: float | None = None,
+    simplified: bool = False,
 ) -> float:
     gel_lifetime = econ.hydrogel_lifetime_years
     if sorbent == "mof":
@@ -252,10 +265,15 @@ def _sorbent_replacement_annual_usd(
         if salt_price_usd_per_kg is not None
         else get_salt_price_usd_per_kg(salt_name)
     )
-    hydrogel_cost_per_kg = (
-        (salt_price * sl + POLYMER_BLENDED_PRICE_USD_PER_KG) / (1.0 + sl)
-        + WATER_RATIO_PER_KG_DRY_COMPOSITE * econ.c_water_gel_usd_per_kg
-    )
+    if simplified:
+        # No DI-water cost, and only the acrylamide share of the polymer sub-mix
+        # is costed (APS/MBA/TEMED treated as free).
+        hydrogel_cost_per_kg = (salt_price * sl + POLYMER_AM_ONLY_PRICE_USD_PER_KG) / (1.0 + sl)
+    else:
+        hydrogel_cost_per_kg = (
+            (salt_price * sl + POLYMER_BLENDED_PRICE_USD_PER_KG) / (1.0 + sl)
+            + WATER_RATIO_PER_KG_DRY_COMPOSITE * econ.c_water_gel_usd_per_kg
+        )
     return hydrogel_cost_per_kg * dry_mass / gel_lifetime
 
 
@@ -292,8 +310,14 @@ def lcow_cost_breakdown_from_daily_yield(
     sorbent: str = "hydrogel",
     mof_mass_kg_m2: float = 0.0,
     mof_price_usd_per_kg: float = 0.0,
+    simplified: bool = False,
 ) -> LcowCostBreakdown | None:
-    """Per-term LCOW breakdown — same segments as lcow_cost_breakdown_usd_per_m3."""
+    """Per-term LCOW breakdown — same segments as lcow_cost_breakdown_usd_per_m3.
+
+    ``simplified=True`` matches ``lcow_from_daily_yield(simplified=True)``: the
+    water line item is dropped and only the acrylamide (AM) share of the
+    polymer sub-mix is billed.
+    """
     lcow = lcow_from_daily_yield(
         daily_yield_kg_per_m2,
         salt_name=salt_name,
@@ -306,6 +330,7 @@ def lcow_cost_breakdown_from_daily_yield(
         sorbent=sorbent,
         mof_mass_kg_m2=mof_mass_kg_m2,
         mof_price_usd_per_kg=mof_price_usd_per_kg,
+        simplified=simplified,
     )
     if not math.isfinite(lcow) or lcow >= 0.99 * FAIL_LCO:
         return None
@@ -343,20 +368,27 @@ def lcow_cost_breakdown_from_daily_yield(
         )
         salt_annual = salt_price * sl / (1.0 + sl) * dry_mass / gel_lifetime
         segments.append(("Hydrogel: salt", _lcow_seg(salt_annual)))
-        # Split the polymer sub-mix's blended cost back out into its four
-        # ingredients using each one's share of the renormalized Table S1 mix.
-        for frac, econ_price, label in (
+        # Split the polymer sub-mix's blended cost back out into its ingredients
+        # using each one's share of the renormalized Table S1 mix. Simplified
+        # mode only bills acrylamide (APS/MBA/TEMED/water are dropped).
+        ingredients = (
+            (_polymer_fractions[0], econ.c_am_usd_per_kg, "Hydrogel: acrylamide (AM)"),
+        ) if simplified else (
             (_polymer_fractions[0], econ.c_am_usd_per_kg, "Hydrogel: acrylamide (AM)"),
             (_polymer_fractions[1], econ.c_aps_usd_per_kg, "Hydrogel: APS"),
             (_polymer_fractions[2], econ.c_mba_usd_per_kg, "Hydrogel: MBA"),
             (_polymer_fractions[3], econ.c_temed_usd_per_kg, "Hydrogel: TEMED"),
-        ):
+        )
+        for frac, econ_price, label in ingredients:
             ingredient_annual = (
                 (frac / _polymer_fraction_sum) * econ_price / (1.0 + sl) * dry_mass / gel_lifetime
             )
             segments.append((label, _lcow_seg(ingredient_annual)))
-        water_annual = WATER_RATIO_PER_KG_DRY_COMPOSITE * econ.c_water_gel_usd_per_kg * dry_mass / gel_lifetime
-        segments.append(("Hydrogel: water", _lcow_seg(water_annual)))
+        if not simplified:
+            water_annual = (
+                WATER_RATIO_PER_KG_DRY_COMPOSITE * econ.c_water_gel_usd_per_kg * dry_mass / gel_lifetime
+            )
+            segments.append(("Hydrogel: water", _lcow_seg(water_annual)))
 
     annual_electricity_cost = (
         econ.electricity_price_usd_per_kwh

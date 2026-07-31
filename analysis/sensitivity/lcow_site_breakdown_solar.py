@@ -59,6 +59,8 @@ def _breakdown_title(result: SolarSimResult) -> str:
         parts.append(result.config.mof_name)
     else:
         parts.append(result.config.salt_name)
+    if result.simplified:
+        parts.append("(simplified TEA)")
     config = result.config
     design = (
         f"hydrogel thickness {config.hydrogel_thickness_m * 1e3:.2f} mm, "
@@ -77,6 +79,7 @@ def _apply_yield_override(result: SolarSimResult, daily_yield_kg_m2: float) -> S
         salt_to_polymer_ratio=config.salt_to_polymer_ratio,
         hydrogel_thickness_m=config.hydrogel_thickness_m,
         econ=result.econ,
+        simplified=result.simplified,
         **lcow_kw,
     )
     lcow = lcow_from_daily_yield(daily_yield_kg_m2, **common)
@@ -152,6 +155,8 @@ def main() -> None:
         sys.exit("Simulation produced no LCOW breakdown (zero or invalid yield).")
 
     tag = output_tag(args, result.config)
+    if result.simplified:
+        tag += "_simplified"
     out_png = args.output or (_DEFAULT_OUT_DIR / f"lcow_breakdown_{tag}.png")
     out_csv = args.table_csv or (_DEFAULT_OUT_DIR / f"lcow_breakdown_{tag}.csv")
 
