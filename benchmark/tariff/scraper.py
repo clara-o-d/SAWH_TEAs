@@ -287,9 +287,7 @@ def build_query_wrapper(command, visual_id):
     return entry
 
 
-# -----------------------------
-# STEP 1: GET UTILITIES
-# -----------------------------
+# --- STEP 1: GET UTILITIES ---
 def get_utilities(country):
     command = {
         "SemanticQueryDataShapeCommand": {
@@ -350,9 +348,7 @@ def get_utilities(country):
     return sorted({u["G0"] for u in utilities if "G0" in u})
 
 
-# -----------------------------
-# STEP 2: GET CATEGORY VALUE
-# -----------------------------
+# --- STEP 2: GET CATEGORY VALUE ---
 def get_category_value(country, utility, category):
     command = {
         "SemanticQueryDataShapeCommand": {
@@ -451,9 +447,7 @@ def get_category_value(country, utility, category):
     return None
 
 
-# -----------------------------
-# STEP 3: PIPELINE (writes to CSV as it goes, resumable)
-# -----------------------------
+# --- STEP 3: PIPELINE (writes to CSV as it goes, resumable) ---
 def prepare_resume(filepath, countries):
     """Looks at the existing CSV (if any) and figures out where to resume.
 

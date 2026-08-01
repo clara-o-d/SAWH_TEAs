@@ -1,26 +1,15 @@
 #!/usr/bin/env python3
-"""Full-factorial device-parameter sweep at one grid site, using one
-representative mean day per calendar month (day-weighted average of the 12
-results) instead of every real day of the year — see compare_annual_vs_mean_day.py
-for the validation. Monthly is the default (--resolution monthly) because this
-feeds a map that must be accurate everywhere, not just at LCOW-competitive
-sites: a single annual mean day (--resolution single, 12x cheaper) is within
-~0.2% of the true annual value at low-seasonal-variance (desert) sites but
-~14-21% off at high-seasonal-variance ones.
+"""Full-factorial device-parameter sweep at one grid site, over one representative mean day
+per calendar month (day-weighted). Monthly is the default because this feeds a map that must
+be accurate everywhere: a single annual mean day is 12x cheaper and within ~0.2% at desert
+sites, but ~14-21% off at high-seasonal-variance ones (see compare_annual_vs_mean_day.py).
 
-Built for cluster job arrays: one invocation = one site. Pass --site-index
-(e.g. $SLURM_ARRAY_TASK_ID) to pick a site out of the full --step land grid,
-or --lat/--lon directly for a one-off/local run. Each invocation runs the full
-parameter grid (default 5x5x5 = 125 combos, sweeping hydrogel thickness, fin
-area ratio, and vapor gap) for that one site and appends one row per combo to
---output-csv, skipping combos already present when --resume is set (so a
-preempted job array task can be resubmitted safely). eps_abs and tau_glass
-are fixed constants per case (--eps-abs/--tau-glass), not swept.
-
-The weather fetch (and the monthly mean-day profiles built from it) happen
-once per site and are reused across all parameter combos — only the device
-config changes per combo, not the weather.
-"""
+Built for cluster job arrays -- one invocation is one site, chosen by --site-index (e.g.
+$SLURM_ARRAY_TASK_ID) out of the --step land grid, or --lat/--lon for a local run. Each runs
+the full grid (default 5x5x5 = 125 combos over hydrogel thickness, fin area ratio, vapor
+gap), appending one row per combo to --output-csv and skipping existing rows under --resume,
+so a preempted task can be resubmitted. eps_abs/tau_glass are fixed per case, not swept.
+Weather is fetched once per site and reused across all combos."""
 
 from __future__ import annotations
 
@@ -127,16 +116,10 @@ def monthly_mean_profiles(df) -> list[tuple[int, DailyWeatherProfile, int]]:
 
 
 def single_mean_profile(df) -> list[tuple[int, DailyWeatherProfile, int]]:
-    """One representative mean-day profile for the whole year (cheap default).
-
-    Validated against the full 365-day sequential simulation across 3 test
-    climates: with the Aitken-converged steady state, this is within ~0.2% of
-    the true annual mean at low-seasonal-variance (desert) sites -- exactly
-    the sites competitive on LCOW -- and off by ~14-21% at high-variance
-    sites (which are already poor performers, not LCOW-competitive anyway).
-    Use --resolution monthly for a targeted re-check on specific sites
-    instead of paying 12x compute across the whole grid.
-    """
+    """One representative mean-day profile for the whole year. Validated against the full
+    365-day simulation across 3 climates: within ~0.2% at low-variance (desert, LCOW-
+    competitive) sites, ~14-21% off at high-variance ones. Use --resolution monthly to
+    re-check specific sites instead of paying 12x across the whole grid."""
     import pandas as pd
 
     ref_day = df.index[len(df) // 2].date()
@@ -179,15 +162,10 @@ def combo_yield_kg_m2(
 def mean_weather_stats(
     profiles: list[tuple[int, DailyWeatherProfile, int]],
 ) -> tuple[float, float, float]:
-    """Day-weighted mean RH (fraction), mean ambient temperature (C), and mean daylight
-    solar irradiance (W/m^2) across profiles.
-
-    A site property, not a per-combo one -- computed once per site and reused across
-    all combos, since it costs nothing beyond aggregating data already in memory
-    (no ODE solves, no extra fetches). Solar is averaged over the desorption (daylight)
-    phase only: absorption is by definition the low-solar half of the day, so blending
-    it in would dilute the number with ~12h of near-zero nighttime values.
-    """
+    """Day-weighted mean RH (fraction), ambient temperature (C), and daylight solar
+    irradiance (W/m²) across profiles -- a site property, computed once and reused across
+    combos. Solar averages the desorption phase only, since absorption is by definition the
+    low-solar half of the day."""
     rh_means: list[float] = []
     t_means: list[float] = []
     solar_means: list[float] = []

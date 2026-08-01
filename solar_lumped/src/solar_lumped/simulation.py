@@ -1,10 +1,5 @@
-"""Simulation: device config, coupled thermal/mass dynamics, ODE integration,
-detailed plotting, water-inventory accounting, site feasibility, and annual yield.
-
-Consolidated from the former simulation/{device_config, coupled_dynamics, ode_system,
-detailed_plots, water_inventory, site_feasibility, annual_yield}.py. Section headers
-below mark each former module's boundary for traceability.
-"""
+"""Simulation: device config, coupled thermal/mass dynamics, ODE integration, detailed
+plotting, water-inventory accounting, site feasibility, and annual yield."""
 
 from __future__ import annotations
 
@@ -37,7 +32,6 @@ from solar_lumped.physics import (
     H0_M,
     H_DES_J_PER_KG,
     H_FG_J_PER_KG,
-    K_AIR_W_M_K,
     L_C_M,
     L_G_M,
     L_INS_M,
@@ -68,16 +62,12 @@ from solar_lumped.physics import (
     radiative_exchange_w_m2,
     salt_molarity_from_composite,
     solve_steady_thermal,
-    u_gel_w_m2_k,
     water_in_sorbent_l_m2,
 )
-from solar_lumped.physics import _residuals as _thermal_residuals
 from solar_lumped.weather import DailyWeatherProfile, PhaseProfile, day_weather_stats
 
 
-# =============================================================================
-# Device configuration dataclass
-# =============================================================================
+# --- Device configuration dataclass ---
 
 @dataclass(frozen=True, slots=True)
 class DeviceConfig:
@@ -104,9 +94,8 @@ class DeviceConfig:
     # Uniform surface/gel temperature at desorption start. None → algebraic steady
     # state (quasi_steady solves Eqs 1/3/4 algebraically each ODE step).
     segregated_initial_temp_c: float | None = None
-    # Per-component desorption-start temperatures (T_gel, T_abs, T_glass, T_cond) in
-    # °C. Takes precedence over ``segregated_initial_temp_c`` when set — e.g. to
-    # match the first digitized Wilson data point.
+    # Per-component desorption-start temperatures (T_gel, T_abs, T_glass, T_cond) in °C;
+    # takes precedence over ``segregated_initial_temp_c``.
     coupled_initial_temps_c: tuple[float, float, float, float] | None = None
 
     def desorption_surface_ic_c(self) -> tuple[float, float, float, float] | None:
@@ -183,11 +172,8 @@ class DeviceConfig:
             eps_al=EPS_AL,
             tilt_deg=self.tilt_deg,
             h_des_j_per_kg=h_des,
-            # Case 2 ("selective surface", sawh_bayesopt.design_space.CASE_EPS_IR) is
-            # this package's base case as of 2026-07: real absorber/glass IR
-            # emissivities instead of Wilson's original blackbody/cavity
-            # approximation (case1, still reachable via an explicit `thermal=`
-            # override with eps_abs_ir=eps_glass_ir=1.0 -- see DeviceThermalParams).
+            # Case 2 ("selective surface") is the base case: real absorber/glass IR
+            # emissivities. Case 1 needs an explicit thermal= with both set to 1.0.
             eps_abs_ir=EPS_ABS_IR_CASE2,
             eps_glass_ir=EPS_GLASS_IR_CASE2,
         )
@@ -224,9 +210,7 @@ class DeviceConfig:
         base.update(overrides)
         return cls(**base)  # type: ignore[arg-type]
 
-# =============================================================================
-# Coupled Wilson Eqs. 1-6 + condenser transient (Eq. 2) rate evaluation
-# =============================================================================
+# --- Coupled Wilson Eqs. 1-6 + condenser transient (Eq. 2) rate evaluation ---
 
 CyclePhase = Literal["absorption", "desorption"]
 
@@ -310,14 +294,9 @@ def evaluate_coupled_rates(
     t_guess: tuple[float, float, float] | None = None,
     h_amb_cond: float | None = None,
 ) -> CoupledRates:
-    """Return (dloading/dt, dH/dt, dT_cond/dt) with self-consistent T_gel and m_des.
-
-    ``c_w`` stores hydrogel mol/m³ or MOF kg/kg loading depending on ``config.sorbent``.
-
-    ``h_amb_cond`` sets the condenser-backing convection coefficient; when None the
-    ambient ``h_amb`` (which also drives the absorber/glass) is reused. Providing a
-    separate value models fan-forced condenser cooling decoupled from ambient wind.
-    """
+    """(dloading/dt, dH/dt, dT_cond/dt) with self-consistent T_gel and m_des. ``c_w`` is
+    hydrogel mol/m³ or MOF kg/kg per ``config.sorbent``; ``h_amb_cond`` models fan-forced
+    condenser cooling decoupled from ambient wind (None reuses ``h_amb``)."""
     gap_eff = max(vapor_gap_m - h_m, 0.0)
     q_sol = max(0.0, q_solar_w_m2)
 
@@ -466,9 +445,7 @@ def evaluate_coupled_rates(
         thermal=state,
     )
 
-# =============================================================================
-# SciPy Radau integration for Wilson half-cycles (coupled Eqs. 1-6 + Eq. 2)
-# =============================================================================
+# --- SciPy Radau integration for Wilson half-cycles (coupled Eqs. 1-6 + Eq. 2) ---
 
 _ODE_RTOL = 1e-4
 _ODE_ATOL = 1e-7
@@ -792,32 +769,15 @@ def find_cyclic_state(
     stall_rounds: int = 2,
     verbose: bool = True,
 ) -> tuple[float, float]:
-    """Find the steady periodic post-desorption (c_w, H) state for a profile
-    repeated indefinitely, without brute-force warmup cycling.
+    """Steady periodic post-desorption (c_w, H) state for an indefinitely repeated profile,
+    via restarted vector Aitken Δ² extrapolation (~3-6 rounds) instead of the 100+ cycles
+    plain fixed-point iteration can need when the one-cycle map's slowest eigenvalue ≈ 1.
 
-    Plain fixed-point iteration (``warmup_to_cyclic_state``) can need 100+
-    cycles to converge at sites where the one-cycle map's slowest eigenvalue
-    is close to 1 (e.g. profiles averaged from strongly seasonal weather).
-    This instead accelerates convergence with restarted vector Aitken Δ²
-    extrapolation: each round applies the real map twice, then extrapolates
-    the fixed point from those two real evaluations (no derivative estimate,
-    so no finite-difference noise), typically converging in ~3-6 rounds.
-
-    Some (profile, config) pairs have no single fixed point: the one-cycle
-    map bifurcates into a stable period-2 orbit (an alternating "wetter
-    day / drier day" pattern under the repeated forcing), so ``rel_step``
-    plateaus (or wobbles) at a small-but-nonzero value instead of shrinking
-    toward ``tol``. This is detected as ``stall_rounds`` consecutive rounds
-    where ``rel_step`` fails to shrink by at least ``stall_ratio`` relative
-    to the previous round, and handled by returning the average of the two
-    most recent extrapolated states rather than an arbitrary snapshot (which
-    would otherwise depend on exactly which round happened to hit
-    ``max_rounds``). The same averaging is applied as a fallback if
-    ``max_rounds`` is exhausted without the detector firing (e.g. a noisier,
-    not-quite-periodic wobble). Callers wanting the true alternating yields
-    rather than the yield from this averaged state should run one cycle
-    from each of the two branches directly.
-    """
+    Some (profile, config) pairs have no fixed point but a stable period-2 orbit, so
+    ``rel_step`` plateaus instead of reaching ``tol``. That is detected as ``stall_rounds``
+    rounds without a ``stall_ratio`` shrink and answered by averaging the two most recent
+    extrapolated states (also the fallback when ``max_rounds`` runs out). Callers wanting
+    the true alternating yields should run one cycle from each branch."""
     if h_initial is None:
         h_initial = config.hydrogel_thickness_m
     if c_w_initial is None:
@@ -886,13 +846,9 @@ def run_daily_cycle(
     cyclic_warmup_cycles: int = 2,
 ) -> tuple[float, float, PhaseResult, PhaseResult]:
     """Run absorption then desorption; return (yield kg/m2, eta_thermal, abs_res, des_res).
-
-    If ``cyclic_initial`` is True, first find the true steady periodic state via
-    Aitken Δ² extrapolation (``find_cyclic_state``, ~3-6 rounds; see its docstring)
-    rather than a fixed number of warmup cycles, then simulate one reporting day
-    from that end state. ``cyclic_warmup_cycles`` is passed through as
-    ``max_rounds`` (floored at 3, since a round is 2 full daily cycles).
-    """
+    With ``cyclic_initial``, first find the steady periodic state via ``find_cyclic_state``
+    and report one day from there; ``cyclic_warmup_cycles`` becomes its ``max_rounds``
+    (floored at 3, since a round is 2 full daily cycles)."""
     if cyclic_initial:
         cw, h = find_cyclic_state(
             profile,
@@ -926,9 +882,7 @@ def run_daily_cycle(
     eta = (yield_kg * config.h_fg_j_per_kg / q_solar_int) if q_solar_int > 0 else 0.0
     return yield_kg, eta, abs_res, des_res
 
-# =============================================================================
-# Device temperatures and weather time series for a daily SAWH cycle
-# =============================================================================
+# --- Device temperatures and weather time series for a daily SAWH cycle ---
 
 @dataclass(frozen=True, slots=True)
 class DetailedSeries:
@@ -1223,9 +1177,7 @@ def plot_detailed_diagnostics(
     fig.savefig(path, dpi=150)
     plt.close(fig)
 
-# =============================================================================
-# Water-in-sorbent inventory time series from a daily absorption-desorption cycle
-# =============================================================================
+# --- Water-in-sorbent inventory time series from a daily absorption-desorption cycle ---
 
 @dataclass(frozen=True, slots=True)
 class WaterInventorySeries:
@@ -1340,9 +1292,7 @@ def plot_water_inventory(
     fig.savefig(path, dpi=150)
     plt.close(fig)
 
-# =============================================================================
-# Site-level salt feasibility and LCOW simulation helpers for global maps
-# =============================================================================
+# --- Site-level salt feasibility and LCOW simulation helpers for global maps ---
 
 FAIL_LCO: float = 1e30
 
@@ -1518,9 +1468,7 @@ def simulate_salt_lcow(
         desorption_aw=aw_des,
     )
 
-# =============================================================================
-# Annual yield aggregation over real weather days
-# =============================================================================
+# --- Annual yield aggregation over real weather days ---
 
 @dataclass(frozen=True, slots=True)
 class SimulationResult:

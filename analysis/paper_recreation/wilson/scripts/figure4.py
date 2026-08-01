@@ -31,12 +31,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-# ---------------------------------------------------------------------------
-# Path bootstrap
-# ---------------------------------------------------------------------------
+# --- Path bootstrap ---
 _SCRIPT = Path(__file__).resolve()
 _WILSON_DIR = _SCRIPT.parent.parent          # wilson-et-al._re-creation/
-_SOLAR_ROOT = _WILSON_DIR.parent             # solar_lumped/
+_SOLAR_ROOT = _WILSON_DIR.parent.parent.parent / "solar_lumped"
 _SRC = _SOLAR_ROOT / "src"
 for _p in (_SRC, _SOLAR_ROOT):
     if str(_p) not in sys.path:
@@ -51,7 +49,7 @@ from solar_lumped.plotting import (
     scaled_fontsize,
     style_axes,
 )
-from solar_lumped.simulation import DeviceConfig, register_desorption_solver_cli
+from solar_lumped.simulation import DeviceConfig
 from solar_lumped.simulation import PhaseResult, run_daily_cycle
 from solar_lumped.simulation import cumulative_desorption_yield_l_m2
 from solar_lumped.weather import (
@@ -185,9 +183,7 @@ def _style_desorption_time_axis(ax: plt.Axes, *, duration_h: float) -> None:
     ax.set_xlabel("Time", fontsize=8.5)
 
 
-# ---------------------------------------------------------------------------
-# Post-process: recover T_abs and T_glass from the stored desorption trajectory
-# ---------------------------------------------------------------------------
+# --- Post-process: recover T_abs and T_glass from the stored desorption trajectory ---
 
 def _profile_index(t: float, dt_s: float, n: int) -> int:
     return min(int(t / dt_s), n - 1)
@@ -243,17 +239,12 @@ def _post_process_desorption(
     return np.array(t_abs_list), np.array(t_glass_list)
 
 
-# ---------------------------------------------------------------------------
-# Simulation
-# ---------------------------------------------------------------------------
+# --- Simulation ---
 
-def simulate_atacama(*, desorption_solver: str = "quasi_steady") -> dict:
+def simulate_atacama() -> dict:
     """Run the Atacama field cycle and return all time-series needed for Fig. 4."""
     print("  Building Atacama field config…")
-    config = DeviceConfig.atacama_field(
-        desorption_solver=desorption_solver,  # type: ignore[arg-type]
-        coupled_initial_temps_c=_atacama_initial_temps_c(),
-    )
+    config = DeviceConfig.atacama_field(coupled_initial_temps_c=_atacama_initial_temps_c())
 
     print("  Loading Atacama weather profile…")
     profile = atacama_field_profile()
@@ -300,9 +291,7 @@ def simulate_atacama(*, desorption_solver: str = "quasi_steady") -> dict:
     }
 
 
-# ---------------------------------------------------------------------------
-# Plotting
-# ---------------------------------------------------------------------------
+# --- Plotting ---
 
 _FIG4_STYLE = {
     "absorber":  {"color": "#c0392b", "linestyle": "-",  "label": "absorber (model)"},
@@ -449,21 +438,17 @@ def plot_figure4(data: dict) -> Path:
     return out_path
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+# --- Main ---
 
 def main() -> Path:
     import argparse
 
     parser = argparse.ArgumentParser(description="Wilson Figure 4 — Atacama field test")
-    register_desorption_solver_cli(parser)
-    args = parser.parse_args()
+    parser.parse_args()
 
     print("Wilson Figure 4 (Atacama field test) — solar_lumped model")
     print("=" * 60)
-    print(f"  desorption_solver = {args.desorption_solver}")
-    data = simulate_atacama(desorption_solver=args.desorption_solver)
+    data = simulate_atacama()
     write_hourly_model_estimates(data)
     print("\nComposing figure…")
     out = plot_figure4(data)

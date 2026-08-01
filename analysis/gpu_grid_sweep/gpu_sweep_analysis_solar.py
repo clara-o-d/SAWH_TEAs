@@ -1,30 +1,11 @@
 #!/usr/bin/env python3
-"""Analysis + plots for the GPU full-grid device-parameter sweep.
+"""Analysis + plots for the GPU full-grid device-parameter sweep (run_gpu_sweep.py CSV:
+1,405 land sites x swept device combos).
 
-Reads a GPU sweep CSV (``gpu_sweep/run_gpu_sweep.py`` output -- 1,405 land sites
-x however many device-parameter combos were swept, see
-``docs/gpu_sweep_handoff.md``) and produces:
-
-1. Per-parameter yield maps -- for each *swept* device parameter (auto-detected:
-   any of hydrogel_thickness_mm/eps_abs/tau_glass/fin_area_ratio that takes more
-   than one value in the CSV), one map per value it takes (other swept device
-   params held at their median value), all sharing one colorbar scale so the
-   maps are directly comparable.
-2. An "optimal configuration" LCOW global map -- at every site, the device combo
-   with the lowest LCOW, plus maps of which parameter value was chosen at each
-   site (for whichever params were actually swept).
-3. Tornado plots (LCOW and thermal efficiency) for the swept device parameters,
-   using true one-at-a-time sensitivity across the full factorial design.
-4. Tornado plots (LCOW and thermal efficiency) for the 3 exogenous weather
-   variables (solar, RH, ambient temperature), which are not a designed sweep --
-   sensitivity is a linear-regression elasticity across all 1,405 sites at the
-   baseline device combo.
-
-Case 2/3 (docs/gpu_sweep_handoff.md's modified radiative-physics cases) only
-sweep a subset of the 4 device parameters (Case 3 fixes eps_abs/tau_glass at
-their idealized-limit values, sweeping only hydrogel_thickness_mm and
-fin_area_ratio) -- this script auto-detects which params were actually swept
-per-CSV rather than assuming all 4, so it works unmodified for any case.
+Produces per-parameter yield maps (one per value, shared colorbar), an optimal-configuration
+LCOW map with the winning parameter value per site, OAT tornado plots for the swept device
+parameters, and regression-elasticity tornado plots for the 3 exogenous weather variables.
+Which parameters were swept is auto-detected per CSV, so Cases 1/2/3 all work unmodified.
 
 Usage::
 
@@ -58,7 +39,7 @@ for _p in (_SRC, _SCRIPTS, _SENSITIVITY_DIR):
 
 from solar_lumped.economics import lcow_from_daily_yield  # noqa: E402
 from solar_lumped.economics import LCOEconomicParams  # noqa: E402
-from tornado_plot_solar import create_tornado_plot  # noqa: E402
+from tornado_plot_oat import create_tornado_plot  # noqa: E402
 
 _SALT_LOADING = 4.0  # fixed salt:polymer ratio used by the GPU sweep (docs/gpu_sweep_handoff.md)
 _SALT_NAME = "LiCl"
@@ -169,12 +150,8 @@ def plot_parameter_metric_map(
     metric_label: str | None = None,
     levels: list[float] | None = None,
 ) -> None:
-    """One figure, one row of panels: *metric* vs. every value *param* takes
-    (other swept device params held at their median/baseline level), all
-    sharing one colorbar. Generalization of the per-parameter yield map to any
-    metric column (e.g. lcow_usd_per_m3) and, via *levels*, any subset of a
-    parameter's values (e.g. just low/median/high tau_glass).
-    """
+    """One row of panels: *metric* at every value *param* takes (other swept params at their
+    median), sharing one colorbar. *levels* restricts to a subset of the values."""
     ccrs, cfeature = _import_map_stack()
     baseline = _baseline_levels(df, device_params)
     metric_label = metric_label or _METRIC_TITLES.get(metric, metric)
@@ -244,10 +221,8 @@ def build_optimal_config(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _land_mask(lon_grid: np.ndarray, lat_grid: np.ndarray) -> np.ndarray:
-    """True where a (lon, lat) fine-grid cell is on land, per the same 110m
-    Natural Earth coastline drawn on the map -- keeps interpolated color from
-    spilling into oceans, bays, and lakes that the linear/nearest fill would
-    otherwise bridge across."""
+    """True where a (lon, lat) cell is on land per the same 110m Natural Earth coastline
+    drawn on the map, so interpolated color can't spill across water."""
     import shapely.vectorized
     from shapely.ops import unary_union
 
@@ -264,16 +239,9 @@ def _interpolate_to_grid(
     sample_step_deg: float,
     fine_step_deg: float = 0.5,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Interpolate scattered (lon, lat, val) samples onto a fine regular grid.
-
-    Uses linear barycentric interpolation, filling remaining holes (concave
-    coastline gaps, small islands) with nearest-neighbor so there's no NaN
-    gaps between the original sample points. The scattered points sit on a
-    regular ``sample_step_deg`` land grid, so their convex hull spans oceans
-    between continents -- cells farther than one sample spacing from the
-    nearest real sample, or that fall in open water per the Natural Earth
-    land polygons, are masked out (NaN) so color never spills past a coastline.
-    """
+    """Interpolate scattered (lon, lat, val) onto a fine grid: linear barycentric, holes
+    filled nearest-neighbor. Since the samples' convex hull spans oceans, cells farther than
+    one sample spacing away or in open water are masked so color stays on land."""
     from scipy.interpolate import griddata
     from scipy.spatial import cKDTree
 
@@ -321,10 +289,8 @@ def plot_optimal_lcow_map(winners: pd.DataFrame, lcow_dir: Path, label: str) -> 
     )
     ax.add_feature(cfeature.NaturalEarthFeature("physical", "ocean", "110m", facecolor="0.92", zorder=0))
     ax.coastlines(resolution="110m", color="0.3", linewidth=0.4, zorder=1)
-    # draw_labels=True hits a gridliner rendering bug on this cartopy/shapely/
-    # matplotlib version combo ("Points of LinearRing do not form a closed
-    # linestring", raised lazily during savefig) -- plain gridlines without
-    # tick labels avoid the buggy code path and are still useful visually.
+    # draw_labels=True hits a gridliner bug on this cartopy/shapely/matplotlib combo
+    # (lazily raised during savefig); unlabelled gridlines avoid it.
     ax.gridlines(
         crs=ccrs.PlateCarree(), draw_labels=False, linewidth=0.35, color="0.45",
         alpha=0.45, linestyle="--",
@@ -403,13 +369,8 @@ def plot_chosen_parameter_maps(
 def _device_param_sensitivity(
     df: pd.DataFrame, param: str, metric: str, device_params: tuple[str, ...]
 ) -> tuple[float, float, int]:
-    """True OAT sensitivity of *metric* to *param*, averaged over the full factorial design.
-
-    Every (site, other-swept-device-params) group contains one row per level of
-    *param* (the design is a complete factorial), so every pairwise comparison
-    within a group is a valid OAT pair — no need for tornado_plot.py's O(n^2)
-    row-matching search.
-    """
+    """True OAT sensitivity of *metric* to *param* over the full factorial design: each
+    (site, other-params) group holds one row per level, so every within-group pair is OAT."""
     group_cols = ["lat", "lon"] + [p for p in device_params if p != param]
     pivot = df.pivot_table(index=group_cols, columns=param, values=metric, aggfunc="first")
     levels = sorted(pivot.columns.tolist())
@@ -471,9 +432,8 @@ def device_param_tornado(df: pd.DataFrame, metric: str, device_params: tuple[str
 
 def _exogenous_sensitivity(baseline_df: pd.DataFrame, var: str, metric: str) -> tuple[float, float, int]:
     """Linear-regression elasticity of *metric* to *var* across sites, controlling for the
-    other two exogenous variables. Not a designed sweep (real weather covaries across sites),
-    so this reports a point elasticity at the sample means rather than a true OAT sensitivity.
-    """
+    other two exogenous variables -- a point elasticity at the sample means, since real
+    weather covaries and this is not a designed sweep."""
     X = baseline_df[list(_EXOGENOUS_PARAMS)].to_numpy(dtype=float)
     y = baseline_df[metric].to_numpy(dtype=float)
     design = np.column_stack([np.ones(len(X)), X])
@@ -531,9 +491,8 @@ def _save_tornado(
 
 
 def run_analysis(csv_path: Path, out_dir: Path, label: str) -> pd.DataFrame:
-    """Run the full analysis + plot suite for one sweep CSV. Returns the loaded
-    (with lcow_usd_per_m3 added) DataFrame, for reuse by the cross-case comparison script.
-    """
+    """Run the full analysis + plot suite for one sweep CSV; returns the loaded DataFrame
+    (with lcow_usd_per_m3 added) for the cross-case comparison script."""
     yield_dir = out_dir / "yield_maps"
     lcow_dir = out_dir / "lcow_optimal"
     tornado_dir = out_dir / "tornado"

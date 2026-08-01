@@ -1,15 +1,6 @@
-"""sys.path wiring for the four SAWH device packages.
-
-All four packages are ``pip install -e``'d into the active environment
-(``solar-lumped-sawh``, ``waste-heat-lumped-sawh``,
-``waste-heat-cycle-lumped-sawh``, ``waste-heat-cycle-lumped-no-loop-sawh``),
-so ``import solar_lumped`` / ``import waste_heat_lumped`` / etc. work with no
-path surgery. This module still adds ``src/`` fallbacks (defensive, in case a
-package is ever run outside its editable install) and, unconditionally, adds
-each package's ``scripts/`` directory to ``sys.path`` so that adapters can
-import the *scripts* (``run_solar_sim``, ``run_waste_heat_sim``) which are
-not part of the installed package.
-"""
+"""sys.path wiring for the four SAWH device packages. All four are pip install -e'd, so the
+package imports need no path surgery; this adds src/ fallbacks plus the scripts/ dirs the
+adapters import run_solar_sim / run_waste_heat_sim from."""
 
 from __future__ import annotations
 
@@ -40,32 +31,17 @@ def _ensure_src_on_path(package_import_name: str, repo_dir_name: str) -> None:
 
 
 def ensure_scripts_on_path(repo_dir_name: str) -> None:
-    """Add one package's ``scripts/`` dir to ``sys.path`` (module-name import).
-
-    Deliberately *not* called for all four packages in :func:`bootstrap` —
-    several packages ship scripts with identical filenames (e.g.
-    ``run_waste_heat_cycle_sim.py``, ``parameter_sweep.py``,
-    ``npv_heatmap.py`` are duplicated between ``waste-heat/cycle_lumped`` and
-    ``waste-heat/cycle_lumped_no_loop``), so blanket-adding every package's
-    ``scripts/`` dir would create a real risk of importing the wrong module.
-    Callers should only request the specific package(s) whose script modules
-    they actually need to import (currently: ``solar_lumped``'s
-    ``run_solar_sim`` and ``waste-heat/lumped``'s ``run_waste_heat_sim`` — the
-    multi-cycle packages are driven directly via ``DeviceConfig`` +
-    ``ode_system.run_daily_operation``, never via their scripts).
-    """
+    """Add one package's ``scripts/`` dir to sys.path. Deliberately not done for all four in
+    :func:`bootstrap` -- the cycle packages ship identically-named scripts, so blanket-adding
+    them risks importing the wrong module. Request only the packages you import from."""
     scripts_dir = REPO_ROOT / repo_dir_name / "scripts"
     if scripts_dir.is_dir() and str(scripts_dir) not in sys.path:
         sys.path.insert(0, str(scripts_dir))
 
 
 def bootstrap() -> None:
-    """Make all four packages importable via ``import <package>``.
-
-    Idempotent; safe to call multiple times (e.g. once per adapter module).
-    Does NOT add any package's ``scripts/`` dir — see
-    :func:`ensure_scripts_on_path` for that (opt-in, per package).
-    """
+    """Make all four packages importable. Idempotent. Does not add any scripts/ dir -- see
+    :func:`ensure_scripts_on_path` for that."""
     for import_name, repo_dir_name in PACKAGE_DIRS.items():
         _ensure_src_on_path(import_name, repo_dir_name)
 

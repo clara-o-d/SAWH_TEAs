@@ -1,10 +1,5 @@
 """Device physics: geometry/material constants, brine/salt thermodynamics, heat-transfer
-correlations, thermal balances, mass transfer, and sorbent (hydrogel/MOF) models.
-
-Consolidated from the former physics/{table_s3, conde2004, correlations, salt_properties,
-brine_equilibrium, device_balances, mass_transfer, adsorbent, sorbent}.py. Section headers
-below mark each former module's boundary for traceability.
-"""
+correlations, thermal balances, mass transfer, and sorbent (hydrogel/MOF) models."""
 
 from __future__ import annotations
 
@@ -26,11 +21,8 @@ if TYPE_CHECKING:
     from solar_lumped.simulation import DeviceConfig
 
 
-# =============================================================================
-# Table S3 / Note S1 device parameters (Wilson & Díaz-Marín *Device* 2025)
-#
-# Values below are loaded directly from docs/parameters.xlsx (Physics sheet).
-# =============================================================================
+# --- Table S3 / Note S1 device parameters (Wilson & Díaz-Marín *Device* 2025) ---
+# All values load from docs/parameters.xlsx (Physics sheet).
 
 # Geometry
 H0_M: float = _pv("Hydrogel reference thickness (H0)", mm_to_m=True)  # hydrogel reference thickness H₀ (m)
@@ -78,10 +70,8 @@ FIN_AREA_RATIO: float = _pv("Condenser fin area ratio (A_r)")  # A_r
 
 
 def u_gel_w_m2_k(h_m: float) -> float:
-    """Note S1 cumulative gel–absorber conductance (series resistances).
-
-    1/U_gel = L_al/k_al + L_silicone/k_silicone + H(t)/k_hydrogel
-    """
+    """Note S1 gel–absorber conductance in series:
+    1/U_gel = L_al/k_al + L_silicone/k_silicone + H(t)/k_hydrogel."""
     h = max(float(h_m), H0_M * 0.25)
     resistance = (
         L_AL_STACK_M / K_AL_W_M_K
@@ -98,15 +88,9 @@ U_GEL_W_M2_K: float = u_gel_w_m2_k(H0_M)
 CONDENSER_THERMAL_MASS_J_M2_K: float = RHO_AL_KG_M3 * CP_AL_J_KG_K * L_C_M
 
 
-# =============================================================================
-# Conde (2004) aqueous LiCl and CaCl2 solution properties
-#
-# Vapour-pressure correlation (Table 3, ``conde2004.tex``):
-#     π ≡ p_sol(ξ, T) / p_H2O(T) = π_25(ξ) · f(ξ, θ)
-# where ξ is the salt mass fraction in the brine and θ = T / T_c,H2O.
-# π equals the water activity a_w at the solution interface (Díaz-Marín Eq. 5 / 8).
-# Pure-water vapour pressure uses Saul–Wagner (Appendix A, same reference).
-# =============================================================================
+# --- Conde (2004) aqueous LiCl and CaCl2 solution properties ---
+# Table 3: π ≡ p_sol(ξ,T)/p_H2O(T) = π_25(ξ)·f(ξ,θ), ξ = brine salt mass fraction,
+# θ = T/T_c,H2O. π is the interface water activity a_w; p_H2O from Saul–Wagner.
 
 # Conde (2004): θ ≡ T / T_c,H2O
 T_CRIT_H2O_K: float = 647.096
@@ -270,9 +254,7 @@ def water_vapor_pressure_pa(temperature_c: float) -> float:
     return float(P_CRIT_H2O_PA * math.exp(ln_p_pc))
 
 
-# =============================================================================
-# Heat-transfer correlations (Hollands et al. 1976; Wilson Note S1)
-# =============================================================================
+# --- Heat-transfer correlations (Hollands et al. 1976; Wilson Note S1) ---
 
 STEFAN_BOLTZMANN_W_M2_K4: float = _pv("Stefan-Boltzmann constant (sigma)")
 D_AIR_M2_S: float = _pv("Water-vapor-in-air diffusivity (D_air)")  # H2O in air ~25 °C (Note S1 Sh = Nu analogy)
@@ -312,14 +294,8 @@ def hollands_vapor_gap_h_conv_w_m2_k(
     *,
     tilt_deg: float = TILT_DEG,
 ) -> float:
-    """Note S1 Eqs. S3–S4: h_conv,g = Nu · k_air / (L_g − H).
-
-    Nu follows Hollands et al. 1976 tilted-parallel-plates (Eq. S3):
-        Nu = 1 + 1.44 * [1 − 1708 sin(1.8θ)^1.6 / Ra cosθ]* [1 − 1708 / Ra cosθ]*
-               + [(Ra cosθ / 5830)^(1/3) − 1]*
-    where []* = max(0, ...), valid for all Ra. Ra is the Rayleigh number for the
-    vapor-gap cavity (properties at mean film temperature).
-    """
+    """Note S1 Eqs. S3–S4: h_conv,g = Nu·k_air/(L_g − H), with Nu from the Hollands et al.
+    1976 tilted-parallel-plates correlation at the vapor-gap cavity Rayleigh number."""
     if gap_m <= 0.0:
         return 0.0
     delta_t = max(abs(t_hot_c - t_cold_c), 1e-6)
@@ -348,9 +324,7 @@ def condenser_h_conv_w_m2_k(h_amb: float, *, fin_area_ratio: float = FIN_AREA_RA
     return fin_area_ratio * h_amb
 
 
-# =============================================================================
-# Salt catalog and PAM-LiCl water-activity models for Wilson Eq. 5
-# =============================================================================
+# --- Salt catalog and PAM-LiCl water-activity models for Wilson Eq. 5 ---
 
 WATER_MOLAR_MASS_KG_MOL: float = _pv("Water molar mass (MW_w)")
 GAS_CONSTANT_J_MOL_K: float = _pv("Universal gas constant (R)")
@@ -512,13 +486,8 @@ def chamber_c_s_from_synthesis(
     pour_ml: float | None = None,
     calibrate_to_dvs: bool = True,
 ) -> float:
-    """Fixed c_s for Díaz-Marín Eq. 8 from Methods pour inventory at Table S3 H₀.
-
-    LiCl moles in the poured solution are spread over the gel footprint area times
-    the measured initial thickness H₀ (SI Note S9). By default the 4 g/g PAM-LiCl
-    reference (8 mL pour, H₀ = 2.34 mm) is scaled to match ``DRY_COMPOSITE_DENSITY``
-    so panel 5c equilibria stay aligned with the DVS isotherm calibration.
-    """
+    """Fixed c_s for Eq. 8: poured LiCl moles spread over footprint × H₀ (SI Note S9),
+    with the 4 g/g reference scaled to DRY_COMPOSITE_DENSITY for DVS consistency."""
     pour = pour_ml if pour_ml is not None else chamber_pour_volume_ml(salt_to_polymer_ratio)
     cs_synth = _chamber_c_s_from_pour_inventory(
         salt_to_polymer_ratio,
@@ -550,15 +519,8 @@ def chamber_c_s_with_constant_density(
     formula_weight_g_mol: float = 42.394,
     pour_ml: float | None = None,
 ) -> float:
-    """``c_s`` for Eq. 8 with SI Note S7 constant solution density at 20 % RH.
-
-    Salt moles come from the Methods pour inventory (``chamber_c_s_from_synthesis``).
-    For PAM--LiCl 2 g/g chamber samples the paper poured 12.8 mL (vs 8 mL) to match
-    the ~2.34 mm thickness of the 4 g/g reference at 20 % RH; measured H₀ can still
-    differ (Table S3: 2.16 mm). Holding ``c_s`` at the 4 g/g calibration thickness
-    while ``H₀`` in ``g/H₀`` uses the measured value matches the digitized model
-    curves (panel 5d) without changing equilibrium plateaus.
-    """
+    """``c_s`` for Eq. 8 at SI Note S7 constant 20 % RH solution density. c_s stays on the
+    4 g/g calibration thickness while g/H₀ uses measured H₀ -- matches panel 5d."""
     cs = chamber_c_s_from_synthesis(
         salt_to_polymer_ratio,
         h0_mm,
@@ -591,12 +553,8 @@ def pam_licl_uptake_g_g_at_rh(rh_fraction: float) -> float:
     return float(np.interp(r, rh_pct, uptake))
 
 
-# Dry-basis composite density for all gravimetric-uptake <-> c_w conversions.
-# Table S3 reports the composite density at fabrication (25 °C, 20% RH); the DVS
-# isotherm uptake is gravimetric per gram of *dry* composite, so the dry-basis
-# density is rho_composite(20% RH) / (1 + uptake(20% RH)). Using the wet (20% RH)
-# density here would over-count the sorbent dry mass by (1 + u20) ≈ 2.26x and
-# inflate the absolute water inventory / desorption swing accordingly.
+# Dry-basis composite density = rho_composite(20% RH) / (1 + uptake(20% RH)); the wet
+# density would over-count dry sorbent mass by (1 + u20) ≈ 2.26x.
 DRY_COMPOSITE_DENSITY_KG_M3: float = RHO_COMPOSITE_KG_M3 / (
     1.0 + pam_licl_uptake_g_g_at_rh(0.20)
 )
@@ -622,21 +580,9 @@ def pam_licl_gravimetric_uptake_g_g(
     salt_to_polymer_ratio: float | None = None,
     salt_weight_factor: float = 1.0,
 ) -> float:
-    """Gravimetric moisture content m_w / m_dry (g/g) on a footprint basis.
-
-    Water inventory is referenced to the fixed fabrication thickness H₀, not the
-    swollen H(t): Wilson defines c_w and the desorption flux ṁ_des = MW·H₀·dc_w/dt
-    (Note S1) on the H₀ basis, so the sorbate inventory per area is c_w·H₀. The
-    swelling H(t) (Eq. 6) enters only the vapor-gap convection (L_g − H) and the
-    U_gel conductance (H/k_gel), never the water inventory or its activity. Using
-    the swollen H here would double-count dilution and break consistency with the
-    yield integral. ``h_m`` is retained for signature compatibility but unused.
-
-    When composite state is supplied, dry mass uses salt inventory with
-    ``formula_weight_g_mol * salt_weight_factor`` in the uptake denominator only
-    (``c_s`` and brine activity are unchanged). Otherwise falls back to the
-    calibrated DVS dry-basis density.
-    """
+    """Gravimetric moisture content m_w/m_dry (g/g) per footprint, referenced to the fixed
+    fabrication thickness H₀ (Note S1), not swollen H(t) -- ``h_m`` is unused. With composite
+    state, dry mass uses ``formula_weight_g_mol * salt_weight_factor``; else the DVS density."""
     del h_m
     if (
         c_s_mol_m3 is not None
@@ -880,9 +826,7 @@ def fabrication_c_w_initial(
     )
 
 
-# =============================================================================
-# Equilibrium brine isotherms for NaCl, LiCl, CaCl2, and MgCl2
-# =============================================================================
+# --- Equilibrium brine isotherms for NaCl, LiCl, CaCl2, and MgCl2 ---
 
 
 def _aw_polynomial(salt_fraction: float, coeffs: tuple[float, ...]) -> float:
@@ -895,9 +839,8 @@ def _aw_polynomial(salt_fraction: float, coeffs: tuple[float, ...]) -> float:
     return float(a_w)
 
 
-# a_w(ξ) polynomial coefficients (increasing powers of ξ), used both as a
-# forward isotherm (water_activity_at_brine_fraction) and, inverted via
-# find_root_bracketed, as the equilibrium brine fraction (mf_NaCl/mf_MgCl2).
+# a_w(ξ) polynomial coefficients (increasing powers of ξ): forward isotherm, and inverted
+# via find_root_bracketed for the equilibrium brine fraction.
 _NACL_AW_COEFFS: tuple[float, ...] = (0.9998, -0.5597, -0.332, -5.545, 5.863)
 _MGCL2_AW_COEFFS: tuple[float, ...] = (1.16231287, -4.86704441, 38.21982328, -153.67496570, 186.32487108)
 
@@ -987,9 +930,7 @@ def water_activity_at_brine_fraction(
     return float("nan")
 
 
-# =============================================================================
-# Wilson et al. 2025 Eqs. 1, 3, 4 — steady absorber, glass, and gel temperatures
-# =============================================================================
+# --- Wilson et al. 2025 Eqs. 1, 3, 4 — steady absorber, glass, and gel temperatures ---
 
 
 @dataclass(frozen=True, slots=True)
@@ -1009,11 +950,8 @@ class DeviceThermalParams:
     tau_glass: float = TAU_GLASS
     eps_gel: float = EPS_GEL
     eps_al: float = EPS_AL
-    # Real absorber/glass IR emissivities for the modified Eqs. 3/4 radiative
-    # exchange terms (2026-07 update to the original blackbody/cavity
-    # approximation below). Both None (default) reproduces the original
-    # Wilson Eqs. 3/4 exactly (eps_ag=eps_ga=1.0) -- set both together to
-    # activate the modified physics; see _residuals.
+    # Real absorber/glass IR emissivities for the modified Eqs. 3/4 radiative terms.
+    # Both None (default) reproduces Wilson exactly; set both together -- see _residuals.
     eps_abs_ir: float | None = None
     eps_glass_ir: float | None = None
     tilt_deg: float = TILT_DEG
@@ -1050,10 +988,8 @@ def _residuals(
     )
 
     if params.eps_abs_ir is not None and params.eps_glass_ir is not None:
-        # Modified Eqs. 3/4: real absorber/glass IR emissivities instead of the
-        # blackbody cavity approximation. eps_ag via the same parallel-plate
-        # formula already used for eps_gel/eps_al; eps_ga is the glass's own
-        # IR emissivity directly (glass radiates to ambient, not a cavity).
+        # Modified Eqs. 3/4: eps_ag from the parallel-plate formula (as eps_gel/eps_al),
+        # eps_ga is the glass IR emissivity directly (it radiates to ambient, not a cavity).
         eps_ag = parallel_plate_emissivity(params.eps_abs_ir, params.eps_glass_ir)
         eps_ga = params.eps_glass_ir
     else:
@@ -1178,9 +1114,7 @@ def thermal_residual_norm(
     return float(np.linalg.norm(r))
 
 
-# =============================================================================
-# Wilson et al. 2025 Eqs. 5–6 — convection-limited mass transfer
-# =============================================================================
+# --- Wilson et al. 2025 Eqs. 5–6 — convection-limited mass transfer ---
 
 MassTransferPhase = Literal["absorption", "desorption"]
 
@@ -1192,10 +1126,8 @@ def _absorption_effective_water_activity(
     params: MassTransferParams,
     h_m: float,
 ) -> float:
-    """Composite gel a_w for Eq. 5 during open absorption.
-
-    LiCl uses brine activity plus PAM-LiCl DVS cap (Note S2). Other salts use brine only.
-    """
+    """Composite gel a_w for Eq. 5 during open absorption: LiCl uses brine activity plus
+    the PAM-LiCl DVS cap (Note S2); other salts use brine only."""
     aw_brine = water_activity_from_c_w(
         c_w,
         c_s=params.c_s_mol_m3,
@@ -1378,13 +1310,8 @@ def dH_dt(
     phase: MassTransferPhase = "absorption",
     t_cond_c: float | None = None,
 ) -> float:
-    """Eq. 6: dH/dt (m/s) — hydrogel thickness rate.
-
-    Consistent with Note S1 dc_w/dt:
-        dH/dt = g · (MW / ρ_sol) · (p_sat / RT) · driving
-    This equals dc_w/dt · (MW · H₀ / ρ_sol), ensuring H and c_w evolve at
-    the same timescale (both driven by the mass-transfer velocity g).
-    """
+    """Eq. 6 hydrogel thickness rate dH/dt = g·(MW/ρ_sol)·(p_sat/RT)·driving (m/s), i.e.
+    dc_w/dt·(MW·H₀/ρ_sol), so H and c_w evolve on the same timescale."""
     t_k, p_sat, g, driving = _mass_transfer_rate_terms(
         c_w, t_gel_c=t_gel_c, c_r=c_r, params=params, h_m=h_m, phase=phase, t_cond_c=t_cond_c
     )
@@ -1397,13 +1324,8 @@ def m_des_kg_s_m2_from_state(
     dc_w_dt_val: float,
     dH_dt_val: float,
 ) -> float:
-    """Desorption flux (kg/m²/s) from Eqs. 5–6 gel water inventory rate.
-
-    Paper Eq. 1 ṁ_des removes water from the gel. With c_w (mol/m³) and H (m),
-    inventory N = c_w H (mol/m²) gives ṁ = -MW · dN/dt = -MW · (dc_w/dt·H + c_w·dH/dt).
-
-    Note S1 ṁ = -dc_w/dt · MW · H₀ is the H ≈ H₀, dH/dt ≈ 0 limit of Eq. 5 alone.
-    """
+    """Desorption flux (kg/m²/s) from the Eqs. 5–6 inventory N = c_w·H:
+    ṁ = -MW·(dc_w/dt·H + c_w·dH/dt); Note S1's -dc_w/dt·MW·H₀ is its dH/dt ≈ 0 limit."""
     flux = -WATER_MOLAR_MASS_KG_MOL * (dc_w_dt_val * h_m + c_w * dH_dt_val)
     return max(0.0, flux)
 
@@ -1419,9 +1341,7 @@ def m_des_kg_s_m2_from_dc_w(
     return -dc_w_dt_val * WATER_MOLAR_MASS_KG_MOL * h0_ref_m
 
 
-# =============================================================================
-# MOF adsorbent isotherm and mass-transfer rates (tabulated MIL-100(Fe) @ 303 K)
-# =============================================================================
+# --- MOF adsorbent isotherm and mass-transfer rates (tabulated MIL-100(Fe) @ 303 K) ---
 
 DEFAULT_MOF_NAME: str = "MIL-100_Fe"
 Q_MIN_KG_KG: float = 0.0
@@ -1446,11 +1366,8 @@ def _materials_dir() -> Path:
 
 @lru_cache(maxsize=8)
 def _load_isotherm(filename: str) -> tuple[np.ndarray, np.ndarray]:
-    """Load tabulated isotherm: RH fraction, equilibrium loading q (kg water / kg MOF).
-
-    Source columns: relative pressure (%), H2O uptake (mol/kg). Relative pressure is
-    treated as RH at the measurement temperature (303 K).
-    """
+    """Load tabulated isotherm (RH fraction, q in kg water/kg MOF) from source columns
+    relative pressure (%) and H2O uptake (mol/kg), taking p/p0 as RH at 303 K."""
     rh_pct, mol_per_kg = load_two_column_csv(_materials_dir() / filename)
     return rh_pct / 100.0, mol_per_kg * WATER_MOLAR_MASS_KG_MOL
 
@@ -1613,9 +1530,7 @@ class _MofMassBridge:
 SorbentKind = Literal["hydrogel", "mof"]
 
 
-# =============================================================================
-# Unified sorbent interface: PAM-salt hydrogel (default) or MOF coating
-# =============================================================================
+# --- Unified sorbent interface: PAM-salt hydrogel (default) or MOF coating ---
 
 # PhaseResult.c_w stores mol/m³ for hydrogel or kg/kg loading for MOF.
 LOADING_MIN = Q_MIN_KG_KG

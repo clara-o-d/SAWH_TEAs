@@ -166,8 +166,6 @@ def _apply_combo(
             econ = LCOEconomicParams(total_investment_factor=value)
         elif key == "maintenance_cost_fraction":
             econ = LCOEconomicParams(maintenance_cost_fraction=value)
-        elif key == "electricity_price_usd_per_kwh":
-            econ = LCOEconomicParams(electricity_price_usd_per_kwh=value)
         elif key == "c_am_usd_per_kg":
             econ = LCOEconomicParams(c_am_usd_per_kg=value)
         elif key == "c_water_gel_usd_per_kg":
@@ -288,13 +286,6 @@ def make_sweep_params(
             0.02,
             0.10,
             base_econ.maintenance_cost_fraction,
-        ),
-        SweepParam(
-            "electricity_price_usd_per_kwh",
-            "Electricity price (USD/kWh)",
-            0.05,
-            0.30,
-            base_econ.electricity_price_usd_per_kwh,
         ),
     ]
 

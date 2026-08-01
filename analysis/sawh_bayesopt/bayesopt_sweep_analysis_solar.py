@@ -1,21 +1,11 @@
 #!/usr/bin/env python3
-"""Analysis + plots for the GPU BayesOpt full-grid sweep (gpu_sweep/
-run_bayesopt_sweep.py output: one row per land site, giving that site's own
-optimized 3-variable design -- not a discrete grid like gpu_grid_sweep's).
+"""Analysis + plots for the GPU BayesOpt full-grid sweep (one row per land site with that
+site's own optimized 3-variable design), reusing gpu_sweep_analysis_solar.py's map plotting.
 
-Reuses gpu_grid_sweep/gpu_sweep_analysis_solar.py's map-plotting primitives
-(world axis, land-masked interpolation) rather than reimplementing them.
-
-Produces:
-1. A global map of each site's optimized LCOW.
-2. Maps of the chosen (continuous) hydrogel_thickness_mm/vapor_gap_mm/
-   fin_area_ratio at each site's optimum.
-3. A console summary of optimization/diagnostic quality (stopped_reason,
-   surrogate-artifact flags, GP calibration, DE convergence).
-4. A per-site comparison against the brute-force grid sweep's own
-   optimal-config LCOW (analysis/gpu_grid_sweep/full_sweep.csv) at the same
-   sites -- BayesOpt searches a continuous box containing the grid's 5x5x5
-   discrete combos, so its optimum should very rarely be worse.
+Produces a global optimized-LCOW map, maps of the chosen continuous hydrogel_thickness_mm /
+vapor_gap_mm / fin_area_ratio, a console summary of optimization quality, and a per-site
+comparison against the brute-force grid sweep -- BayesOpt searches a continuous box
+containing the grid's 5x5x5 combos, so it should very rarely be worse.
 
 Usage::
 
@@ -60,15 +50,9 @@ _TOTAL_LAND_SITES = 1405  # analysis/gpu_grid_sweep/full_sweep_case2.csv's own s
 
 
 def load_data(csv_path: Path, corrected_csv_path: Path | None = None) -> pd.DataFrame:
-    """Load the sweep summary, with LCOW/design overridden by
-    recompute_lcow_from_cache.py's corrected values when available (see that
-    script's module docstring -- economics.py's LCOW formula had a real bug,
-    fixed after this sweep ran; the corrected file re-picks each site's best
-    already-cached design under the fixed formula, no GPU re-run needed).
-    Diagnostic columns (stopped_reason, cv_rmse, ...) are about the search
-    process itself, unaffected by the LCOW-formula fix, so those still come
-    from the original summary.
-    """
+    """Load the sweep summary, overriding LCOW/design with recompute_lcow_from_cache.py's
+    corrected values when present (economics.py's LCOW formula was fixed after this sweep
+    ran). Diagnostic columns describe the search itself, so they stay as originally written."""
     df = pd.read_csv(csv_path)
     df = df[df["error"].isna()] if "error" in df.columns else df
     if corrected_csv_path is None or not corrected_csv_path.is_file():
@@ -232,14 +216,9 @@ def plot_improvement_map(merged: pd.DataFrame, out_dir: Path, label: str) -> Non
 
 
 def compare_vs_grid_sweep(bo_df: pd.DataFrame, grid_csv: Path, out_dir: Path, label: str) -> None:
-    """BayesOpt searches a continuous box that contains the brute-force
-    grid's 5x5x5 discrete combos -- so at any site both ran under the *same*
-    physics case, BayesOpt's optimum should very rarely be worse than the
-    grid's own best combo. Refuses the comparison (rather than silently
-    reporting a number) if the two runs used different eps_abs_ir/
-    eps_glass_ir cases, or if the grid CSV didn't actually sweep all 3 of
-    BayesOpt's optimized variables -- either makes "improvement" meaningless.
-    """
+    """BayesOpt's continuous box contains the grid's 5x5x5 combos, so its optimum should
+    very rarely be worse at a site both ran under the same physics case. Refuses the
+    comparison outright on a case mismatch or if the grid didn't sweep all 3 variables."""
     grid_df = load_grid_data(grid_csv)
 
     bo_cases = bo_df["case"].unique()

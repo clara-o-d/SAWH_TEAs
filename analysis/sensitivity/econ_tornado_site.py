@@ -36,7 +36,7 @@ from solar_lumped.economics import (  # noqa: E402
     get_salt_price_usd_per_kg,
     lcow_from_daily_yield,
 )
-from tornado_plot_solar import create_tornado_plot  # noqa: E402
+from tornado_plot_oat import create_tornado_plot  # noqa: E402
 
 _POLYMER_FIELDS: tuple[str, ...] = (
     "c_am_usd_per_kg", "c_aps_usd_per_kg", "c_mba_usd_per_kg", "c_temed_usd_per_kg",

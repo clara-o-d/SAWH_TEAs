@@ -1,17 +1,7 @@
-"""Cached wrapper around solar_lumped/gpu_sweep's JAX/diffrax fast path for
-combined_lcow(design_vector).
+"""Cached combined_lcow(design_vector) over gpu_sweep's JAX daily-cycle + Aitken pipeline.
 
-Evaluates through solar_lumped/gpu_sweep's JAX daily-cycle + Aitken pipeline
-(jax_daily_cycle.py), not solar_lumped's CPU ode_system.py directly --
-gpu_sweep/FINDINGS.md Results 6/7 show the two agree to <0.03% and the JAX
-path is ~8x faster even single-threaded on a CPU with no GPU, purely from
-compiling the daily-cycle function once and reusing it across every Aitken
-round and every (design, site, month) instance, instead of re-dispatching
-scipy's Radau/root/brentq calls from Python one at a time. Every uncached
-design in a round is therefore evaluated together: all of its (site, month)
-instances, across every uncached design in the batch, are stacked into one
-jax.vmap-compiled call rather than one process per design.
-"""
+Agrees with solar_lumped's CPU path to <0.03% and is ~8x faster (FINDINGS.md 6/7): every
+uncached design's (site, month) instances stack into one jax.vmap-compiled call."""
 
 from __future__ import annotations
 
@@ -33,15 +23,12 @@ from sawh_bayesopt.sites import MonthlyProfiles, SiteSpec
 
 CombineRule = Literal["mean", "worst_case"]
 
-# Finite stand-in for solar_lumped's FAIL_LCO (1e30) once a failure is
-# clamped into the surrogate-facing combined_lcow -- 1e30 would wreck GP
-# kernel hyperparameter fitting, but this is still comfortably worse than
-# any real design (LCOW here is typically single/low-double-digit USD/m^3).
+# Finite stand-in for FAIL_LCO (1e30), which would wreck GP hyperparameter fitting;
+# still far worse than any real design (LCOW is typically single/low-double-digit).
 PENALTY_LCOW_USD_PER_M3: float = 1.0e4
 
-# Fixed-round-count Aitken convergence, as validated in gpu_sweep/FINDINGS.md
-# Result 7 (<0.03% worst-per-month accuracy cost vs. the adaptive
-# per-instance result) and used as run_gpu_sweep.py's own default.
+# Fixed-round-count Aitken convergence: <0.03% worst-per-month cost vs. adaptive
+# (FINDINGS.md Result 7), and run_gpu_sweep.py's own default.
 JAX_AITKEN_MAX_ROUNDS: int = 8
 
 # .../sawh_bayesopt/src/sawh_bayesopt/evaluator.py -> .../SAWH_TEAs
@@ -64,22 +51,15 @@ class DesignEvalResult:
     design_vector: tuple[float, ...]
     site_results: tuple[SiteResult, ...]
     combined_lcow: float
-    # Wall-clock of the whole batched jax.vmap call this design was evaluated
-    # in, not this design's own share of it -- every design in the same
-    # evaluate_batch() call gets the same value.
+    # Wall-clock of the whole batched jax.vmap call, not this design's share -- every
+    # design in the same evaluate_batch() gets the same value.
     wall_time_s: float
 
     @property
     def is_feasible(self) -> bool:
-        """True iff every site succeeded. A property (not a stored field) so
-        it's always exactly consistent with site_results and free for old
-        cache.jsonl records to pick up -- see surrogate.py/gp_diagnostics.py's
-        outlier-exclusion logic, which this backs. combined_lcow itself isn't
-        a reliable feasibility signal: with combine_rule="mean" it can land
-        anywhere between a real value and the penalty (e.g. one feasible site
-        averaged with one infeasible site's penalty), not just exactly at
-        PENALTY_LCOW_USD_PER_M3.
-        """
+        """True iff every site succeeded. A property so it always tracks site_results and
+        old cache records get it free. combined_lcow can't substitute: with
+        combine_rule="mean" a partial failure lands between a real value and the penalty."""
         return all(r.feasible for r in self.site_results)
 
     def site(self, name: str) -> SiteResult:
@@ -103,24 +83,10 @@ def design_vector_hash(
     resolution: str = "monthly",
     case: str = "case2",
 ) -> str:
-    """Stable cache key: sig-fig-rounded design vector + site set + resolution
-    (+ case, when non-default), so float jitter from LHS/EI proposals doesn't
-    create spurious cache misses for effectively-identical points.
-
-    Default matches evaluate_batch's own default ("case2") -- keep these two
-    in sync. A caller relying on this function's default while another caller
-    (or evaluate_batch itself) relies on a *different* default for the same
-    design vector/sites/resolution silently produces two different cache
-    keys for what's supposed to be the same evaluation.
-
-    ``case`` is deliberately left out of the payload for the default
-    "case1" -- every cache.jsonl written before case-awareness existed used
-    keys with no case field at all, and case1 reproduces the original
-    physics exactly (see design_space.CASE_EPS_IR), so this keeps those
-    caches valid instead of invalidating them on the next run. Case2/3 get a
-    distinct key space so they can never collide with a case1 (or each
-    other's) cached LCOW for the same raw design vector.
-    """
+    """Stable cache key: sig-fig-rounded design vector + sites + resolution (+ case when
+    non-default), so LHS/EI float jitter doesn't cause spurious misses. The ``case``
+    default must stay in sync with evaluate_batch's, and "case1" is omitted from the
+    payload so pre-case-awareness cache.jsonl records stay valid."""
     rounded = tuple(_round_sig(float(v)) for v in np.asarray(x, dtype=float).reshape(-1))
     payload = {"x": rounded, "sites": sorted(sites), "resolution": resolution}
     if case != "case1":
@@ -130,16 +96,8 @@ def design_vector_hash(
 
 
 def _load_jax_daily_cycle():
-    """Import solar_lumped/gpu_sweep's jax_daily_cycle module.
-
-    gpu_sweep/ isn't an installed package (it's meant to be run from a
-    checkout on a GPU node, see gpu_sweep/SHERLOCK_GPU_RUNBOOK.md), so it's
-    reached the same way gpu_sweep/run_gpu_sweep.py reaches it: sys.path-
-    inserting the gpu_sweep/ directory itself. Done lazily, only when an
-    evaluation actually needs real physics, so unit tests that never hit
-    real physics (empty weather profiles, monkeypatched internals) don't
-    require jax/diffrax to be installed.
-    """
+    """Import gpu_sweep's jax_daily_cycle by sys.path-inserting gpu_sweep/ (it isn't an
+    installed package). Lazy, so tests that never touch real physics need no jax/diffrax."""
     if str(_GPU_SWEEP_DIR) not in sys.path:
         sys.path.insert(0, str(_GPU_SWEEP_DIR))
     import jax_daily_cycle
@@ -178,9 +136,8 @@ def _result_from_jsonable(d: dict) -> DesignEvalResult:
 
 
 class EvalCache:
-    """Append-only jsonl ledger of completed evaluations, keyed by design-vector
-    hash, so an interrupted/crashed optimization run can resume without
-    re-paying for already-completed evaluations."""
+    """Append-only jsonl ledger of completed evaluations keyed by design-vector hash, so an
+    interrupted run resumes without re-paying for finished evaluations."""
 
     def __init__(self, path: str | Path):
         self.path = Path(path)
@@ -220,12 +177,9 @@ def _run_jax_batch(
     *,
     initial_loading,
 ) -> tuple[dict[tuple[int, int], float], dict[tuple[int, int], float], str | None]:
-    """Run one jax.vmap-batched daily-cycle call over every flattened
-    (design, site, month) instance and reduce it to a day-weighted mean
-    yield/eta per (design, site) pair. Returns (yield_by_pair, eta_by_pair,
-    error) -- error is set (and the two dicts left empty) if the batched
-    jax/diffrax call itself raised.
-    """
+    """One jax.vmap-batched daily-cycle call over every (design, site, month) instance,
+    reduced to day-weighted mean yield/eta per (design, site). Returns (yield, eta, error);
+    on a raised jax/diffrax call, error is set and both dicts are empty."""
     if not flat_profiles:
         return {}, {}, None
 
@@ -268,20 +222,10 @@ def evaluate_batch(
     resolution: str = "monthly",
     case: str = "case2",
 ) -> list[DesignEvalResult]:
-    """Evaluate every x in *xs*, skipping any already present in *cache*.
-
-    Every uncached design's (site, month) instances -- across every uncached
-    design in *xs* -- are stacked into one jax.vmap-batched daily-cycle call
-    (see jax_daily_cycle.py::make_batched_daily_cycle_fn) instead of
-    dispatching one process per design; that cross-design batching is what
-    actually delivers the JAX path's speedup, not just a faster single call.
-
-    ``case`` selects the absorber/glass IR emissivity variant (see
-    design_space.CASE_EPS_IR / to_device_config_kwargs) -- "case2" (default)
-    matches solar_lumped's own base-case physics
-    (DeviceConfig.thermal_params()); pass "case1" to reproduce Wilson's
-    original blackbody/cavity approximation instead.
-    """
+    """Evaluate every x in *xs* not already in *cache*, stacking all uncached designs'
+    (site, month) instances into one jax.vmap-batched call -- that cross-design batching is
+    the actual speedup. ``case`` picks the IR emissivity variant (design_space.CASE_EPS_IR);
+    "case2" matches solar_lumped base-case physics, "case1" Wilson's original."""
     from solar_lumped.economics import FAIL_LCO, lcow_from_daily_yield
     from solar_lumped.physics import initial_loading
     from solar_lumped.simulation import DeviceConfig
@@ -302,9 +246,8 @@ def evaluate_batch(
 
     configs = {i: DeviceConfig(**design_space.to_device_config_kwargs(xs[i], case=case)) for i in to_run}
 
-    # Flatten every (design, site, month) instance that actually has weather
-    # data into one cross-product batch. (design, site) pairs with no
-    # profiles at all are handled directly below without needing jax.
+    # Flatten every (design, site, month) instance with weather data into one batch;
+    # pairs with no profiles are handled below without jax.
     flat_profiles = []
     flat_configs = []
     flat_weights: list[int] = []

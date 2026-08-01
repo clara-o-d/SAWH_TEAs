@@ -116,7 +116,7 @@ def main() -> int:
     print(f"{len(out)} sites recomputed -> {out_path}")
     print(f"median LCOW reduction from the fix: {frac_change.median():.2%}")
     print(f"sites where the argmin design changed: {int(out['design_changed'].sum())}/{len(out)}")
-    print(f"regret (originally-reported design vs. best-in-cache, both under corrected formula):")
+    print("regret (originally-reported design vs. best-in-cache, both under corrected formula):")
     print(f"  median={out['regret_frac'].median():.2%}  mean={out['regret_frac'].mean():.2%}  "
           f"max={out['regret_frac'].max():.2%}  p90={out['regret_frac'].quantile(0.9):.2%}")
     return 0

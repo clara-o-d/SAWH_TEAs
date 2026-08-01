@@ -1,21 +1,11 @@
 #!/usr/bin/env python3
-"""GP surrogate regression diagnostics for a completed sawh_bayesopt run.
+"""GP surrogate regression diagnostics for a completed sawh_bayesopt run -- is the GP
+modelling the LCOW surface, or just guessing? Works from cache.jsonl + config.json alone
+(k-fold CV refits fresh GPs, so gp_state.joblib isn't needed).
 
-Answers: "is the GP actually modeling the LCOW surface well, or are we
-trusting a surrogate that's just guessing?" Everything here works from a
-completed run directory's cache.jsonl (every evaluated design -- always
-present) and config.json (bounds -- written by run_bayesopt.py); it doesn't
-need gp_state.joblib, since k-fold CV refits fresh GPs on held-out folds by
-construction.
-
-Produces, in <run-dir>/diagnostics/:
-  - gp_regression_report.json: k-fold cross-validated MSE, standardized
-    residuals (mean/std), MSLL (vs. a trivial mean/std baseline), and the
-    final full-data fit's kernel hyperparameters.
-  - gp_slices.png: 1D posterior mean +/- 95% CI through the incumbent best
-    design, one subplot per design variable, with the actually-evaluated
-    points overlaid -- the variance band should pinch to ~0 right at
-    observed points and widen away from them.
+Writes <run-dir>/diagnostics/gp_regression_report.json (CV MSE, standardized residuals,
+MSLL vs. a mean/std baseline, final kernel hyperparameters) and gp_slices.png (1D posterior
+mean ±95% CI through the incumbent, one subplot per variable, evaluated points overlaid).
 
 Usage:
     python3 scripts/diagnostics/gp_diagnostics.py --run-dir outputs/runs/<run_id>
@@ -152,19 +142,11 @@ def cross_validate(
 
 
 def summarize_de_diagnostics(run_dir: Path) -> dict | None:
-    """Summarize acquisition.py's per-round differential_evolution results
-    (written by reporting.write_de_diagnostics, run_bayesopt.py), if present.
-
-    DE is gradient-free/population-based and can exhaust maxiter without its
-    own convergence tolerance being satisfied -- a proposal from such a call
-    is only an approximate EI maximizer, not the true one. A high
-    hit_maxiter/not_success rate means EI-based proposals (and therefore
-    apparent explore/exploit behavior) may be an artifact of an
-    under-budgeted inner optimizer rather than genuine acquisition-function
-    preference -- worth ruling out before tuning ei_xi/stall_rel_tol/n_init.
-    Returns None if no de_diagnostics.json exists (e.g. an older run, or a
-    run that never got far enough to fit a GP and propose via EI at all).
-    """
+    """Summarize the per-round differential_evolution results, if de_diagnostics.json
+    exists (None otherwise). A high hit_maxiter/not_success rate means EI proposals are
+    approximate maximizers, so apparent explore/exploit behavior may be an under-budgeted
+    inner optimizer rather than real acquisition preference -- rule that out before tuning
+    ei_xi/stall_rel_tol/n_init."""
     path = run_dir / "diagnostics" / "de_diagnostics.json"
     if not path.is_file():
         return None
@@ -194,14 +176,9 @@ def summarize_de_diagnostics(run_dir: Path) -> dict | None:
 
 
 def detect_outliers(y: np.ndarray, *, iqr_multiplier: float = 3.0) -> np.ndarray:
-    """Tukey's "far out" fence (Q3 + iqr_multiplier*IQR) on percentiles of *y*.
-
-    Order-statistics-based, so a couple of extreme points (e.g. infeasible
-    designs hitting the penalty LCOW, or landing near it) barely move Q1/Q3
-    themselves -- this catches outliers beyond the exact penalty sentinel too
-    (a design can be badly infeasible without landing exactly on
-    PENALTY_LCOW_USD_PER_M3), which the n_penalized_points count alone misses.
-    """
+    """Tukey's "far out" fence (Q3 + iqr_multiplier*IQR) on percentiles of *y*. Being
+    order-statistics-based, extreme points barely move Q1/Q3, so this also catches designs
+    that are badly infeasible without landing exactly on the penalty sentinel."""
     q1, q3 = np.percentile(y, [25, 75])
     iqr = q3 - q1
     threshold = q3 + iqr_multiplier * iqr
@@ -278,11 +255,8 @@ def main(argv: list[str] | None = None) -> int:
         flush=True,
     )
 
-    # Cross-validation and the final fit both operate on feasible designs
-    # only, matching surrogate.py::fit -- infeasible designs carry a penalty
-    # or partial-penalty-blend LCOW (see evaluator.py::combine_site_lcows),
-    # never a real measurement, so judging LCOW-regression calibration
-    # against them isn't meaningful regardless of how "outlying" they look.
+    # CV and the final fit use feasible designs only (matching surrogate.py::fit):
+    # penalized LCOWs aren't measurements, so calibrating against them is meaningless.
     X_feas, y_feas = X[feasible], y[feasible]
 
     print(f"Running {args.k_folds}-fold cross-validation on feasible points...", flush=True)

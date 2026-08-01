@@ -1,12 +1,6 @@
-"""Shared plotting helpers for the comparison scripts.
-
-Mirrors the conventions already established in the per-package
-``npv_heatmap.py`` / ``tornado_plot.py`` scripts (e.g.
-``solar_lumped/scripts/npv_heatmap.py``): ``RdYlGn`` + ``TwoSlopeNorm`` for
-diverging NPV colormaps, ``viridis_r`` + gray ``///``-hatched rectangles for
-infeasible payback, plus (new here) a categorical colormap helper for the
-4-config "winner" maps used by ``grid_heatmap.py``.
-"""
+"""Shared plotting helpers for the comparison scripts, following the per-package npv_heatmap
+/ tornado_plot conventions: RdYlGn + TwoSlopeNorm for NPV, viridis_r + gray ///-hatching for
+infeasible payback, plus a categorical colormap for grid_heatmap.py's winner maps."""
 
 from __future__ import annotations
 
@@ -25,13 +19,8 @@ COMPARABLE_HATCH = "///"
 
 
 def diverging_norm_centered_zero(values: np.ndarray):
-    """``TwoSlopeNorm(vcenter=0)`` sized to ``values``, guarding all-positive/all-negative grids.
-
-    Same edge-case handling as ``solar_lumped/scripts/npv_heatmap.py``'s
-    ``plot_npv_heatmap``: without the ``eps`` pad, an all-positive or
-    all-negative grid makes ``vmin == vcenter`` or ``vcenter == vmax``, which
-    ``TwoSlopeNorm`` rejects.
-    """
+    """``TwoSlopeNorm(vcenter=0)`` sized to ``values``. The ``eps`` pad is what keeps an
+    all-positive/all-negative grid from hitting vmin == vcenter, which TwoSlopeNorm rejects."""
     import matplotlib.colors as mcolors
 
     finite = values[np.isfinite(values)]

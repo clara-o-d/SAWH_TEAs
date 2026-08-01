@@ -11,7 +11,7 @@ from solar_lumped.physics import (
     parallel_plate_emissivity,
     radiative_exchange_w_m2,
 )
-from solar_lumped.physics import DeviceThermalParams, _residuals, solve_steady_thermal
+from solar_lumped.physics import _residuals, solve_steady_thermal
 from solar_lumped.physics import (
     concentration_ratio_absorption,
     concentration_ratio_desorption,

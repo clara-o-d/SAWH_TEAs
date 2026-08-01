@@ -25,12 +25,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-# ---------------------------------------------------------------------------
-# Path bootstrap (same pattern as wilson-et-al._re-creation scripts)
-# ---------------------------------------------------------------------------
+# --- Path bootstrap (same pattern as wilson-et-al._re-creation scripts) ---
 _SCRIPT = Path(__file__).resolve()
 _DIAZ_DIR = _SCRIPT.parent.parent
-_SOLAR_ROOT = _DIAZ_DIR.parent
+_SOLAR_ROOT = _DIAZ_DIR.parent.parent.parent / "solar_lumped"
 _SRC = _SOLAR_ROOT / "src"
 for _p in (_SRC, _SOLAR_ROOT):
     if str(_p) not in sys.path:
@@ -113,9 +111,7 @@ def _uptake_curve(salt_to_polymer_ratio: float) -> tuple[np.ndarray, np.ndarray]
     return _RH_GRID * 100.0, uptake
 
 
-# ---------------------------------------------------------------------------
-# Reference CSV helpers
-# ---------------------------------------------------------------------------
+# --- Reference CSV helpers ---
 
 
 def _load_ref_csv(filename: str) -> tuple[np.ndarray, np.ndarray] | None:
@@ -148,9 +144,7 @@ def _overlay_ref(
     return True
 
 
-# ---------------------------------------------------------------------------
-# Panel styling
-# ---------------------------------------------------------------------------
+# --- Panel styling ---
 
 # Salt-content series colours (panel B)
 _COL_SL0 = "#4a4a4a"

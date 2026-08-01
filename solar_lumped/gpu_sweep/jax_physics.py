@@ -1,20 +1,9 @@
 """JAX port of the Wilson quasi-steady desorption RHS (Note S1 Eqs. 1-6 + Eq. 2).
 
-Mirrors, for the ``physics_model="note_s1"`` / ``desorption_solver="quasi_steady"``
-path only (the default -- see solar_lumped/scripts/grid_param_sweep.py):
-  - solar_lumped.physics.solve_steady_thermal (scipy.optimize.root
-    "hybr" on Eqs. 1/3/4) -> replaced with a fixed-iteration Newton solve.
-  - solar_lumped.simulation._solve_m_des_coupled (scipy.brentq
-    root of m_calc(m) - m = 0) -> replaced with fixed-iteration bisection.
-  - solar_lumped.physics.dc_w_dt / dH_dt (desorption branch only).
-  - solar_lumped.physics.water_activity_from_c_w (LiCl branch only
-    -- this prototype does not port the CaCl2/MgCl2/NaCl brine_equilibrium path).
-
-All functions are pure, vmap-safe (no data-dependent Python control flow -- every
-branch is a jnp.where), and operate on float64 (jax.config.update("jax_enable_x64",
-True) is required by the caller -- c_w is O(1e4) mol/m3 and float32 loses the
-absolute precision the original atol=1e-7 assumes).
-"""
+Covers the note_s1/quasi_steady path only: scipy root/brentq solves become
+fixed-iteration Newton/bisection, and only the LiCl brine branch is ported. All
+functions are pure and vmap-safe (every branch is a jnp.where) and need float64 --
+c_w is O(1e4) mol/m3, so float32 loses the precision atol=1e-7 assumes."""
 
 from __future__ import annotations
 
@@ -123,12 +112,8 @@ def water_activity_licl_from_c_w(c_w, *, c_s, h0_ref_m, formula_weight_g_mol, te
 
 
 def parallel_plate_emissivity(eps_a, eps_b):
-    # jnp.asarray first: if eps_a/eps_b arrive as plain Python floats (e.g. a
-    # closure constant from the serial, non-batched daily-cycle path) rather
-    # than JAX arrays, "1.0 / 0.0" is eager Python division and raises
-    # ZeroDivisionError immediately -- jnp.where can't mask a branch that
-    # never got the chance to be lazy. As real arrays, "1.0 / 0.0" is a safe,
-    # lazy `inf` that jnp.where then correctly discards.
+    # jnp.asarray first: as plain Python floats, "1.0 / 0.0" raises eagerly before
+    # jnp.where can mask it; as arrays it is a lazy inf that jnp.where discards.
     eps_a = jnp.asarray(eps_a)
     eps_b = jnp.asarray(eps_b)
     return jnp.where((eps_a <= 0.0) | (eps_b <= 0.0), 0.0, 1.0 / (1.0 / eps_a + 1.0 / eps_b - 1.0))
@@ -247,14 +232,9 @@ def m_des_kg_s_m2_from_dc_w(dc_w_dt_val, *, h0_ref_m):
 
 
 class ThermalParams:
-    """Mirrors DeviceThermalParams for the note_s1/has_glass=True Atacama-baseline path.
-
-    eps_abs_ir/eps_glass_ir default to 1.0 (blackbody), which makes
-    parallel_plate_emissivity(1.0, 1.0) == 1.0 -- i.e. the default reproduces
-    the original Wilson Eqs. 3/4 cavity/blackbody approximation exactly (Case
-    1). Pass real IR emissivities to activate the modified physics (Case 2/3,
-    see device_balances.py's _residuals for the CPU-side mirror of this).
-    """
+    """Mirrors DeviceThermalParams for the note_s1/has_glass=True Atacama baseline. The
+    default eps_abs_ir/eps_glass_ir of 1.0 reproduces Wilson's Eqs. 3/4 blackbody
+    approximation (Case 1); pass real IR emissivities for Case 2/3."""
 
     def __init__(self, *, insulation_gap_m, vapor_gap_m, eps_abs, tau_glass, tilt_deg, eps_abs_ir=1.0, eps_glass_ir=1.0):
         self.insulation_gap_m = insulation_gap_m
@@ -335,13 +315,9 @@ def solve_m_des_and_thermal(
     *, c_w, h_m, t_cond_c, t_amb_c, q_solar_w_m2, h_amb, thermal: ThermalParams, mass: MassParams, gap_eff_m, x0,
     n_bisect=22,
 ):
-    """Fixed-iteration bisection root of m_calc(m) - m = 0, replacing scipy.brentq.
-
-    Brackets [0, _M_DES_BRACKET_MAX] always (the CPU code's adaptive doubling is a
-    performance optimization, not a correctness requirement -- the residual is
-    monotonically decreasing in m over the physical range, per the original comment
-    "avoids fixed-point cycling").
-    """
+    """Fixed-iteration bisection root of m_calc(m) - m = 0, replacing scipy.brentq. Always
+    brackets [0, _M_DES_BRACKET_MAX]; the residual is monotone in m over that range, so the
+    CPU path's adaptive doubling is a speed optimization, not a correctness requirement."""
     r0, x0_star, dc0, _ = _m_calc_residual(
         0.0, c_w=c_w, h_m=h_m, t_cond_c=t_cond_c, t_amb_c=t_amb_c, q_solar_w_m2=q_solar_w_m2,
         h_amb=h_amb, thermal=thermal, mass=mass, gap_eff_m=gap_eff_m, x0=x0,
@@ -374,12 +350,9 @@ def solve_m_des_and_thermal(
 
 
 def _joint_residuals(z, *, c_w, h_m, t_cond_c, t_amb_c, q_solar_w_m2, h_amb, thermal, mass, gap_eff_m):
-    """4x4 system [T_gel, T_abs, T_glass, m_des]: Eqs. 1/3/4 plus m_calc(m)-m=0,
-    solved jointly instead of an outer scalar root wrapping an inner 3x3 root.
-    Same fixed point as solve_m_des_and_thermal, ~n_iter cost instead of
-    n_bisect * n_iter (this is the fix the bisection-nesting-Newton architecture
-    needs for practical per-step cost -- see gpu_sweep/FINDINGS.md).
-    """
+    """4x4 system [T_gel, T_abs, T_glass, m_des] (Eqs. 1/3/4 plus m_calc(m)-m=0) solved
+    jointly: same fixed point as solve_m_des_and_thermal at ~n_iter cost instead of
+    n_bisect * n_iter. See gpu_sweep/FINDINGS.md."""
     x, m_des = z[:3], jnp.clip(z[3], 0.0, None)
     r_thermal = _thermal_residuals(
         x, t_cond_c=t_cond_c, t_amb_c=t_amb_c, q_solar_w_m2=q_solar_w_m2,
@@ -396,9 +369,8 @@ def solve_desorption_state_joint(
     *, c_w, h_m, t_cond_c, t_amb_c, q_solar_w_m2, h_amb, thermal: ThermalParams, mass: MassParams, gap_eff_m,
     x0, n_iter=12,
 ):
-    """Joint Newton solve of (T_gel, T_abs, T_glass, m_des); replaces
-    solve_m_des_and_thermal's bisection-wraps-Newton with a single 4x4 Newton.
-    """
+    """Joint 4x4 Newton solve of (T_gel, T_abs, T_glass, m_des), replacing
+    solve_m_des_and_thermal's bisection-wraps-Newton."""
     z0 = jnp.concatenate([x0, jnp.array([0.0])])
 
     def body(z, _):
@@ -420,9 +392,8 @@ def solve_desorption_state_joint(
     z_final, _ = jax.lax.scan(body, z0, None, length=n_iter)
     x_star, m_star = z_final[:3], jnp.clip(z_final[3], 0.0, None)
 
-    # No-desorption branch: if the equilibrium m_des would be negative, the
-    # physical answer is m_des=0 with thermal state solved at m_des=0 (mirrors
-    # solve_m_des_and_thermal's m_at_zero<=0 short-circuit).
+    # No-desorption branch: a negative equilibrium m_des means m_des=0 with the thermal
+    # state solved there (mirrors solve_m_des_and_thermal's m_at_zero<=0 short-circuit).
     x_at_zero, _ = solve_steady_thermal(
         t_cond_c=t_cond_c, t_amb_c=t_amb_c, q_solar_w_m2=q_solar_w_m2, m_des=0.0,
         h_amb=h_amb, params=thermal, h_m=h_m, gap_eff_m=gap_eff_m, x0=x0,
@@ -450,11 +421,8 @@ def desorption_rhs(
     fin_area_ratio,
     x0_guess,
 ):
-    """dy/dt for y = [c_w, H, T_cond] -- the 3-state quasi_steady desorption ODE
-    integrated by scipy.integrate.solve_ivp(method='Radau') in
-    ode_system.py::_integrate_desorption. Matches evaluate_coupled_rates's
-    desorption branch exactly (Eqs. 1-6 + Eq. 2).
-    """
+    """dy/dt for y = [c_w, H, T_cond]: the 3-state quasi_steady desorption ODE, matching
+    evaluate_coupled_rates's desorption branch exactly (Eqs. 1-6 + Eq. 2)."""
     c_w, h_m_raw, t_cond = y[0], y[1], y[2]
     h_m = jnp.clip(h_m_raw, h0_ref_m, None)
     t_cond_c = clamp_temperature_c(t_cond)
@@ -483,10 +451,8 @@ def desorption_rhs(
 
 
 # ---- Absorption phase (Note S1, no thermal root-solve -- T_gel == T_amb) ----
-# Wilson Note S2 PAM-LiCl DVS isotherm (RH %, gravimetric uptake g/g), sorted by RH
-# ascending, verbatim from data/materials/PAM-LiCL_isotherm.csv. Interpolation for
-# the inverse (uptake -> RH) lookup replicates salt_properties.py's np.interp
-# exactly, including its non-monotonic first two uptake points -- not "fixed" here.
+# Wilson Note S2 PAM-LiCl DVS isotherm (RH %, g/g), verbatim from PAM-LiCL_isotherm.csv.
+# The inverse lookup replicates np.interp exactly, non-monotonic first two points included.
 _DVS_RH_PCT = jnp.array([
     0.0, 4.912669270074408, 9.915874958714616, 14.900817936313652,
     19.908297876474123, 24.81513862174817, 29.92286918847506, 34.83048707038915,
@@ -553,10 +519,8 @@ def dc_dh_absorption(c_w, *, t_gel_c, rh, h_m, mass: "MassParams", salt_to_polym
 
 
 def absorption_rhs(y, *, t_amb_c, rh, h0_ref_m, h_max_m, mass: "MassParams", salt_to_polymer_ratio):
-    """dy/dt for y = [c_w, H] -- the 2-state absorption ODE (ode_system.py's
-    _integrate_absorption). T_gel == T_amb during open absorption (fast gel
-    thermal storage, Note S1 Eq. S1) -- no thermal root-solve needed here.
-    """
+    """dy/dt for y = [c_w, H]: the 2-state absorption ODE. T_gel == T_amb during open
+    absorption (Note S1 Eq. S1), so no thermal root-solve is needed."""
     c_w, h_m_raw = y[0], y[1]
     h_m = jnp.maximum(h_m_raw, h0_ref_m)
     t_gel = t_amb_c

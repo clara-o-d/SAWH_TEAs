@@ -21,12 +21,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-# ---------------------------------------------------------------------------
-# Path bootstrap
-# ---------------------------------------------------------------------------
+# --- Path bootstrap ---
 _SCRIPT = Path(__file__).resolve()
 _WILSON_DIR = _SCRIPT.parent.parent          # wilson-et-al._re-creation/
-_SOLAR_ROOT = _WILSON_DIR.parent             # solar_lumped/
+_SOLAR_ROOT = _WILSON_DIR.parent.parent.parent / "solar_lumped"
 _SRC = _SOLAR_ROOT / "src"
 for _p in (_SRC, _SOLAR_ROOT):
     if str(_p) not in sys.path:
@@ -48,9 +46,7 @@ _OUT_DIR.mkdir(parents=True, exist_ok=True)
 _DATA_PATH = _OUT_DIR / "figure2_data.pkl"
 _REF_DIR = _WILSON_DIR / "reference" / "figure2"
 
-# ---------------------------------------------------------------------------
-# Data loading
-# ---------------------------------------------------------------------------
+# --- Data loading ---
 
 def load_figure2_data(path: Path = _DATA_PATH) -> dict:
     if not path.exists():
@@ -62,9 +58,7 @@ def load_figure2_data(path: Path = _DATA_PATH) -> dict:
         return pickle.load(fh)
 
 
-# ---------------------------------------------------------------------------
-# Plotting helpers
-# ---------------------------------------------------------------------------
+# --- Plotting helpers ---
 
 _TEAL_PALETTE = [
     "#1a5c5c", "#1f7a7a", "#2a9d8f", "#4db8b8", "#85d1d1"

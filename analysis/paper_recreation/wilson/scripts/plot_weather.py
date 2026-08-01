@@ -23,12 +23,10 @@ import matplotlib.pyplot as plt
 import matplotlib.transforms as mtransforms
 import numpy as np
 
-# ---------------------------------------------------------------------------
-# Path bootstrap
-# ---------------------------------------------------------------------------
+# --- Path bootstrap ---
 _SCRIPT = Path(__file__).resolve()
 _WILSON_DIR = _SCRIPT.parent.parent
-_SOLAR_ROOT = _WILSON_DIR.parent
+_SOLAR_ROOT = _WILSON_DIR.parent.parent.parent / "solar_lumped"
 _SRC = _SOLAR_ROOT / "src"
 for _p in (_SRC, _SOLAR_ROOT):
     if str(_p) not in sys.path:
@@ -42,7 +40,6 @@ from solar_lumped.plotting import (
     plot_defaults_slides,
     print_figure,
     ref_marker_kwargs,
-    scaled_fontsize,
     style_axes,
 )
 
@@ -62,9 +59,7 @@ _ATACAMA_DURATION_H = 24.0
 _SUNRISE_H = 13.5          # ~07:30 from 18:00 origin
 
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
+# --- Helpers ---
 
 def _load_csv(path: Path) -> tuple[np.ndarray, np.ndarray]:
     data = np.loadtxt(path, delimiter=",")
@@ -107,9 +102,7 @@ def _hours_to_clock_label(h_from_6pm: float) -> str:
     return f"{hour - 12} pm"
 
 
-# ---------------------------------------------------------------------------
-# Cambridge
-# ---------------------------------------------------------------------------
+# --- Cambridge ---
 
 def plot_cambridge_weather() -> Path:
     solar_t, solar_v = _load_csv(_REF_WEATHER / "Cambridge_solar_W_m2.csv")
@@ -198,9 +191,7 @@ def plot_cambridge_weather() -> Path:
     return out
 
 
-# ---------------------------------------------------------------------------
-# Atacama (Fig. 4B style)
-# ---------------------------------------------------------------------------
+# --- Atacama (Fig. 4B style) ---
 
 def plot_atacama_weather() -> Path:
     rh_t, rh_v = _load_csv(_REF_WEATHER / "Atacama_RH.csv")
@@ -323,9 +314,7 @@ def plot_atacama_weather() -> Path:
     return out
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+# --- Main ---
 
 def main() -> None:
     print("Wilson weather validation plots")

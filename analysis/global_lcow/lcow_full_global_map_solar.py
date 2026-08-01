@@ -3,13 +3,9 @@
 
 Requires optional deps:  pip install -e ".[maps]"  (Shapely/Cartopy for land mask)
 
-Unlike ``lcow_random_global_map.py``, sites are deterministic grid nodes on land
-(default 5° spacing). Each site fetches weather once and simulates it with LiCl
-(default; pass ``--salts`` for a feasibility-fallback list, tried in order until
-one is feasible), writes CSVs, and optionally renders an LCOW color map. Sites
-run in parallel worker processes (``--workers``, default cpu_count - 1).
-
-Plot uses uniform markers colored by LCOW (no salt-shape legend).
+Sites are deterministic grid nodes on land (default 5° spacing). Each fetches weather once,
+simulates with LiCl (or ``--salts`` tried in order until feasible), writes CSVs, and
+optionally renders an LCOW map. Runs in parallel (``--workers``, default cpu_count - 1).
 
 Examples::
 
@@ -243,12 +239,8 @@ def _feasible_mask(lc: np.ndarray, infeasible: np.ndarray) -> np.ndarray:
 
 
 class LogPowerNorm(mcolors.Normalize):
-    """Log-normalize to [0, 1], then apply ``t ** gamma``.
-
-    gamma < 1 spreads out the low-value end of the color scale (more
-    contrast among cheap sites) at the cost of compressing the high end;
-    gamma > 1 does the opposite. gamma = 1 is a plain log norm.
-    """
+    """Log-normalize to [0, 1], then apply ``t ** gamma``: gamma < 1 spreads the low end
+    (more contrast among cheap sites) and compresses the high end; gamma = 1 is plain log."""
 
     def __init__(self, vmin: float, vmax: float, gamma: float = 1.0, clip: bool = True):
         super().__init__(vmin=vmin, vmax=vmax, clip=clip)
@@ -287,11 +279,8 @@ def _build_regular_grid(
     values: np.ndarray,
     step_deg: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Snap scattered (lat, lon, value) samples onto a regular step_deg grid.
-
-    Returns (lat_vals, lon_vals, grid) where grid has shape
-    (len(lat_vals), len(lon_vals)) and NaN where no sample landed.
-    """
+    """Snap scattered (lat, lon, value) samples onto a regular step_deg grid, returning
+    (lat_vals, lon_vals, grid) with NaN where no sample landed."""
     snap = lambda a: np.round(np.round(a / step_deg) * step_deg, 6)  # noqa: E731
     lat_snap = snap(lats)
     lon_snap = snap(lons)
@@ -436,9 +425,8 @@ def plot_lcow_color_map(
     mappable = sc if sc is not None else plt.matplotlib.cm.ScalarMappable(norm=norm, cmap="viridis")
     cbar = fig.colorbar(mappable, ax=ax, fraction=0.03, pad=0.04)
     if log_scale:
-        # Tick at each base-e "decade" (e^k) between vmin and vmax, but place the
-        # tick mark at norm(value) — under the gamma power-law this spaces ticks
-        # unevenly, visually showing where contrast has been stretched or compressed.
+        # Tick at each base-e "decade" (e^k) but placed at norm(value), so the uneven
+        # spacing shows where the gamma power-law stretched or compressed contrast.
         log_min, log_max = norm._log_bounds()
         k_lo, k_hi = math.ceil(log_min), math.floor(log_max)
         if k_hi <= k_lo:

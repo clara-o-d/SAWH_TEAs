@@ -295,7 +295,6 @@ def build() -> Path:
         ws_s.cell(row=br, column=col, value=h)
     _style_header_row(ws_s, br, 3)
     br += 1
-    br_start = br
     for label, annual_usd, usd_per_m3 in zip(
         [x[0] for x in metrics.lcow_breakdown_annual],
         [x[1] for x in metrics.lcow_breakdown_annual],

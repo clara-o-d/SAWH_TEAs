@@ -52,7 +52,6 @@ def _gpu_memory_used_mb() -> str:
 
 
 def monthly_mean_profiles(df):
-    import pandas as pd
 
     out = []
     for m in sorted(set(df.index.month)):

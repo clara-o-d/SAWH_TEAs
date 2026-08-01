@@ -28,12 +28,8 @@ logger = logging.getLogger(__name__)
 
 StoppedReason = Literal["budget", "stalled"]
 
-# Below this many feasible observations, the LCOW GP can't be fit at all
-# (surrogate.py::fit requires >=2) -- fall back to pure Latin-hypercube
-# exploration instead of EI-based proposal until enough accumulate. Should be
-# rare (LHS init over a reasonable design space normally finds several
-# feasible points immediately), but a design space where most of the box is
-# infeasible shouldn't crash the optimizer, it should just explore longer.
+# Below this many feasible observations the LCOW GP can't be fit, so proposal falls back
+# to pure LHS exploration -- a mostly-infeasible box should explore longer, not crash.
 MIN_FEASIBLE_TO_FIT = 2
 
 
@@ -51,16 +47,11 @@ class BayesOptConfig:
     stall_rounds: int = 3
     resolution: str = "monthly"
     weather_cache_dir: str = ".weather_cache"
-    # Absorber/glass IR emissivity variant (design_space.CASE_EPS_IR) -- see
-    # to_device_config_kwargs. "case2" (default) matches solar_lumped's own
-    # base-case physics; "case1" reproduces Wilson's original blackbody/cavity
-    # approximation instead.
+    # IR emissivity variant (design_space.CASE_EPS_IR): "case2" matches solar_lumped's
+    # base case, "case1" Wilson's original blackbody/cavity approximation.
     case: str = "case2"
-    # Inner differential_evolution search budget for each EI proposal (see
-    # acquisition.propose_next) -- defaults match acquisition.py's own
-    # (1000/40), overridable here so a cheap synthetic-objective test doesn't
-    # have to pay real-problem DE cost just to exercise the loop's control
-    # flow (see tests/test_bayesopt_loop_synthetic.py).
+    # Inner differential_evolution budget per EI proposal; matches acquisition.py's
+    # defaults (1000/40) but overridable so synthetic tests don't pay real DE cost.
     de_maxiter: int = 1000
     de_popsize: int = 40
 
@@ -71,10 +62,8 @@ class BayesOptResult:
     best: DesignEvalResult
     surrogate: SurrogateState
     stopped_reason: StoppedReason
-    # One dict per differential_evolution call made during EI-based proposal
-    # (see acquisition.propose_next's `record` param) -- success/nit/maxiter
-    # for each, tagged with the round it was proposed in. Empty for rounds
-    # that fell back to pure LHS exploration (no DE involved).
+    # One success/nit/maxiter dict per differential_evolution call, tagged with its round.
+    # Empty for rounds that fell back to pure LHS exploration.
     de_diagnostics: list[dict]
 
 
@@ -86,12 +75,8 @@ def _to_xyf(results: list[DesignEvalResult]) -> tuple[np.ndarray, np.ndarray, np
 
 
 def _try_fit(state: SurrogateState, *, seed: int) -> tuple[SurrogateState, bool]:
-    """Fit the LCOW GP if there are enough feasible points yet, and the
-    feasibility classifier whenever both classes have been observed (a
-    no-op, clf left as None, otherwise -- see fit_feasibility). Returns
-    (state, fitted) so the caller knows whether EI-based proposal is usable
-    this round or it should still fall back to exploration.
-    """
+    """Fit the LCOW GP if enough feasible points exist, and the classifier once both classes
+    are observed. Returns (state, fitted) so the caller knows if EI proposal is usable."""
     state = fit_feasibility(state, seed=seed)
     if state.n_feasible < MIN_FEASIBLE_TO_FIT:
         return state, False
@@ -153,10 +138,8 @@ def run_bayesopt(cfg: BayesOptConfig, run_dir: str | Path) -> BayesOptResult:
                 d["round"] = round_idx
             de_diagnostics.extend(round_record)
         else:
-            # Not enough feasible observations yet to fit the LCOW GP --
-            # keep exploring blindly (this design space region's feasibility
-            # is still unknown) rather than proposing via a surrogate that
-            # can't exist yet.
+            # Too few feasible observations to fit the LCOW GP -- keep exploring blindly
+            # rather than proposing from a surrogate that can't exist yet.
             batch = list(
                 latin_hypercube_design(batch_n, cfg.bounds, seed=cfg.seed + len(history), reject_gap_degenerate=True)
             )
@@ -172,9 +155,8 @@ def run_bayesopt(cfg: BayesOptConfig, run_dir: str | Path) -> BayesOptResult:
         if fitted and math.isfinite(best_so_far) and best_so_far != 0.0:
             rel_improve = (best_so_far - new_best) / abs(best_so_far)
         else:
-            # Still bootstrapping (or just became fittable this round) --
-            # don't let the stall counter fire off an undefined/meaningless
-            # comparison against the pre-fit y_best.
+            # Still bootstrapping: don't let the stall counter compare against a
+            # meaningless pre-fit y_best.
             rel_improve = 1.0
         stall_count = 0 if rel_improve >= cfg.stall_rel_tol else stall_count + 1
         best_so_far = new_best

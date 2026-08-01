@@ -1,18 +1,8 @@
 #!/usr/bin/env python3
-"""Second sanity baseline alongside baseline_random_search.py: does the
-Bayesian optimizer actually beat a simple exhaustive grid sweep over the
-same 6-D design space (the same kind of brute-force full-factorial sweep
-solar_lumped/scripts/grid_param_sweep.py runs on Sherlock, just over
-sawh_bayesopt's own design variables/bounds instead of solar_lumped's)?
-
-Grid: 2 levels (bounds.lo, bounds.hi) per design variable, full factorial
-across all 6 variables = 2**6 = 64 combinations -- the corners of the design
-hypercube. Deliberately not a finer grid: a brute-force sweep's whole
-argument is exhaustive coverage at whatever resolution is affordable, and
-64 combinations is already close to (and, being a batched single JAX call,
-far cheaper to run than) a real BayesOpt run's evaluation budget, making it
-a fair apples-to-apples comparison rather than either starving the grid or
-letting it cheat with a much larger budget than BayesOpt got.
+"""Sanity baseline alongside baseline_random_search.py: does BayesOpt beat an exhaustive
+grid sweep over the same 6-D space? Grid is 2 levels (bounds.lo/hi) x 6 variables = 64
+hypercube corners -- close to a real BayesOpt evaluation budget, so neither side is starved
+or given extra budget.
 
 Usage:
     python3 scripts/diagnostics/grid_search_baseline.py \\
@@ -74,12 +64,8 @@ def main(argv: list[str] | None = None) -> int:
 
     X = full_factorial_design(bounds, levels_per_dim=args.levels_per_dim)
     n_total = len(X)
-    # Full-factorial order (last variable fastest) has no bearing on the
-    # final best (it's exhaustive either way), but a "reveal in grid order"
-    # best-so-far curve would look artificially structured/steppy in a way a
-    # real brute-force sweep run in a fixed order also would -- shuffle with
-    # a fixed seed instead so the curve reads as "typical grid-sweep order",
-    # not a specific arbitrary axis-priority artifact.
+    # Exhaustive either way, so grid order can't change the final best -- but revealing in
+    # grid order makes a steppy best-so-far curve, so shuffle with a fixed seed instead.
     rng = np.random.default_rng(args.seed)
     X = X[rng.permutation(n_total)]
 

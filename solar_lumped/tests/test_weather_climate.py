@@ -14,7 +14,6 @@ from solar_lumped.weather import profile_from_day_df
 
 def _synthetic_year_15min() -> pd.DataFrame:
     index = pd.date_range("2024-01-01", "2024-01-02 23:45", freq="15min")[:-1]
-    n = len(index)
     hours = index.hour + index.minute / 60.0
     return pd.DataFrame(
         {

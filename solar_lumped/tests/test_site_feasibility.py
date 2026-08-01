@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import math
 
 from solar_lumped.simulation import DeviceConfig
 from solar_lumped.simulation import (

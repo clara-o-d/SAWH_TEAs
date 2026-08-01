@@ -1,13 +1,8 @@
-"""Full daily-cycle JAX integrator (absorption -> desorption) and the Aitken
-steady-periodic-state search on top of it, matching ode_system.py's
-run_daily_cycle / find_cyclic_state for the quasi_steady desorption solver.
+"""Full daily-cycle JAX integrator plus the Aitken steady-periodic-state search, matching
+run_daily_cycle / find_cyclic_state for the quasi_steady solver.
 
-Absorption and desorption are each integrated with diffrax.Tsit5 (both proved
-non-stiff at monthly-mean-day resolution -- see FINDINGS.md). The Aitken Delta^2
-loop itself stays a thin Python loop calling one jitted daily-cycle function
-twice per round, exactly mirroring ode_system.py::find_cyclic_state's structure
--- it's only ~3-6 rounds, not worth fusing into the JIT boundary.
-"""
+Both phases use diffrax.Tsit5 (non-stiff at monthly-mean-day resolution, see FINDINGS.md).
+The Aitken loop stays a thin Python loop -- only ~3-6 rounds, not worth fusing into JIT."""
 
 from __future__ import annotations
 
@@ -31,11 +26,8 @@ def _phase_arrays(phase_profile):
 
 
 def make_daily_cycle_fn(profile, config):
-    """Build a single jax.jit-able function y0 -> (yield_kg, eta, c_w_end, h_end)
-    for one (weather profile, device config) pair. Compile once, reuse across
-    Aitken rounds and (eventually) vmap across a batch of configs sharing the
-    same profile shape.
-    """
+    """Build a jax.jit-able y0 -> (yield_kg, eta, c_w_end, h_end) for one (profile, config)
+    pair: compiled once, reused across Aitken rounds and vmappable over a batch."""
     t_amb_abs, rh_abs, _solar_abs, h_amb_abs, dt_abs, n_abs = _phase_arrays(profile.absorption)
     t_amb_des, _rh_des, solar_des, h_amb_des, dt_des, n_des = _phase_arrays(profile.desorption)
 
@@ -75,15 +67,9 @@ def make_daily_cycle_fn(profile, config):
         return dy
 
     def des_vector_field(t, y, args):
-        """y = [c_w, H, T_cond, W] -- W (cumulative desorbed water, kg/m^2) is
-        integrated directly (dW/dt = m_des) instead of being reconstructed
-        afterward from a densely-saved trajectory. Densely saving every step and
-        recomputing m_des via a second vmap over all saved points is what
-        blew up GPU memory at large batch sizes (see FINDINGS.md Result 8/9) --
-        vmapping *that* over the batch axis too meant (batch x num_saved_points)
-        parallel Newton solves materialized at once, ~90M-wide at the full grid
-        size. Integrating W as a state avoids ever needing the dense trajectory.
-        """
+        """y = [c_w, H, T_cond, W], with cumulative water W integrated directly (dW/dt =
+        m_des). Reconstructing it from a dense trajectory needs a second vmap that, under
+        the batch vmap, materializes ~90M parallel Newton solves (FINDINGS.md 8/9)."""
         i = idx_des(t)
         t_amb_c = t_amb_des[i]
         q_solar = solar_des[i]
@@ -141,10 +127,8 @@ def make_daily_cycle_fn(profile, config):
 def find_cyclic_state_jax(
     daily_cycle_fn, *, c_w_initial, h_initial, tol=1e-6, max_rounds=10, stall_ratio=0.5, stall_rounds=2,
 ):
-    """Aitken Delta^2 steady-periodic-state search -- same algorithm and
-    stall/period-2 fallback as ode_system.py::find_cyclic_state, calling the
-    jitted JAX daily-cycle function instead of the CPU one.
-    """
+    """Aitken Delta^2 steady-periodic-state search: same algorithm and stall/period-2
+    fallback as find_cyclic_state, on the jitted JAX daily cycle."""
     x = np.array([c_w_initial, h_initial], dtype=float)
 
     def step(state):
@@ -182,17 +166,9 @@ def find_cyclic_state_jax(
     return float(x[0]), float(x[1])
 
 
-# ---------------------------------------------------------------------------
-# Batched, cross-length daily cycle -- vmaps the daily cycle across a batch of
-# (weather profile, device config) pairs whose real absorption/desorption
-# lengths differ (e.g. different months at one site, or different sites).
-# diffrax needs one static t1 shared by the whole batch, so every profile is
-# padded to the batch's max length with its own last value repeated, and the
-# vector field is masked to freeze the state (dy=0) once real time runs out --
-# equivalent to just stopping at each instance's own real end, but with a
-# uniform loop trip count that vmap/XLA can compile once. See FINDINGS.md
-# "Result 7" for the accuracy check on this masking approach.
-# ---------------------------------------------------------------------------
+# --- Batched cross-length daily cycle ---
+# diffrax needs one static t1 per batch, so profiles are padded to the batch max and the
+# vector field freezes state (dy=0) past each instance's real end. See FINDINGS.md 7.
 
 
 def _pad_to(arr, n_max):
@@ -204,11 +180,8 @@ def _pad_to(arr, n_max):
 
 
 def build_batch_arrays(profiles, configs):
-    """Stack a list of (DailyWeatherProfile, DeviceConfig) pairs into padded
-    JAX arrays for make_batched_daily_cycle_fn. Every profile's own PHASE_DT_S
-    is assumed equal (always 100s in this codebase -- see weather/profiles.py);
-    only the step *count* varies by real day length.
-    """
+    """Stack (DailyWeatherProfile, DeviceConfig) pairs into padded JAX arrays. All profiles
+    share PHASE_DT_S (always 100s here); only the step count varies by day length."""
     n_abs_max = max(len(p.absorption.temperature_c) for p in profiles)
     n_des_max = max(len(p.desorption.temperature_c) for p in profiles)
     dt = profiles[0].absorption.dt_s
@@ -250,10 +223,8 @@ def build_batch_arrays(profiles, configs):
 
 
 def make_batched_daily_cycle_fn(batch, dt, n_abs_max, n_des_max):
-    """Build a jax.jit(jax.vmap(...))-compiled function
-    (c_w_initial, h_initial) [each shape (batch,)] -> (yield, eta, c_w_end, h_end)
-    [each shape (batch,)], compiled once for the whole batch regardless of size.
-    """
+    """Build a jax.jit(jax.vmap(...)) function (c_w_initial, h_initial) -> (yield, eta,
+    c_w_end, h_end), all shape (batch,), compiled once regardless of batch size."""
 
     def single(
         c_w_initial, h_initial,
@@ -290,15 +261,9 @@ def make_batched_daily_cycle_fn(batch, dt, n_abs_max, n_des_max):
             return jnp.where(i < n_abs_real, dy, 0.0)
 
         def des_vf(t, y, args):
-            """y = [c_w, H, T_cond, W] -- W integrated directly (dW/dt = m_des)
-            instead of densely saving the trajectory and recomputing m_des via a
-            second vmap over every saved point. That second vmap, combined with
-            this whole function already being vmapped over the batch axis, made
-            a (batch x num_saved_points) parallel Newton-solve-with-Jacobian
-            computation -- ~90M-wide at the full 189,675-instance grid, which is
-            what actually exhausted GPU memory (not a hardware batch-size limit).
-            See FINDINGS.md Result 9.
-            """
+            """y = [c_w, H, T_cond, W], with W integrated directly (dW/dt = m_des). The
+            dense-trajectory alternative needs a second vmap that, nested inside this
+            batch vmap, exhausted GPU memory at ~90M-wide (FINDINGS.md 9)."""
             i = idx_des(t)
             t_amb_c = t_amb_des[i]
             q_solar = solar_des[i]
@@ -358,16 +323,10 @@ def make_batched_daily_cycle_fn(batch, dt, n_abs_max, n_des_max):
 def find_cyclic_state_batched(
     daily_cycle_fn, *, c_w_initial, h_initial, tol=1e-6, max_rounds=8,
 ):
-    """Batched Aitken Delta^2 search using the handoff doc's "fixed number of
-    rounds for every instance" strategy: every instance in the batch runs the
-    same max_rounds (no early exit -- that's what makes this vmap-friendly),
-    then a single vectorized final pass decides, per instance, whether the
-    last round's extrapolated state is trustworthy (rel_step < tol) or whether
-    to fall back to averaging the last two rounds (covers both slow-but-real
-    convergence and period-2 stalls, per ode_system.py::find_cyclic_state's own
-    fallback) -- a simplified, vectorized stand-in for that function's
-    multi-round stall counter, not a byte-for-byte port of it.
-    """
+    """Batched Aitken Delta^2 search: every instance runs the same max_rounds (no early
+    exit, which is what makes it vmap-friendly), then one vectorized pass either trusts the
+    extrapolated state (rel_step < tol) or averages the last two rounds. A simplified
+    stand-in for find_cyclic_state's stall counter, not a byte-for-byte port."""
     c_w_initial = np.asarray(c_w_initial, dtype=float)
     h_initial = np.asarray(h_initial, dtype=float)
     x = np.stack([c_w_initial, h_initial], axis=1)

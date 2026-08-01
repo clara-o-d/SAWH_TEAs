@@ -8,7 +8,6 @@ desorption, copper condenser, custom Nu).  Digitized-curve agreement is best wit
 
   Physics:   Note S1 (Hollands gap, h_des, U_gel, Al condenser, A_r·h_amb)
   Schedule:  12 h absorption + 12 h desorption @ 100 s steps
-  Solver:    segregated (COMSOL-style BDF on gel/condenser; algebraic glass/abs)
   Baseline:  T_amb=25 °C, Q_solar=600 W/m², RH=0.5, h_amb=10 W/m²K,
              H₀=4 mm, L_g=40 mm, ε_abs=0.95, τ_glass=0.9, A_r=7.1
 
@@ -28,12 +27,10 @@ from typing import NamedTuple
 
 import numpy as np
 
-# ---------------------------------------------------------------------------
-# Path bootstrap
-# ---------------------------------------------------------------------------
+# --- Path bootstrap ---
 _SCRIPT = Path(__file__).resolve()
 _WILSON_DIR = _SCRIPT.parent.parent          # wilson-et-al._re-creation/
-_SOLAR_ROOT = _WILSON_DIR.parent             # solar_lumped/
+_SOLAR_ROOT = _WILSON_DIR.parent.parent.parent / "solar_lumped"
 _SRC = _SOLAR_ROOT / "src"
 for _p in (_SRC, _SOLAR_ROOT):
     if str(_p) not in sys.path:
@@ -49,7 +46,7 @@ from solar_lumped.physics import (
     TILT_DEG,
     DeviceThermalParams,
 )
-from solar_lumped.simulation import DeviceConfig, register_desorption_solver_cli
+from solar_lumped.simulation import DeviceConfig
 from solar_lumped.simulation import run_daily_cycle
 from solar_lumped.weather import baseline_profile
 
@@ -57,9 +54,7 @@ _OUT_DIR = _WILSON_DIR / "outputs" / "figure2"
 _OUT_DIR.mkdir(parents=True, exist_ok=True)
 _DATA_PATH = _OUT_DIR / "figure2_data.pkl"
 
-# ---------------------------------------------------------------------------
-# Wilson Fig. 2 / Methods + Table S3 baseline
-# ---------------------------------------------------------------------------
+# --- Wilson Fig. 2 / Methods + Table S3 baseline ---
 _T_AMB_C = 25.0
 _RH = 0.5
 _Q_SOLAR_W_M2 = 600.0
@@ -67,7 +62,6 @@ _H_AMB = 10.0
 _H_AMB_LO = 7.5
 _H_AMB_HI = 12.5
 
-_DESORPTION_SOLVER = "segregated"
 _H0_MM = H0_M * 1000.0
 _LG_MM = L_G_M * 1000.0
 _A_R = FIN_AREA_RATIO
@@ -113,7 +107,6 @@ def make_config(
         fin_area_ratio=A_r,
         tilt_deg=TILT_DEG,
         thermal=thermal,
-        desorption_solver=_DESORPTION_SOLVER,  # type: ignore[arg-type]
     )
 
 
@@ -381,18 +374,13 @@ def save_figure2_data(
 
 def main() -> Path:
     import argparse
-    global _DESORPTION_SOLVER
-
     parser = argparse.ArgumentParser(
         description="Wilson Figure 2 — Table S3 / Note S1 parametric sweep data"
     )
-    register_desorption_solver_cli(parser, default="segregated")
-    args = parser.parse_args()
-    _DESORPTION_SOLVER = args.desorption_solver
+    parser.parse_args()
 
     print("Wilson Figure 2 data generation — Table S3 / Note S1 model")
     print("=" * 60)
-    print(f"  desorption_solver = {_DESORPTION_SOLVER}")
     print(f"  H0={_H0_MM} mm, L_g={_LG_MM} mm, Q_solar={_Q_SOLAR_W_M2} W/m², T_amb={_T_AMB_C} °C")
 
     print("\nRunning panel B (optical properties)…")

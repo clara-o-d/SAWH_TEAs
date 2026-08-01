@@ -3,11 +3,9 @@
 
 Requires optional deps:  pip install -e ".[maps]"  (Shapely/Cartopy for land mask)
 
-Unlike ``lcow_random_global_map.py``, sites are deterministic grid nodes on land
-(default 5° spacing). Each site fetches weather once, simulates each candidate salt,
-picks the lowest feasible LCOW, writes CSVs, and optionally renders an LCOW color map.
-
-Plot uses uniform markers colored by LCOW (no salt-shape legend).
+Sites are deterministic grid nodes on land (default 5° spacing). Each fetches weather once,
+simulates every candidate salt, keeps the lowest feasible LCOW, writes CSVs, and optionally
+renders an LCOW map.
 
 Examples::
 

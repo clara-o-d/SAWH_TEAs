@@ -1,10 +1,5 @@
-"""Device design-variable bounds, normalization, and space-filling sampling.
-
-Bounds are reused from what solar_lumped has already explored/documented as
-sensible ranges (scripts/parameter_sweep.py::make_sweep_params,
-data/economics/lcow_economic_params.csv's hydrogel_thickness_min/max_m), not
-invented -- see docs/design_notes.md for the per-variable provenance.
-"""
+"""Device design-variable bounds, normalization, and space-filling sampling. Bounds come
+from solar_lumped's documented ranges; see docs/design_notes.md for provenance."""
 
 from __future__ import annotations
 
@@ -26,26 +21,15 @@ VAR_ORDER: tuple[str, ...] = (
     "salt_to_polymer_ratio",
 )
 
-# Wilson's ~7mm thermobuoyancy/transport floor on the *effective* vapor gap
-# (VAPOR_GAP_TRANSPORT_MIN_M); used only to avoid wasting expensive
-# initial samples on designs the physics already handles gracefully as
-# near-zero yield.
+# Wilson's ~7mm transport floor on the effective vapor gap; used only to avoid spending
+# initial samples on designs the physics already returns near-zero yield for.
 VAPOR_GAP_TRANSPORT_MIN_M: float = _VAPOR_GAP_TRANSPORT_MIN_M
 
-# Absorber/glass IR emissivity pairs for solar_lumped's modified Eqs. 3/4
-# radiative-exchange term (device_balances.py::DeviceThermalParams.eps_abs_ir/
-# eps_glass_ir), matching gpu_sweep/run_gpu_sweep.py's --eps-abs-ir/
-# --eps-glass-ir CLI convention exactly (see gpu_sweep_handoff.md's Case
-# table): case2 ("selective surface") is solar_lumped's base case as of
-# 2026-07 (DeviceConfig.thermal_params()'s own default); case1 (explicit
-# 1.0, 1.0) reproduces Wilson's original blackbody/cavity approximation
-# exactly; case3 is the idealized optical-material-limits variant. case1 is
-# encoded as explicit floats, not (None, None) -- device_balances.py's
-# `_residuals` treats explicit (1.0, 1.0) and (None, None) identically
-# (parallel_plate_emissivity(1.0, 1.0) == 1.0 == the blackbody branch's
-# eps_ag/eps_ga), so this is numerically a no-op vs. the pre-2026-07 (None,
-# None) encoding and does not invalidate historical case1 cache.jsonl
-# entries -- see evaluator.py::design_vector_hash.
+# Absorber/glass IR emissivity pairs for the modified Eqs. 3/4 radiative term, matching
+# run_gpu_sweep.py's --eps-abs-ir/--eps-glass-ir: case2 (selective surface) is the base
+# case, case1 (1.0, 1.0) is Wilson's blackbody/cavity approximation, case3 the idealized
+# optical limit. case1 uses explicit floats -- numerically identical to the old (None,
+# None), so historical case1 cache.jsonl entries stay valid.
 CASE_EPS_IR: dict[str, tuple[float | None, float | None]] = {
     "case1": (1.0, 1.0),
     "case2": (EPS_ABS_IR_CASE2, EPS_GLASS_IR_CASE2),
@@ -55,16 +39,9 @@ CASE_EPS_IR: dict[str, tuple[float | None, float | None]] = {
 
 @dataclass(frozen=True, slots=True)
 class DesignBounds:
-    """(low, high) box bounds for each of the 6 v1 design variables.
-
-    No condenser_thickness_m dimension: economics/lcow.py charges a flat
-    condenser BOM cost regardless of thickness (a free cost-side lever with
-    no downside), and the JAX gpu_sweep fast path this package evaluates
-    against (see evaluator.py) hardcodes condenser thermal mass at Table
-    S3's constant rather than taking it as a per-instance input -- it was
-    never a real physics knob on that path. DeviceConfig's own default
-    already matches that constant, so simply not setting it is correct.
-    """
+    """(low, high) box bounds for the 6 v1 design variables. No condenser_thickness_m:
+    LCOW charges a flat condenser BOM cost and the JAX fast path hardcodes condenser
+    thermal mass at the Table S3 constant, which is already DeviceConfig's default."""
 
     hydrogel_thickness_m: tuple[float, float] = (0.001, 0.010)
     vapor_gap_m: tuple[float, float] = (0.007, 0.060)
@@ -83,18 +60,10 @@ def bounds_array(bounds: DesignBounds) -> np.ndarray:
 
 
 def to_device_config_kwargs(x: np.ndarray, *, case: str = "case2") -> dict[str, Any]:
-    """Map an unnamed VAR_ORDER-ordered vector to DeviceConfig field names.
-
-    ``case`` selects the absorber/glass IR emissivity pair (CASE_EPS_IR) for
-    solar_lumped's modified Eqs. 3/4 radiative exchange; default "case2"
-    matches solar_lumped's own base case (DeviceConfig.thermal_params()).
-    Every case, including "case1", gets an explicit "thermal" kwarg built the
-    same way grid_param_sweep.py's build_device_config does: DeviceThermalParams
-    re-derived from this design point's insulation_gap_m/vapor_gap_m/tilt_deg
-    (all three are swept VAR_ORDER dims, so they must be rebuilt per-point, not
-    fixed once) plus the fixed eps_abs/tau_glass table_s3 constants, with
-    eps_abs_ir/eps_glass_ir set to the requested case's pair.
-    """
+    """Map a VAR_ORDER-ordered vector to DeviceConfig field names. ``case`` picks the IR
+    emissivity pair (CASE_EPS_IR). Every case gets an explicit "thermal" kwarg with
+    DeviceThermalParams re-derived per point, since insulation_gap_m/vapor_gap_m/tilt_deg
+    are all swept dims."""
     x = np.asarray(x, dtype=float).reshape(-1)
     if x.shape[0] != len(VAR_ORDER):
         raise ValueError(f"Expected a length-{len(VAR_ORDER)} design vector, got shape {x.shape}")
@@ -132,13 +101,9 @@ def from_unit_cube(u: np.ndarray, bounds: DesignBounds) -> np.ndarray:
 
 
 def is_gap_degenerate(x: np.ndarray, *, margin_m: float = VAPOR_GAP_TRANSPORT_MIN_M) -> bool:
-    """True if the nominal vapor gap leaves less than ``margin_m`` of headroom
-    over the hydrogel thickness -- i.e. the effective gap (vapor_gap_m -
-    hydrogel_thickness_m) would already sit at/below Wilson's transport floor
-    even before the gel swells further during absorption. Not a hard
-    infeasibility (the physics degrades to near-zero yield gracefully, it
-    doesn't raise), just a signal to avoid spending an expensive sample there.
-    """
+    """True if the effective gap (vapor_gap_m - hydrogel_thickness_m) leaves under
+    ``margin_m`` of headroom over Wilson's transport floor before the gel even swells.
+    Not a hard infeasibility -- just a signal not to spend a sample there."""
     kwargs = to_device_config_kwargs(x)
     return (float(kwargs["vapor_gap_m"]) - float(kwargs["hydrogel_thickness_m"])) < margin_m
 
@@ -151,12 +116,9 @@ def latin_hypercube_design(
     reject_gap_degenerate: bool = True,
     max_resample_rounds: int = 20,
 ) -> np.ndarray:
-    """n Latin-hypercube-sampled design vectors within ``bounds``, shape (n, 6).
-
-    When ``reject_gap_degenerate``, degenerate rows (see is_gap_degenerate)
-    are resampled (not dropped) up to ``max_resample_rounds`` times so the
-    returned array always has exactly n rows.
-    """
+    """n Latin-hypercube design vectors within ``bounds``, shape (n, 6). With
+    ``reject_gap_degenerate``, degenerate rows are resampled (never dropped) up to
+    ``max_resample_rounds`` times, so the result always has exactly n rows."""
     sampler = qmc.LatinHypercube(d=len(VAR_ORDER), seed=seed)
     u = sampler.random(n)
     x = from_unit_cube(u, bounds)

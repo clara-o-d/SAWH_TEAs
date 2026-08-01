@@ -36,12 +36,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-# ---------------------------------------------------------------------------
-# Path bootstrap — import run_solar_sim.py from scripts/
-# ---------------------------------------------------------------------------
+# --- Path bootstrap — import run_solar_sim.py from scripts/ ---
 _SCRIPT = Path(__file__).resolve()
 _DIAZ_DIR = _SCRIPT.parent.parent
-_SOLAR_ROOT = _DIAZ_DIR.parent
+_SOLAR_ROOT = _DIAZ_DIR.parent.parent.parent / "solar_lumped"
 _SRC = _SOLAR_ROOT / "src"
 _SCRIPTS = _SOLAR_ROOT / "scripts"
 for _p in (_SRC, _SCRIPTS, _SOLAR_ROOT):
@@ -151,9 +149,7 @@ def simulate_rh_cycle(
     )
 
 
-# ---------------------------------------------------------------------------
-# Reference CSV helpers
-# ---------------------------------------------------------------------------
+# --- Reference CSV helpers ---
 
 
 def _load_ref_csv(filename: str) -> tuple[np.ndarray, np.ndarray] | None:

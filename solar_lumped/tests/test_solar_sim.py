@@ -13,7 +13,7 @@ from solar_lumped.economics import (
     lcow_cost_breakdown_from_daily_yield,
     lcow_from_daily_yield,
 )
-from solar_lumped.economics import LCOEconomicParams, dry_composite_mass_kg
+from solar_lumped.economics import LCOEconomicParams
 from solar_lumped.physics import thermal_residual_norm
 from solar_lumped.physics import DeviceThermalParams
 from solar_lumped.physics import concentration_ratio_absorption, dc_w_dt

@@ -1,30 +1,12 @@
 #!/usr/bin/env python3
-"""At every map point run_gpu_sweep.py would brute-force sweep, run BayesOpt
-instead: same site selection CLI, same 12-month Aitken JAX fast path
-(evaluator.py's JAX_AITKEN_MAX_ROUNDS=8, resolution="monthly"), optimizing
-over the same 3 combo variables (hydrogel_thickness, fin_area_ratio,
-vapor_gap) with bounds taken from the same --hydrogel-thickness-mm/
---fin-area-ratio/--vapor-gap-mm lists the brute-force sweep grids over
-(min/max instead of the 5 discrete grid values). insulation_gap_mm/tilt_deg/
-salt-loading are fixed constants (bounds collapsed to a point), same as the
-brute-force sweep's non-swept args.
+"""BayesOpt at every map point run_gpu_sweep.py would brute-force sweep: same site
+selection CLI and 12-month Aitken JAX fast path, optimizing hydrogel_thickness /
+fin_area_ratio / vapor_gap over the min/max of the sweep's own combo lists.
 
-Reuses run_gpu_sweep.py's site selection (so --site-range/--site-indices
-split across concurrent GPU jobs the same way, see sbatch_gpu_sweep_array.sh)
-and sawh_bayesopt's run_bayesopt loop (each site's BayesOpt evaluations are
-still one batched jax.vmap call per round via evaluator.py, so this stays
-GPU-parallel the same way the brute-force sweep is).
-
-Per-site run directory gets the same artifacts and diagnostics
-scripts/hp_sweep.py writes per combination (that script's own per-combo run
-is the reference for what "a complete sawh_bayesopt run" records): history.csv,
-convergence.png, gp_state.joblib, diagnostics/de_diagnostics.json,
-report.json (verify_optimum + baseline comparison), and
-diagnostics/gp_regression_report.json + gp_slices.png (k-fold CV calibration
-of the LCOW GP, via scripts/diagnostics/gp_diagnostics.py). A site whose
-run/verify/diagnostics step raises gets an "error"/"verify_error"/
-"diagnostics_error" field in its summary row instead of killing the rest of
-this task's sites (same isolation hp_sweep.py uses per combination).
+Each site writes the same artifacts hp_sweep.py records per combination (history.csv,
+convergence.png, gp_state.joblib, de_diagnostics.json, report.json, gp_regression_report
+.json, gp_slices.png). A failing stage lands in an "error"/"verify_error"/
+"diagnostics_error" field rather than killing this task's remaining sites.
 
 Usage:
     python3 gpu_sweep/run_bayesopt_sweep.py --num-sites 10 --output-dir outputs/gpu_bayesopt_sweep/smoke
@@ -109,9 +91,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--de-maxiter", type=int, default=1000)
     p.add_argument("--de-popsize", type=int, default=40)
 
-    # Per-site verification -- re-evaluates the reported optimum (+ perturbed
-    # neighbors) against the true model, same check run_bayesopt.py does, to
-    # flag GP surrogate artifacts rather than trusting the EI loop blindly.
+    # Re-evaluates the reported optimum and perturbed neighbors against the true model
+    # (same check as run_bayesopt.py) to flag GP surrogate artifacts.
     p.add_argument("--n-verify-neighbors", type=int, default=5)
     p.add_argument("--verify-perturbation-frac", type=float, default=0.10)
 
@@ -120,19 +101,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-# design_space.to_unit_cube divides by (hi - lo) -- an exact lo == hi point
-# for a "fixed" dim makes that a division by zero (NaN in every normalized
-# coordinate, which then blows up the GP fit). A span this small relative to
-# any real bound (~1e-3 to tens) samples as indistinguishable from the exact
-# fixed value while keeping the normalization finite.
+# to_unit_cube divides by (hi - lo), so an exact lo == hi fixed dim would NaN the whole
+# normalization. This span is indistinguishable from the fixed value at any real bound.
 _FIXED_DIM_EPS = 1e-9
 
 
 def _bounds(args: argparse.Namespace) -> DesignBounds:
-    """Box bounds for the 3 optimized dims from the sweep's own combo lists
-    (min/max, mm -> m); the other 3 DesignBounds dims collapse to a tiny span
-    around the fixed CLI value (see _FIXED_DIM_EPS).
-    """
+    """Box bounds for the 3 optimized dims from the sweep's combo lists (min/max, mm -> m);
+    the other 3 collapse to a tiny span around the fixed CLI value (see _FIXED_DIM_EPS)."""
     salt_ratio = args.salt_loading
     insulation_m = args.insulation_gap_mm / 1000.0
     tilt = args.tilt_deg
@@ -154,13 +130,9 @@ def _load_summary_rows(path: Path) -> list[dict]:
 
 
 def _write_summary_rows(path: Path, rows: list[dict]) -> None:
-    """Rewrites the whole file from *rows* every call (same approach as
-    hp_sweep.py's _write_outputs) rather than appending -- a site with an
-    "error" field has far fewer columns than one with full diagnostics, so
-    appending with a header locked in from whichever row came first would
-    crash the moment a differently-shaped row showed up. Cheap: rows here is
-    at most a few thousand.
-    """
+    """Rewrite the whole file from *rows* each call rather than appending: error rows have
+    far fewer columns than full ones, so a locked-in header would crash. At most a few
+    thousand rows, so the rewrite is cheap."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fieldnames: list[str] = []
     for r in rows:
@@ -174,15 +146,9 @@ def _write_summary_rows(path: Path, rows: list[dict]) -> None:
 
 
 def run_site(lat: float, lon: float, args: argparse.Namespace, bounds: DesignBounds) -> dict:
-    """Runs one site's full BayesOpt loop plus every diagnostic
-    scripts/hp_sweep.py records per combination (history/convergence/
-    gp_state/de_diagnostics/report/gp_regression_report) -- see this
-    module's docstring. Each stage past the core optimization loop is
-    isolated in its own try/except, same as hp_sweep.py's _run_one_combo:
-    a verification or diagnostics failure shouldn't discard an otherwise-
-    good optimization result, and shouldn't crash the rest of this task's
-    sites either.
-    """
+    """One site's full BayesOpt loop plus every diagnostic hp_sweep.py records. Each stage
+    past the optimization loop is isolated, so a diagnostics failure neither discards a
+    good result nor kills this task's remaining sites."""
     site = SiteSpec(name=f"{lat:+.4f}_{lon:+.4f}", lat=lat, lon=lon, year=args.year)
     run_dir = args.output_dir / site.name
     run_dir.mkdir(parents=True, exist_ok=True)

@@ -11,8 +11,6 @@ Uncertainty band: h_amb = 10 ± 2.5 W/m²K, matching Wilson Methods.
 Optional ``--wilson-initial-temps``: start desorption at the first digitized
 Fig. 3C reference point for each component (absorber / glass / condenser).
 
-``--desorption-solver {quasi_steady,segregated,coupled_bdf}`` (default: quasi_steady).
-
 Output saved to:  wilson-et-al._re-creation/outputs/figure3/figure3b.png
 """
 
@@ -26,12 +24,10 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-# ---------------------------------------------------------------------------
-# Path bootstrap (same pattern as figure2.py)
-# ---------------------------------------------------------------------------
+# --- Path bootstrap (same pattern as figure2.py) ---
 _SCRIPT = Path(__file__).resolve()
 _WILSON_DIR = _SCRIPT.parent.parent          # wilson-et-al._re-creation/
-_SOLAR_ROOT = _WILSON_DIR.parent             # solar_lumped/
+_SOLAR_ROOT = _WILSON_DIR.parent.parent.parent / "solar_lumped"
 _SRC = _SOLAR_ROOT / "src"
 for _p in (_SRC, _SOLAR_ROOT):
     if str(_p) not in sys.path:
@@ -48,7 +44,7 @@ from solar_lumped.plotting import (
     style_axes,
 )
 from solar_lumped.simulation import evaluate_coupled_rates
-from solar_lumped.simulation import DeviceConfig, register_desorption_solver_cli
+from solar_lumped.simulation import DeviceConfig
 from solar_lumped.simulation import run_daily_cycle
 from solar_lumped.simulation import cumulative_desorption_yield_l_m2
 from solar_lumped.weather import (
@@ -64,7 +60,7 @@ _OUT_DIR = _WILSON_DIR / "outputs" / "figure3"
 _OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 _REF_DIR = _WILSON_DIR / "reference" / "figure3"
-_WEATHER_DIR = _SRC / "solar_lumped" / "weather"
+_WEATHER_DIR = _SRC / "solar_lumped" / "data" / "weather"
 _REF_LABEL = "Wilson et al. (digitized)"
 
 _REF_ABSORBER_CSV = "Cambridge_absorber.csv"
@@ -76,9 +72,7 @@ _REF_CONDENSER_CSV = "Cambridge_condenser.csv"
 # dividing by A_c converts it to the mL/m² basis used for the model curve.
 _A_C_M2 = 0.078
 
-# ---------------------------------------------------------------------------
-# Cambridge test conditions (Wilson paper Methods / Fig. 3)
-# ---------------------------------------------------------------------------
+# --- Cambridge test conditions (Wilson paper Methods / Fig. 3) ---
 _T_ABS_C = 25.0       # absorption temperature (room adjacent to roof, ~25 °C)
 _RH_ABS = 0.5         # ~50% RH absorption (paper Methods)
 _RH_DES = 0.5         # RH value during desorption (sealed device; only affects CR via T_cond)
@@ -91,9 +85,7 @@ _DES_HOURS = 10.0
 _DES_STEPS = int(_DES_HOURS * 3600.0 / PHASE_DT_S)   # 600
 
 
-# ---------------------------------------------------------------------------
-# 1. Load and interpolate Cambridge weather CSVs
-# ---------------------------------------------------------------------------
+# --- 1. Load and interpolate Cambridge weather CSVs ---
 
 def _interp_csv(
     raw: np.ndarray,
@@ -132,9 +124,7 @@ def _load_cambridge_weather() -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     return t_grid, solar_grid, temp_grid
 
 
-# ---------------------------------------------------------------------------
-# 2. Build PhaseProfiles
-# ---------------------------------------------------------------------------
+# --- 2. Build PhaseProfiles ---
 
 def _make_absorption_profile(*, h_amb: float = _H_AMB_MID) -> PhaseProfile:
     """Standard 12-h absorption at ~25 °C, 50% RH, no solar."""
@@ -177,30 +167,21 @@ def _make_profile(
     )
 
 
-# ---------------------------------------------------------------------------
-# 3. Device configuration (optimised Cambridge device, Wilson Methods)
-# ---------------------------------------------------------------------------
+# --- 3. Device configuration (optimised Cambridge device, Wilson Methods) ---
 
-def _make_config(
-    *,
-    wilson_initial_temps: bool = False,
-    desorption_solver: str = "quasi_steady",
-) -> DeviceConfig:
+def _make_config(*, wilson_initial_temps: bool = False) -> DeviceConfig:
     kwargs: dict[str, object] = {
         "hydrogel_thickness_m": 0.004,   # H0 = 4 mm
         "vapor_gap_m": 0.040,            # L_g = 40 mm
         "fin_area_ratio": FIN_AREA_RATIO,  # A_r = 7.1 (Wilson Table S3)
         "tilt_deg": 35.0,                # Cambridge rooftop tilt (~35°, Methods)
-        "desorption_solver": desorption_solver,
     }
     if wilson_initial_temps:
         kwargs["coupled_initial_temps_c"] = _cambridge_initial_temps_c()
     return DeviceConfig(**kwargs)  # type: ignore[arg-type]
 
 
-# ---------------------------------------------------------------------------
-# 4 & 5. Run ODE + reconstruct absorber and glass temperatures
-# ---------------------------------------------------------------------------
+# --- 4 & 5. Run ODE + reconstruct absorber and glass temperatures ---
 
 def _reconstruct_all_temps(
     des_res,
@@ -255,16 +236,12 @@ def run_simulation(
     *,
     h_amb: float,
     wilson_initial_temps: bool = False,
-    desorption_solver: str = "quasi_steady",
 ) -> dict[str, np.ndarray]:
     """
     Run one daily cycle and return a dict of temperature arrays vs time.
     Keys: 'time_hr', 't_abs', 't_glass', 't_cond', 't_gel', 't_amb'.
     """
-    config = _make_config(
-        wilson_initial_temps=wilson_initial_temps,
-        desorption_solver=desorption_solver,
-    )
+    config = _make_config(wilson_initial_temps=wilson_initial_temps)
     profile = _make_profile(solar_grid, temp_grid, h_amb=h_amb)
 
     _, _, _, des_res = run_daily_cycle(profile, config)
@@ -298,9 +275,7 @@ def run_simulation(
     }
 
 
-# ---------------------------------------------------------------------------
-# 6. Plot
-# ---------------------------------------------------------------------------
+# --- 6. Plot ---
 
 # Colours matching Wilson Fig. 3B
 _COL_ABS = "#8b2000"      # dark brick red — absorber
@@ -473,9 +448,7 @@ def plot_figure3b(
     return out_path
 
 
-# ---------------------------------------------------------------------------
-# Main
-# ---------------------------------------------------------------------------
+# --- Main ---
 
 def main() -> Path:
     import argparse
@@ -483,7 +456,6 @@ def main() -> Path:
     parser = argparse.ArgumentParser(
         description="Wilson Figure 3 — Cambridge field-test temperature model",
     )
-    register_desorption_solver_cli(parser)
     parser.add_argument(
         "--wilson-initial-temps",
         action="store_true",
@@ -496,7 +468,6 @@ def main() -> Path:
 
     print("Wilson Figure 3B — Cambridge temperature model")
     print("=" * 50)
-    print(f"  desorption_solver = {args.desorption_solver}")
     if args.wilson_initial_temps:
         ic = _cambridge_initial_temps_c()
         print(
@@ -512,10 +483,7 @@ def main() -> Path:
         f"  T_amb: min={temp_grid.min():.1f}, max={temp_grid.max():.1f} °C"
     )
 
-    sim_kw = {
-        "wilson_initial_temps": args.wilson_initial_temps,
-        "desorption_solver": args.desorption_solver,
-    }
+    sim_kw = {"wilson_initial_temps": args.wilson_initial_temps}
     print("\nRunning simulations for h_amb = 7.5, 10.0, 12.5 W/m²K…")
     res_lo = run_simulation(solar_grid, temp_grid, h_amb=_H_AMB_LO, **sim_kw)
     print(f"  h_amb={_H_AMB_LO}: T_abs peak = {res_lo['t_abs'].max():.1f} °C")

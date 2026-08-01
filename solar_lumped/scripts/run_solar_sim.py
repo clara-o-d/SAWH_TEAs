@@ -46,7 +46,6 @@ from solar_lumped.physics import (
     DRY_COMPOSITE_DENSITY_KG_M3,
     GAS_CONSTANT_J_MOL_K,
     WATER_MOLAR_MASS_KG_MOL,
-    chamber_c_s_from_synthesis,
     chamber_c_s_with_constant_density,
     equilibrium_c_w_at_rh,
     get_salt,

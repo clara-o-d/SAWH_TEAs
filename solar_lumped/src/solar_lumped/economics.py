@@ -12,10 +12,8 @@ from solar_lumped._parameters_xlsx import economics_value as _ev
 from solar_lumped._parameters_xlsx import physics_value as _pv
 from solar_lumped.physics import DRY_COMPOSITE_DENSITY_KG_M3, get_salt_price_usd_per_kg
 
-# =============================================================================
-# Economic parameter loading and defaults -- read directly from
-# docs/parameters.xlsx (Economics + Physics sheets); no separate CSV.
-# =============================================================================
+# --- Economic parameter loading and defaults ---
+# Read directly from docs/parameters.xlsx (Economics + Physics sheets); no separate CSV.
 
 _BOM_PREFIX = "BOM: "
 
@@ -32,11 +30,15 @@ _ECON_FIELD_ROWS: dict[str, str] = {
     "c_mba_usd_per_kg": "N,N'-methylenebisacrylamide price, MBA (c_MBA)",
     "c_temed_usd_per_kg": "Tetramethylethylenediamine price, TEMED (c_TEMED)",
     "c_water_gel_usd_per_kg": "De-ionized water price, hydrogel manufacturing (c_water_gel)",
-    "electricity_price_usd_per_kwh": "Electricity price (p_elec)",
-    "desorption_hours_per_day": "Desorption hours per day (t_des)",
-    "max_electric_heat_w_per_m2": "Max electric heat, optimizer bound (Q_elec,max)",
     "include_desorption_enthalpy": "Include desorption enthalpy in T_g solve (flag)",
 }
+
+# No electricity / electric-heat rows: solar_lumped is the *passive* solar device, so
+# there is no purchased-energy term at all (Wilson's Note S4 TEA likewise has none).
+# The parameters.xlsx Economics sheet still carries "Electricity price (p_elec)",
+# "Desorption hours per day (t_des)" and "Max electric heat, optimizer bound
+# (Q_elec,max)" rows -- deliberately left unread here, since the waste-heat packages
+# (which do have parasitic/supplemental electric loads) read the same workbook.
 
 
 def _coerce_bool(raw: Any) -> bool:
@@ -56,9 +58,8 @@ def _load_economic_data() -> tuple[dict[str, Any], tuple[tuple[str, float], ...]
         else:
             scalars[field_name] = float(raw)
 
-    # Hydrogel geometry/density and mass-transfer coefficient live on the
-    # Physics sheet (they're physical, not economic, quantities) but are
-    # needed here for the sorbent-replacement cost calculation.
+    # Physical (not economic) quantities from the Physics sheet, needed here for the
+    # sorbent-replacement cost calculation.
     h0_row = _PHYS_XLSX["Hydrogel reference thickness (H0)"]
     scalars["hydrogel_thickness_m"] = float(h0_row["value"]) / 1000.0
     scalars["hydrogel_thickness_min_m"] = float(h0_row["lower"]) / 1000.0
@@ -109,9 +110,6 @@ class LCOEconomicParams:
     c_mba_usd_per_kg: float
     c_temed_usd_per_kg: float
     c_water_gel_usd_per_kg: float
-    electricity_price_usd_per_kwh: float
-    desorption_hours_per_day: float
-    max_electric_heat_w_per_m2: float
     include_desorption_enthalpy: bool
 
     def __init__(self, **kwargs: Any) -> None:
@@ -142,11 +140,8 @@ DEVICE_BOM_USD_PER_M2: tuple[tuple[str, float], ...] = _DEVICE_BOM_ROWS
 C_DEVICE_USD: float = sum(cost for _, cost in DEVICE_BOM_USD_PER_M2)
 _LCOW_DEFAULTS: dict[str, Any] = {f.name: _SCALARS[f.name] for f in fields(LCOEconomicParams)}
 
-# Polymer sub-mix (AM/APS/MBA/TEMED) blended price and water-to-dry-composite
-# ratio, derived from Table S1's whole-batch mass fractions (each tracked as
-# its own parameters.xlsx Economics-sheet row). Renormalized because those
-# four items' fractions don't sum to 1 on their own (the batch also contains
-# salt and water).
+# Polymer sub-mix (AM/APS/MBA/TEMED) blended price and water ratio from Table S1 batch
+# mass fractions, renormalized since those four don't sum to 1 (the batch has salt+water).
 _POLYMER_ITEMS: tuple[tuple[str, str], ...] = (
     ("Acrylamide price, AM (c_AM)", "Acrylamide mass fraction, AM (Table S1 recipe)"),
     ("Ammonium persulfate price, APS (c_APS)", "Ammonium persulfate mass fraction, APS (Table S1 recipe)"),
@@ -174,21 +169,9 @@ POLYMER_AM_ONLY_PRICE_USD_PER_KG: float = _AM_FRACTION_SHARE * float(_ev(_POLYME
 _water_gel_fraction = float(_ev("De-ionized water mass fraction (Table S1 recipe)"))
 WATER_RATIO_PER_KG_DRY_COMPOSITE: float = _water_gel_fraction / (1.0 - _water_gel_fraction)
 
-# =============================================================================
-# Levelized cost of water (LCOW)
-# =============================================================================
+# --- Levelized cost of water (LCOW) ---
 
 FAIL_LCO: float = 1e30
-
-
-def _annual_electricity_cost_usd(econ: LCOEconomicParams, electric_heat_w_per_m2: float) -> float:
-    return (
-        econ.electricity_price_usd_per_kwh
-        * float(electric_heat_w_per_m2)
-        * econ.desorption_hours_per_day
-        * 365.0
-        / 1000.0
-    )
 
 
 def lcow_from_daily_yield(
@@ -199,19 +182,14 @@ def lcow_from_daily_yield(
     hydrogel_thickness_m: float,
     econ: LCOEconomicParams,
     cycles_per_day: float = 1.0,
-    electric_heat_w_per_m2: float = 0.0,
     salt_price_usd_per_kg: float | None = None,
     sorbent: str = "hydrogel",
     mof_mass_kg_m2: float = 0.0,
     mof_price_usd_per_kg: float = 0.0,
     simplified: bool = False,
 ) -> float:
-    """Scalar LCOW (USD/m³) — identical structure to lcow_zsr_at_sl.
-
-    ``simplified=True`` drops the DI-water and non-acrylamide polymer (APS/MBA/
-    TEMED) cost terms from the hydrogel line item -- see
-    ``_sorbent_replacement_annual_usd``.
-    """
+    """Scalar LCOW (USD/m³), same structure as lcow_zsr_at_sl. ``simplified=True`` drops the
+    DI-water and non-acrylamide polymer (APS/MBA/TEMED) terms from the hydrogel line."""
     if daily_yield_kg_per_m2 <= 0.0 or not math.isfinite(daily_yield_kg_per_m2):
         return FAIL_LCO
     if sorbent == "hydrogel" and (
@@ -232,12 +210,10 @@ def lcow_from_daily_yield(
         simplified=simplified,
     )
 
-    annual_electricity_cost = _annual_electricity_cost_usd(econ, electric_heat_w_per_m2)
     annual_cost_usd = (
         econ.capital_recovery_factor() * econ.total_investment_factor * C_DEVICE_USD
         + sorbent_replacement
         + econ.maintenance_cost_fraction * C_DEVICE_USD
-        + annual_electricity_cost
     )
     if not math.isfinite(annual_cost_usd):
         return FAIL_LCO
@@ -282,13 +258,9 @@ def _sorbent_replacement_annual_usd(
 
 
 def dry_composite_mass_kg(hydrogel_thickness_m: float) -> float:
-    """Dry (solids-only) composite mass per m^2 at the given thickness.
-
-    Uses the DVS-derived dry-basis density, not the raw Table S3 rho_gel (that's
-    measured at 20% RH and already carries ~126% equilibrium water by mass --
-    see physics.py::DRY_COMPOSITE_DENSITY_KG_M3), since the recipe-based hydrogel
-    cost below is priced per kg of dry (post-synthesis) solids.
-    """
+    """Dry (solids-only) composite mass per m² at the given thickness, using the DVS
+    dry-basis density -- Table S3's rho_gel is measured at 20% RH and already carries
+    ~126% water, while the hydrogel cost below is priced per kg of dry solids."""
     return float(hydrogel_thickness_m) * DRY_COMPOSITE_DENSITY_KG_M3
 
 
@@ -309,19 +281,14 @@ def lcow_cost_breakdown_from_daily_yield(
     hydrogel_thickness_m: float,
     econ: LCOEconomicParams,
     cycles_per_day: float = 1.0,
-    electric_heat_w_per_m2: float = 0.0,
     salt_price_usd_per_kg: float | None = None,
     sorbent: str = "hydrogel",
     mof_mass_kg_m2: float = 0.0,
     mof_price_usd_per_kg: float = 0.0,
     simplified: bool = False,
 ) -> LcowCostBreakdown | None:
-    """Per-term LCOW breakdown — same segments as lcow_cost_breakdown_usd_per_m3.
-
-    ``simplified=True`` matches ``lcow_from_daily_yield(simplified=True)``: the
-    water line item is dropped and only the acrylamide (AM) share of the
-    polymer sub-mix is billed.
-    """
+    """Per-term LCOW breakdown, same segments as lcow_cost_breakdown_usd_per_m3.
+    ``simplified=True`` drops the water line and bills only the acrylamide share."""
     lcow = lcow_from_daily_yield(
         daily_yield_kg_per_m2,
         salt_name=salt_name,
@@ -329,7 +296,6 @@ def lcow_cost_breakdown_from_daily_yield(
         hydrogel_thickness_m=hydrogel_thickness_m,
         econ=econ,
         cycles_per_day=cycles_per_day,
-        electric_heat_w_per_m2=electric_heat_w_per_m2,
         salt_price_usd_per_kg=salt_price_usd_per_kg,
         sorbent=sorbent,
         mof_mass_kg_m2=mof_mass_kg_m2,
@@ -372,9 +338,8 @@ def lcow_cost_breakdown_from_daily_yield(
         )
         salt_annual = salt_price * sl / (1.0 + sl) * dry_mass / gel_lifetime
         segments.append(("Hydrogel: salt", _lcow_seg(salt_annual)))
-        # Split the polymer sub-mix's blended cost back out into its ingredients
-        # using each one's share of the renormalized Table S1 mix. Simplified
-        # mode only bills acrylamide (APS/MBA/TEMED/water are dropped).
+        # Split the blended polymer cost back into ingredients by renormalized Table S1
+        # share; simplified mode bills acrylamide only.
         ingredients = (
             (_polymer_fractions[0], econ.c_am_usd_per_kg, "Hydrogel: acrylamide (AM)"),
         ) if simplified else (
@@ -394,14 +359,9 @@ def lcow_cost_breakdown_from_daily_yield(
             )
             segments.append(("Hydrogel: water", _lcow_seg(water_annual)))
 
-    annual_electricity_cost = _annual_electricity_cost_usd(econ, electric_heat_w_per_m2)
-    segments.append(("Electricity (active heat)", _lcow_seg(annual_electricity_cost)))
-
     return LcowCostBreakdown(items=tuple(segments))
 
-# =============================================================================
-# Net present value (NPV) and payback period
-# =============================================================================
+# --- Net present value (NPV) and payback period ---
 
 
 @dataclass(frozen=True, slots=True)
@@ -424,7 +384,6 @@ def npv_from_daily_yield(
     hydrogel_thickness_m: float,
     econ: LCOEconomicParams,
     cycles_per_day: float = 1.0,
-    electric_heat_w_per_m2: float = 0.0,
     salt_price_usd_per_kg: float | None = None,
     sorbent: str = "hydrogel",
     mof_mass_kg_m2: float = 0.0,
@@ -451,13 +410,8 @@ def npv_from_daily_yield(
         econ=econ,
         salt_price_usd_per_kg=salt_price_usd_per_kg,
     )
-    annual_electricity_cost = _annual_electricity_cost_usd(econ, electric_heat_w_per_m2)
     capex = econ.total_investment_factor * C_DEVICE_USD
-    annual_opex = (
-        sorbent_replacement
-        + econ.maintenance_cost_fraction * C_DEVICE_USD
-        + annual_electricity_cost
-    )
+    annual_opex = sorbent_replacement + econ.maintenance_cost_fraction * C_DEVICE_USD
     annual_revenue = gross_annual_water_m3 * float(water_price_usd_per_m3)
     annual_net_cash_flow = annual_revenue - annual_opex
 

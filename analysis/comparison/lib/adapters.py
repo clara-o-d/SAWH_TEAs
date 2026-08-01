@@ -1,27 +1,14 @@
-"""Uniform ``ConfigAdapter`` interface over the four SAWH device packages.
+"""Uniform ``ConfigAdapter`` interface over the four SAWH device packages, so comparison
+scripts never branch per config:
 
-Each adapter hides that package's real (already working, already-tested)
-entry points behind a common shape so the comparison scripts never need
-per-config branching:
+* ``passive``      -> ``solar_lumped``                    (via scripts/run_solar_sim)
+* ``single_loop``  -> ``waste_heat_lumped``               (via scripts/run_waste_heat_sim)
+* ``multi_loop``   -> ``waste_heat_cycle_lumped``         (direct DeviceConfig + ode_system)
+* ``multi_noloop`` -> ``waste_heat_cycle_lumped_no_loop`` (same, HTF-loop removal is internal)
 
-* ``passive``      -> ``solar_lumped``                       (script-driven)
-* ``single_loop``  -> ``waste_heat_lumped``                  (script-driven)
-* ``multi_loop``   -> ``waste_heat_cycle_lumped``             (direct DeviceConfig + ode_system)
-* ``multi_noloop`` -> ``waste_heat_cycle_lumped_no_loop``     (direct DeviceConfig + ode_system,
-                                                                same call shape as multi_loop --
-                                                                the HTF-loop removal is entirely
-                                                                internal to that package's physics)
-
-``passive`` and ``single_loop`` are driven through their packages'
-``scripts/run_*.py`` modules (``run_solar_simulation`` /
-``run_waste_heat_simulation``) because that is where the CLI-argument ->
-``DeviceConfig`` construction logic (and the LCOW/NPV wiring) actually lives.
-``multi_loop`` / ``multi_noloop`` skip their scripts entirely (per the task
-brief, to avoid importing private script internals across packages with
-colliding filenames) and instead call ``DeviceConfig(...)`` and
-``simulation.ode_system.run_daily_operation(...)`` directly, exactly as
-``scripts/run_waste_heat_cycle_sim.py --daily`` does internally.
-"""
+The first two go through their scripts because that is where CLI-arg -> DeviceConfig and the
+LCOW/NPV wiring live; the cycle packages call DeviceConfig + run_daily_operation directly to
+avoid importing script internals across packages with colliding filenames."""
 
 from __future__ import annotations
 
@@ -38,19 +25,20 @@ _SCENARIO: Scenario = BASELINE_SCENARIO
 
 
 def _replace_econ(econ: Any, **overrides: Any) -> Any:
-    """``dataclasses.replace``-equivalent for the frozen, ``init=False`` ``LCOEconomicParams``.
-
-    ``LCOEconomicParams.__init__`` takes arbitrary kwargs and falls back to
-    the package's CSV-loaded defaults for anything missing -- so a plain
-    ``dataclasses.replace`` would silently drop any *current* field value
-    that isn't in ``overrides`` (they'd revert to the CSV default instead of
-    staying at ``econ``'s current value). Build the full current-value dict
-    explicitly instead.
-    """
+    """``dataclasses.replace`` equivalent for the frozen, ``init=False`` LCOEconomicParams:
+    its __init__ fills missing kwargs from CSV defaults, so a plain replace would silently
+    revert current field values. Build the full current-value dict instead."""
     if not overrides:
         return econ
     current = {f.name: getattr(econ, f.name) for f in fields(econ)}
-    current.update(overrides)
+    # Silently drop overrides for fields this package doesn't have. The four packages'
+    # LCOEconomicParams are not identical: solar_lumped is passive-only and carries no
+    # electricity_price_usd_per_kwh / desorption_hours_per_day, while the waste-heat
+    # packages do (parasitic + supplemental-heat loads). Callers sweep one shared
+    # parameter list across all adapters, so a field-by-field guard here beats a
+    # per-script exclusion table -- an inapplicable knob just reads as zero sensitivity,
+    # which is what it physically is.
+    current.update({k: v for k, v in overrides.items() if k in current})
     return type(econ)(**current)
 
 
@@ -103,14 +91,8 @@ class ConfigAdapter(Protocol):
 
 
 def _scenario_econ(params_cls: Any) -> Any:
-    """Baseline ``LCOEconomicParams`` with the shared scenario econ fields pinned.
-
-    The packages' own CSV defaults already match ``scenario.py`` (device
-    lifetime 20 yr, discount rate 0.03, electricity $0.10/kWh) as of writing;
-    this makes that agreement explicit/robust instead of implicit, so a
-    future change to one package's CSV defaults can't silently desync the
-    comparison from its own stated scenario.
-    """
+    """Baseline LCOEconomicParams with the shared scenario econ fields pinned explicitly, so
+    a future change to one package's CSV defaults can't silently desync the comparison."""
     econ = params_cls()
     return _replace_econ(
         econ,
@@ -319,14 +301,9 @@ class SingleLoopAdapter:
 
 
 class _CycleAdapterBase:
-    """Shared implementation for ``multi_loop`` and ``multi_noloop``.
-
-    Both packages expose an identical ``DeviceConfig`` / ``datacenter_baseline_profile``
-    / ``run_daily_operation`` call shape -- the pumped-HTF-loop-vs-direct-coupling
-    difference between the two is entirely internal to each package's
-    ``simulation.ode_system`` physics, so one adapter implementation (parameterized
-    by package import name) covers both.
-    """
+    """Shared implementation for ``multi_loop`` and ``multi_noloop``: both expose the same
+    DeviceConfig / datacenter_baseline_profile / run_daily_operation shape, and the
+    HTF-loop-vs-direct-coupling difference is internal to each package's physics."""
 
     config_id: str
     display_name: str

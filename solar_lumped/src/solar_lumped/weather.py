@@ -1,6 +1,5 @@
-"""Weather: Open-Meteo client, real/replay/baseline profile builders, land-grid
-sampling, and the Note S1 Fig. S1D / Atacama Fig. 4 validation profiles.
-"""
+"""Weather: Open-Meteo client, real/replay/baseline profiles, land-grid sampling,
+and the Note S1 Fig. S1D / Atacama Fig. 4 validation profiles."""
 
 from __future__ import annotations
 
@@ -34,9 +33,7 @@ BASELINE_Q_SOLAR_W_M2: float = _pv("Solar irradiance (Q_solar)")
 BASELINE_H_AMB_W_M2_K: float = H_AMB_W_M2_K
 
 
-# =============================================================================
-# Open-Meteo weather API client (real historical + forecast retrieval)
-# =============================================================================
+# --- Open-Meteo weather API client (real historical + forecast retrieval) ---
 
 _ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"
 _HISTORICAL_FORECAST_URL = "https://historical-forecast-api.open-meteo.com/v1/forecast"
@@ -69,13 +66,8 @@ class WeatherClient:
                     # Requests are always for a fixed, already-elapsed date range
                     # (a past calendar year), so the archive response never changes.
                     expire_after=requests_cache.NEVER_EXPIRE,
-                    # WAL mode lets concurrent readers/writers not block each other
-                    # (vs. SQLite's default rollback-journal mode, which serializes
-                    # all writes); busy_timeout (ms) is how long a writer waits on a
-                    # lock before raising "database is locked" instead of the
-                    # 5s sqlite3 default -- both needed once many GPU-sweep array
-                    # tasks share this one cache file concurrently (see
-                    # gpu_sweep/FINDINGS.md/docs/gpu_sweep_handoff.md).
+                    # WAL + long busy_timeout so concurrent GPU-sweep array tasks
+                    # sharing this cache file don't serialize or hit "database is locked".
                     wal=True,
                     busy_timeout=60_000,
                 )
@@ -195,9 +187,7 @@ def fetch_year_weather(
     except Exception:
         return client.get_historical(lat, lon, start, end)
 
-# =============================================================================
-# Real-weather day statistics (solar/temperature/RH day summaries)
-# =============================================================================
+# --- Real-weather day statistics (solar/temperature/RH day summaries) ---
 
 STEPS_PER_HOUR = 4
 STEPS_PER_DAY = 24 * STEPS_PER_HOUR
@@ -208,11 +198,8 @@ def representative_mean_day_df(
     *,
     reference_day: date | None = None,
 ) -> pd.DataFrame:
-    """Build one synthetic calendar day from mean slot values across *df*.
-
-    Uses native 15-min resolution when timestamps are 15-min spaced; otherwise
-    falls back to hourly means expanded to 96 slots.
-    """
+    """One synthetic calendar day of mean slot values; native 15-min resolution when
+    available, else hourly means expanded to 96 slots."""
     if df.empty:
         raise ValueError("Cannot build representative mean day from empty weather data.")
 
@@ -398,13 +385,10 @@ def day_weather_stats(day_df: pd.DataFrame) -> dict[str, float]:
         out["solar_peak_w_m2"] = float(solar.max())
     return out
 
-# =============================================================================
-# Land-grid site sampling for global maps
-# =============================================================================
+# --- Land-grid site sampling for global maps ---
 
-# Land above this latitude within these countries is excluded by default: no realistic
-# deployment demand, and it's mostly the same polar-day/night territory the lat_hi cutoff
-# is already trying to avoid, just reaching further south here than the Arctic circle.
+# Excluded by default: polar territory with no deployment demand that reaches further
+# south than the global lat_hi cutoff catches.
 DEFAULT_EXCLUDE_COUNTRY_ABOVE_LAT: dict[str, float] = {"Canada": 60.0, "Russia": 60.0}
 
 
@@ -415,14 +399,9 @@ def grid_land_points(
     lat_hi: float = 72.0,
     exclude_country_above_lat: dict[str, float] | None = DEFAULT_EXCLUDE_COUNTRY_ABOVE_LAT,
 ) -> list[tuple[float, float]]:
-    """All (lat, lon) grid nodes on land at ``step_deg`` spacing (WGS84).
-
-    ``exclude_country_above_lat`` additionally drops points inside a named country
-    (Natural Earth ADMIN name) above a given latitude -- e.g. the default drops northern
-    Canada and Russia above 60°N, which the global ``lat_hi`` cutoff alone doesn't reach
-    (Canada/Russia extend well south of 72°N at those longitudes). Pass ``{}`` or ``None``
-    to disable.
-    """
+    """All (lat, lon) land grid nodes at ``step_deg`` spacing (WGS84).
+    ``exclude_country_above_lat`` drops points in a Natural Earth ADMIN country above a
+    latitude the global ``lat_hi`` cutoff misses; pass ``{}``/``None`` to disable."""
     from shapely import geometry as sh_geom
     from shapely.ops import unary_union
     from shapely.prepared import prep
@@ -483,9 +462,7 @@ def grid_land_points(
     )
     return out
 
-# =============================================================================
-# Weather profile builders: baseline, replay, and real per-day series
-# =============================================================================
+# --- Weather profile builders: baseline, replay, and real per-day series ---
 
 PHASE_DT_S = 100.0  # Wilson Note S1 / COMSOL time step (s)
 PHASE_HOURS = 12.0
@@ -502,10 +479,8 @@ class PhaseProfile:
     solar_w_m2: tuple[float, ...]
     h_amb_w_m2_k: tuple[float, ...]
     dt_s: float = PHASE_DT_S
-    # Optional separate convection coefficient for the condenser backing. When set,
-    # it decouples condenser cooling from the ambient h_amb that drives the
-    # absorber/glass. Wilson's Atacama device forces ~0.5 m/s over the condenser with
-    # fans (Fig. S2) regardless of the variable ambient wind. None → use h_amb.
+    # Decouples condenser cooling from the absorber/glass h_amb (Wilson's Atacama device
+    # fan-forces ~0.5 m/s over the condenser, Fig. S2). None → use h_amb.
     h_amb_cond_w_m2_k: tuple[float, ...] | None = None
 
 
@@ -520,11 +495,8 @@ FIXED_H_AMB_W_M2_K = BASELINE_H_AMB_W_M2_K
 
 
 def profile_from_day_df(day_df: pd.DataFrame) -> DailyWeatherProfile:
-    """Split one calendar day into absorption (night) + desorption (day).
-
-    The two halves run for their true real-time duration (via each phase's own
-    step count at PHASE_DT_S resolution), not a fixed 12 h/12 h split.
-    """
+    """Split one calendar day into absorption (night) + desorption (day), each running its
+    true real-time duration at PHASE_DT_S resolution rather than a fixed 12 h/12 h split."""
     deltas = day_df.index.to_series().diff().dropna().dt.total_seconds()
     native_dt_s = float(deltas.median()) if len(deltas) else PHASE_DT_S
     solar = day_df.get("shortwave_radiation", pd.Series(0.0, index=day_df.index)).astype(float)
@@ -543,15 +515,8 @@ def profile_from_day_df(day_df: pd.DataFrame) -> DailyWeatherProfile:
 
 
 def _rotate_chronological(df: pd.DataFrame, *, pivot_hour: float) -> pd.DataFrame:
-    """Reorder rows into real elapsed-time order for a slice that may wrap around pivot_hour.
-
-    A boolean mask (e.g. solar < threshold) preserves calendar-day row order --
-    00:00 first, then whatever comes after sunset appended at the end -- not real
-    elapsed time within the night, which actually runs sunset -> midnight ->
-    sunrise. ``pivot_hour`` must be an hour the slice never contains (noon for
-    night, midnight for day), so rotating the axis to start there never splits
-    the slice's one real contiguous span in two.
-    """
+    """Reorder a mask-selected slice into real elapsed-time order (night runs sunset →
+    midnight → sunrise). ``pivot_hour`` must be an hour the slice never contains."""
     hour_frac = df.index.hour + df.index.minute / 60.0
     rel_hour = (hour_frac - pivot_hour) % 24
     order = np.argsort(rel_hour, kind="stable")
@@ -559,13 +524,8 @@ def _rotate_chronological(df: pd.DataFrame, *, pivot_hour: float) -> pd.DataFram
 
 
 def _steps_for(n_rows: int, native_dt_s: float) -> int:
-    """Step count at PHASE_DT_S resolution matching a slice's real elapsed duration.
-
-    Absorption and desorption aren't equal-length in real time (day/night varies by
-    latitude and season), so each phase gets its own step count rather than being
-    forced onto a fixed 12 h grid -- that would silently speed up or slow down real
-    time within the ODE integration.
-    """
+    """Step count at PHASE_DT_S matching a slice's real elapsed duration -- day/night
+    lengths vary, so a fixed 12 h grid would distort real time inside the ODE."""
     return max(4, int(round(n_rows * native_dt_s / PHASE_DT_S)))
 
 
@@ -579,11 +539,8 @@ def _resample_phase(df: pd.DataFrame, n: int = STEPS_PER_PHASE) -> PhaseProfile:
         solar_src = df.get("shortwave_radiation", pd.Series(0.0, index=df.index))
         solar = solar_src.astype(float).values[idx]
     else:
-        # The absorption/desorption day/night split can wrap midnight, so the
-        # slice's rows aren't contiguous in calendar time (e.g. 20:00-23:45
-        # then 00:00-05:45). Interpolate by row position within the slice,
-        # not by real timestamp -- a calendar reindex would silently drop
-        # whichever chunk falls outside the first chunk's forward span.
+        # The day/night split can wrap midnight, so rows aren't contiguous in calendar
+        # time -- interpolate by row position; a calendar reindex would drop a chunk.
         x_src = np.arange(len(df))
         x_tgt = np.linspace(0, len(df) - 1, n)
         rh = np.interp(x_tgt, x_src, df["relative_humidity_2m"].astype(float).values) / 100.0
@@ -718,9 +675,7 @@ def real_weather_days_from_df(
             continue
     return days_out
 
-# =============================================================================
-# Wilson Note S1 Fig. S1D mass-transfer validation profile (24 h cycle)
-# =============================================================================
+# --- Wilson Note S1 Fig. S1D mass-transfer validation profile (24 h cycle) ---
 
 FIG_S1_TEMPERATURE_C = 25.0
 FIG_S1_ABSORPTION_RH = 0.5
@@ -765,9 +720,7 @@ def fig_s1_initial_c_w(*, h_m: float = H0_M) -> float:
     """Initial brine state matching Fig. S1D start (~1.2 L/m² at H₀)."""
     return c_w_from_water_in_gel_l_m2(FIG_S1_INITIAL_WATER_L_M2, h_m)
 
-# =============================================================================
-# Wilson Fig. 4 Atacama field-test weather (24 h from 18:00)
-# =============================================================================
+# --- Wilson Fig. 4 Atacama field-test weather (24 h from 18:00) ---
 
 _WEATHER_DATA_DIR = Path(__file__).resolve().parent / "data" / "weather"
 ATACAMA_RH_CSV = _WEATHER_DATA_DIR / "Atacama_RH.csv"
@@ -783,9 +736,8 @@ DESORPTION_HOURS = 12.0
 # Atacama field protocol (Methods): install at 8 a.m., ~8 h desorption in sun.
 ATACAMA_INSTALL_HOUR_FROM_ORIGIN = 14.0  # 18:00 + 14 h = 08:00
 ATACAMA_WIND_STEP_HOUR_FROM_ORIGIN = 20.0  # 18:00 + 20 h = 14:00 (2 p.m.)
-# Digitized Fig. 4 curves begin ~0.15 h after 8 a.m. (first data point ≈ 8:09 a.m.),
-# so the model desorption is started there rather than exactly at 8:00 a.m. The
-# window still ends at 4 p.m. (8 h from 8 a.m.).
+# Digitized Fig. 4 curves start ≈8:09 a.m., so desorption starts there, not 8:00 a.m.;
+# the window still ends at 4 p.m.
 ATACAMA_DESORPTION_START_OFFSET_H = 0.15
 ATACAMA_FIELD_DESORPTION_HOURS = 8.0 - ATACAMA_DESORPTION_START_OFFSET_H
 ATACAMA_FIELD_DESORPTION_STEPS = int(
@@ -797,11 +749,8 @@ ATACAMA_CONDENSER_FAN_H_AMB_W_M2_K = 10.0
 
 
 def atacama_field_profile() -> DailyWeatherProfile:
-    """Atacama field validation: 12 h open absorption, desorption from ~8:09 a.m.
-
-    Desorption begins where the digitized Fig. 4 curves start (≈0.15 h after
-    8 a.m.) and runs through 4 p.m.
-    """
+    """Atacama field validation: 12 h open absorption, then desorption from where the
+    digitized Fig. 4 curves start (≈8:09 a.m.) through 4 p.m."""
     return _build_atacama_profile(
         desorption_start_h=(
             ATACAMA_INSTALL_HOUR_FROM_ORIGIN + ATACAMA_DESORPTION_START_OFFSET_H
@@ -905,10 +854,8 @@ def _interp_clamped(
 
 
 def _atacama_h_amb_w_m2_k(hours_from_6pm: float) -> float:
-    """Wilson Atacama Methods: h_amb = 1 W/m²K, stepped to 10 W/m²K at 2 p.m.
-
-    Fig. 4 timeline origin is 18:00; 2 p.m. local = hour 20 on that axis.
-    """
+    """Wilson Atacama Methods: h_amb = 1 W/m²K stepped to 10 W/m²K at 2 p.m. (Fig. 4
+    timeline origin is 18:00, so 2 p.m. local = hour 20)."""
     return (
         10.0
         if hours_from_6pm >= ATACAMA_WIND_STEP_HOUR_FROM_ORIGIN

@@ -1,27 +1,13 @@
-"""Gaussian-process surrogate for combined_lcow(design_vector), plus a
-separate feasibility classifier.
+"""Gaussian-process surrogate for combined_lcow(design_vector) plus a separate
+feasibility classifier.
 
-scikit-learn's GaussianProcessRegressor, not BoTorch/GPyTorch: the problem is
-6-D with a ~50-80 point evaluation budget, no GPU/multi-fidelity need, and
-scikit-learn+scipy are already shared, lightweight dependencies across every
-sibling solar_lumped / waste-heat/lumped package. BoTorch is the natural
-upgrade for principled batch qEI or a joint multi-output (both-sites) model
-if a future version needs it.
+scikit-learn over BoTorch/GPyTorch: 6-D with a ~50-80 point budget and no GPU need.
+Feasibility is modelled separately because penalized/partially-penalized LCOWs aren't real
+measurements and corrupt the regression's calibration -- the GP fits only fully-feasible
+designs, a GaussianProcessClassifier learns P(feasible | x) from all of them, and
+acquisition.py weights EI by it ("constrained EI").
 
-Feasibility is modeled separately from LCOW, not folded into a single
-regression: infeasible designs get a finite sentinel LCOW
-(evaluator.PENALTY_LCOW_USD_PER_M3), and with combine_rule="mean" a
-partially-infeasible design (one site ok, one site penalized) lands
-somewhere between a real value and the sentinel -- neither is a real LCOW
-measurement, and feeding either into the LCOW regression corrupts its
-calibration (see gpu_sweep/../sawh_bayesopt diagnostics: a couple of such
-points out of 39 pushed standardized_residual_std to ~86 when they should
-have been excluded). The LCOW GP here fits *only* on fully-feasible designs;
-a separate GaussianProcessClassifier learns P(feasible | x) from every
-evaluated design (feasible and infeasible both -- that's exactly the signal
-a classifier needs), and acquisition.py weights EI by that probability
-("constrained EI") so proposals near known-infeasible regions are naturally
-discouraged without ever training the regression on contaminated values.
+# ponytail: sklearn GP, ~50-80 point budget; move to BoTorch for batch qEI or multi-output.
 """
 
 from __future__ import annotations
@@ -62,10 +48,8 @@ def build_gp_classifier(
     n_restarts_optimizer: int = 10,
     seed: int = 0,
 ) -> GaussianProcessClassifier:
-    """P(feasible | x). No WhiteKernel term: GaussianProcessClassifier fits a
-    latent GP via Laplace approximation with its own noise handling, unlike
-    the regressor above which needs an explicit observation-noise term.
-    """
+    """P(feasible | x). No WhiteKernel: GaussianProcessClassifier's Laplace approximation
+    handles noise itself, unlike the regressor above."""
     kernel = ConstantKernel(1.0, (1e-3, 1e3)) * Matern(
         length_scale=[1.0] * n_dims,
         length_scale_bounds=(1e-2, 1e2),
@@ -84,21 +68,15 @@ class SurrogateState:
     bounds: DesignBounds
     X_raw: np.ndarray = field(default_factory=lambda: np.zeros((0, len(VAR_ORDER))))
     y: np.ndarray = field(default_factory=lambda: np.zeros((0,)))
-    # True iff the corresponding y is a real, uncontaminated LCOW measurement
-    # (all sites feasible for that design) -- see module docstring. gp is fit
-    # on X_raw[feasible]/y[feasible] only; clf is fit on all of X_raw against
-    # this same array.
+    # True iff y is a real LCOW measurement (all sites feasible). gp fits on
+    # X_raw[feasible]/y[feasible]; clf fits on all X_raw against this array.
     feasible: np.ndarray = field(default_factory=lambda: np.zeros((0,), dtype=bool))
     clf: GaussianProcessClassifier | None = None
 
     @property
     def y_best(self) -> float:
-        """Best *feasible* observation. Falls back to the unmasked min only
-        if literally nothing feasible has been observed yet (keeps this
-        finite/usable during the earliest bootstrap steps rather than
-        crashing), which should be rare -- LHS init over a reasonable design
-        space normally finds several feasible points immediately.
-        """
+        """Best feasible observation, or the unmasked min if nothing feasible has been seen
+        yet (keeps bootstrap steps usable; rare, since LHS init usually finds several)."""
         if self.feasible.any():
             return float(np.min(self.y[self.feasible]))
         if self.y.size == 0:
@@ -123,12 +101,8 @@ def append_observations(
     y_new: np.ndarray,
     feasible_new: np.ndarray | None = None,
 ) -> SurrogateState:
-    """feasible_new=None means "treat every new point as feasible" -- the
-    right default for synthetic/test objectives with no feasibility concept,
-    and for acquisition.py's Kriging-Believer fantasized points (which stand
-    in for a believed-good real observation). Real evaluator.py-backed
-    callers (bayesopt.py) should always pass real feasibility flags.
-    """
+    """feasible_new=None treats every new point as feasible -- right for synthetic objectives
+    and Kriging-Believer fantasy points; bayesopt.py must pass real flags."""
     X_new = np.asarray(X_new, dtype=float).reshape(-1, len(VAR_ORDER))
     y_new = np.asarray(y_new, dtype=float).reshape(-1)
     feasible_new = (
@@ -142,12 +116,8 @@ def append_observations(
 
 
 def fit(state: SurrogateState) -> SurrogateState:
-    """Fits the LCOW regression on feasible points only. Raises if fewer than
-    2 feasible points exist yet -- callers (bayesopt.py's main loop) should
-    check state.n_feasible >= 2 before calling this, and fall back to pure
-    exploration (Latin hypercube) otherwise rather than treating this as a
-    real error.
-    """
+    """Fit the LCOW regression on feasible points only. Raises below 2 feasible points --
+    callers should check state.n_feasible >= 2 and explore via LHS instead."""
     n_feasible = int(state.feasible.sum())
     if n_feasible < 2:
         raise ValueError(
@@ -162,13 +132,8 @@ def fit(state: SurrogateState) -> SurrogateState:
 
 
 def fit_feasibility(state: SurrogateState, *, seed: int = 0) -> SurrogateState:
-    """Fits (or refits) state.clf on every evaluated point (feasible and
-    infeasible both) against state.feasible. A no-op (clf left as None) if
-    only one class has been observed so far -- GaussianProcessClassifier
-    can't fit with a single class, and "no evidence of infeasibility
-    anywhere yet" is correctly represented downstream as P(feasible)=1
-    everywhere (see predict_feasibility_batch), not an error.
-    """
+    """Fit state.clf on every evaluated point against state.feasible. No-op (clf stays None)
+    with only one class observed -- downstream that reads as P(feasible)=1, not an error."""
     if state.X_raw.shape[0] < 2 or len(np.unique(state.feasible)) < 2:
         state.clf = None
         return state
@@ -180,26 +145,11 @@ def fit_feasibility(state: SurrogateState, *, seed: int = 0) -> SurrogateState:
 
 
 def check_hyperparameter_convergence(gp: GaussianProcessRegressor, *, edge_tol: float = 0.01) -> list[str]:
-    """Flags fitted hyperparameters that landed within edge_tol (relative,
-    in log space) of their optimization bounds.
-
-    n_restarts_optimizer=10 (see build_gp above) restarts sklearn's internal
-    L-BFGS-B from 10 random points and keeps the best log marginal likelihood
-    found, but that's still a local, gradient-based search that can silently
-    converge to a boundary rather than a true interior optimum (sklearn's own
-    ConvergenceWarning fires for exactly this case -- this is the same
-    signal, made an explicit, machine-checkable diagnostic instead of
-    something you only notice by reading warnings scroll by). A
-    hyperparameter pinned at its bound usually means the search wants a wider
-    bound, not just more restarts -- see length_scale_bounds/noise_level
-    bounds in build_gp/build_gp_classifier.
-    """
-    # gp.kernel_.theta/.bounds are the fitted hyperparameters and their bounds
-    # in log space, in lockstep order with the non-fixed entries of
-    # gp.kernel_.hyperparameters (each contributing hp.n_elements slots, e.g.
-    # a per-dimension length_scale contributes n_dims slots) -- reading
-    # .value directly off each Hyperparameter isn't available in sklearn's
-    # namedtuple, so theta/bounds is the supported way to get fitted values.
+    """Flag fitted hyperparameters within edge_tol (relative, log space) of their bounds --
+    sklearn's ConvergenceWarning made machine-checkable. A pinned hyperparameter usually
+    means the bound is too tight, not that more restarts are needed."""
+    # theta/bounds are the log-space fitted hyperparameters, in lockstep with the non-fixed
+    # kernel_.hyperparameters (hp.n_elements slots each); sklearn exposes no .value.
     warnings_out = []
     theta, log_bounds = gp.kernel_.theta, gp.kernel_.bounds
     pos = 0
@@ -244,9 +194,7 @@ def predict_batch(state: SurrogateState, X: np.ndarray) -> tuple[np.ndarray, np.
 
 
 def predict_feasibility_batch(state: SurrogateState, X: np.ndarray) -> np.ndarray:
-    """P(feasible) at raw design vectors X, shape (n,). All-ones if state.clf
-    is None (no evidence of infeasibility observed yet -- see fit_feasibility).
-    """
+    """P(feasible) at raw design vectors X, shape (n,); all-ones when state.clf is None."""
     X = np.asarray(X, dtype=float).reshape(-1, len(VAR_ORDER))
     if state.clf is None:
         return np.ones(X.shape[0])

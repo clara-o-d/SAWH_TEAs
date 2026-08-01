@@ -1,70 +1,25 @@
 #!/usr/bin/env python3
-"""Grid sweep over ei_xi x stall_rel_tol x n_init, running a full BayesOpt
-loop + gp_diagnostics.py for every combination and aggregating the results.
+"""Grid sweep over ei_xi x stall_rel_tol x n_init (3x3x3 by default), running a full
+BayesOpt loop + gp_diagnostics.py per combination and aggregating the results.
 
-Motivation: a single sawh_bayesopt run (outputs/runs/sherlock_gpu_run_1)
-stalled after 33-39 evaluations with its EI-proposed points clustering
-tightly around the incumbent -- exploitation converging quickly under
-ei_xi=0.01 (small EI exploration bonus) and a stall rule (stall_rel_tol,
-stall_rounds) that can stop the search early. This sweep asks: does raising
-ei_xi (more exploration bonus), loosening/tightening stall_rel_tol (when the
-loop gives up), or growing n_init (more guaranteed LHS coverage before EI
-even starts) change search quality, and by how much?
+Motivation: a baseline run stalled after 33-39 evaluations with EI points clustered on the
+incumbent. This asks whether more exploration bonus (ei_xi), a different stall rule
+(stall_rel_tol), or more LHS coverage (n_init) changes search quality.
 
-Grid (3 x 3 x 3 = 27 combinations by default):
-  - ei_xi: only values *greater* than the baseline run's 0.01 (per request) --
-    default (0.02, 0.05, 0.1).
-  - stall_rel_tol: both greater and lesser than the baseline's 0.005 --
-    default (0.001, 0.005, 0.02).
-  - n_init: only values *greater* than the baseline's 24 -- default
-    (30, 36, 42). n_total is NOT held fixed across these -- it's set to
-    n_init + --bo-budget (default 26, matching the baseline's implied
-    50-24=26 post-init evaluations) so every combo gets the same *EI-based*
-    evaluation budget regardless of n_init. Holding n_total fixed instead
-    would confound "more LHS coverage" with "less EI budget", making higher
-    n_init look worse for a reason that has nothing to do with LHS coverage.
+n_total is not held fixed: it is n_init + --bo-budget, so every combo gets the same EI
+budget regardless of n_init -- otherwise "more LHS coverage" is confounded with "less EI
+budget". All combos share one seed, isolating each hyperparameter's effect.
 
-Every combination reuses the *same* seed (--seed, default 0) -- the point is
-isolating each hyperparameter's effect, not adding RNG-driven variance on
-top of it.
+Each combo writes its own outputs/runs/<sweep-id>/<combo-tag>/ with the same artifacts
+run_bayesopt.py's CLI produces, plus gp_diagnostics run in-process; the sweep root gets
+sweep_results.csv/.json with one row per combo. A failing combo gets an "error" field
+rather than being dropped.
 
-For each combination, in its own outputs/runs/<sweep-id>/<combo-tag>/:
-  - Runs the full BayesOpt loop (sawh_bayesopt.bayesopt.run_bayesopt) exactly
-    as scripts/run_bayesopt.py's CLI does (same write_run_config/
-    write_history_csv/write_convergence_plot/write_de_diagnostics/
-    verify_optimum/write_final_report sequence).
-  - Runs scripts/diagnostics/gp_diagnostics.py's main() against that run_dir
-    (in-process, not a subprocess) -- this is what actually applies the
-    updated result.success/result.nit-vs-maxiter and standardized-residual/
-    MSLL checks to every combination, not just the run that originally
-    prompted this sweep.
-
-Then writes, in outputs/runs/<sweep-id>/:
-  - sweep_results.csv / sweep_results.json: one row per combination with its
-    hyperparameters, best LCOW found, stopped_reason, wall-clock, and the key
-    gp_regression_report.json / de_diagnostics.json fields.
-  - Nothing is silently dropped: a combination whose run_bayesopt/
-    verify_optimum/gp_diagnostics step raises gets an "error" field instead
-    of being skipped, and still appears as a row.
-
-Runs combinations in parallel via a fresh subprocess per combination
-(ProcessPoolExecutor, max_tasks_per_child=1 -- see the GPU-sharing note
-below), across --n-workers workers spread over --gpu-ids.
-
-GPU sharing: JAX initializes its GPU backend once per process and then
-caches it -- if a worker process were reused for a second combination with a
-different intended GPU/memory-fraction assignment, that second assignment
-would silently never take effect. max_tasks_per_child=1 forces a brand new
-process (and therefore a fresh, correctly-configured JAX backend) for every
-single combination, at the cost of one process-spawn per combination (this
-sweep's per-combination unit of work is minutes, not milliseconds, so that
-overhead is negligible). Each combination's process sets
-CUDA_VISIBLE_DEVICES to its assigned GPU and
-XLA_PYTHON_CLIENT_MEM_FRACTION=1/n_workers *before* importing anything from
-sawh_bayesopt/solar_lumped (which only imports jax lazily, inside
-evaluate_batch's first call) -- so several combinations can safely share one
-GPU's memory without one process preallocating 90% of it and starving the
-rest (JAX's default behavior absent this env var).
+GPU sharing: combos run in fresh subprocesses (max_tasks_per_child=1) because JAX caches
+its GPU backend per process, so a reused worker would silently ignore the next combo's
+CUDA_VISIBLE_DEVICES / XLA_PYTHON_CLIENT_MEM_FRACTION. Those are set before any
+sawh_bayesopt/solar_lumped import (jax loads lazily), letting several combos share a GPU
+without one preallocating 90% of its memory.
 
 Usage (full sweep, 4 workers on 1 GPU):
     python3 scripts/hp_sweep.py --sweep-id hp_sweep_1 --n-workers 4 --gpu-ids 0 \\
@@ -140,11 +95,8 @@ def _combo_tag(ei_xi: float, stall_rel_tol: float, n_init: int) -> str:
 
 
 def _run_one_combo(task: dict) -> dict:
-    """Runs in its own (spawn, max_tasks_per_child=1) worker process -- see
-    module docstring's GPU-sharing note for why that matters. Never raises:
-    any failure at any stage is captured into the returned dict's "error"
-    field instead of killing the whole sweep.
-    """
+    """Runs in its own spawn/max_tasks_per_child=1 worker process (see the module
+    docstring's GPU-sharing note). Never raises -- failures land in the "error" field."""
     if task["gpu_id"] is not None:
         os.environ["CUDA_VISIBLE_DEVICES"] = str(task["gpu_id"])
         os.environ["XLA_PYTHON_CLIENT_MEM_FRACTION"] = str(task["mem_fraction"])
@@ -243,12 +195,9 @@ def _run_one_combo(task: dict) -> dict:
 
 
 def _load_completed_row(task: dict) -> dict | None:
-    """Reconstruct a combo's row from a prior run's on-disk outputs, if it
-    looks complete (report.json and gp_regression_report.json both present --
-    the two files _run_one_combo writes last, after everything else
-    succeeded). Returns None if either is missing/unreadable, so the caller
-    falls back to actually running the combination.
-    """
+    """Reconstruct a combo's row from a prior run's outputs if both report.json and
+    gp_regression_report.json exist (the last two files written). None otherwise, so the
+    caller re-runs the combination."""
     run_dir = Path(task["run_dir"])
     report_path = run_dir / "report.json"
     gp_report_path = run_dir / "diagnostics" / "gp_regression_report.json"

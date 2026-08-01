@@ -7,7 +7,6 @@ import math
 from solar_lumped.physics import (
     LICL_VAPOR_PRESSURE,
     equilibrium_salt_mass_fraction_licl,
-    vapor_pressure_ratio,
     water_activity_licl,
     water_vapor_pressure_pa,
 )
