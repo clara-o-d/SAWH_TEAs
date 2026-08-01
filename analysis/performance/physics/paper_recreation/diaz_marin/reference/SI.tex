@@ -1,0 +1,709 @@
+\documentclass[11pt]{article}
+
+% ---------- Packages ----------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{amsmath,amssymb,amsfonts}
+\usepackage{graphicx}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{caption}
+\usepackage{subcaption}
+\usepackage{authblk}
+\usepackage[colorlinks=true,citecolor=blue,linkcolor=blue,urlcolor=blue]{hyperref}
+\usepackage{natbib}
+\setcitestyle{super,open={},close={}}
+\usepackage{siunitx}
+\usepackage{xcolor}
+
+\newcommand{\ce}[1]{\mathrm{#1}} % simple chemical-species text
+
+\title{Supplementary Information\\[4pt]
+\Large Physics-based prediction of moisture-capture properties of hydrogels}
+
+\author[1]{Carlos D. D\'iaz-Mar\'in}
+\author[1,2]{Lorenzo Masetti}
+\author[1]{Miles A. Roper}
+\author[3]{Kezia E. Hector}
+\author[1]{Yang Zhong}
+\author[4]{Zhengmao Lu}
+\author[1]{Omer Caylan}
+\author[1]{Gustav Graeber}
+\author[4]{Jeffrey C. Grossman}
+
+\affil[1]{Department of Mechanical Engineering, Massachusetts Institute of Technology, Cambridge, Massachusetts 02139, United States}
+\affil[2]{Department of Mechanical and Process Engineering, ETH Zurich, Zurich, Switzerland}
+\affil[3]{Department of Chemical Engineering, Massachusetts Institute of Technology, Cambridge, Massachusetts 02139, United States}
+\affil[4]{Department of Materials Science and Engineering, Massachusetts Institute of Technology, Cambridge, Massachusetts 02139, United States}
+
+\renewcommand\Authands{, }
+\date{}
+
+\begin{document}
+\maketitle
+\begin{center}
+\href{mailto:cddiaz@mit.edu}{cddiaz@mit.edu}
+\end{center}
+
+\clearpage
+
+%======================================================================
+\section*{Supplementary Note S1: Characterization of hydrogel-salt composites}
+%======================================================================
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.42\textwidth]{figures/fig-000.jpg}
+\caption{\textbf{Composition of PAM-LiCl with lower crosslinking.} Electron dispersive x-ray spectroscopy results of a PAM-LiCl hydrogel with 4~g of salt per g of polymer and 0.5~mg of crosslinker per g of polymer. The hydrogel contains carbon, nitrogen, and chloride as expected and similarly to the hydrogels with higher crosslinking (Fig.~2h).}
+\label{fig:S1}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\begin{subfigure}{0.85\textwidth}
+\includegraphics[width=\textwidth]{figures/fig-001.jpg}
+\caption{PAM-LiCl 4~g/g \hspace{4cm} PAM-LiCl 8~g/g}
+\end{subfigure}\\[6pt]
+\begin{subfigure}{0.85\textwidth}
+\includegraphics[width=\textwidth]{figures/fig-002.jpg}
+\caption{PVA-LiCl 4~g/g \hspace{4cm} PAM-LiBr 4~g/g}
+\end{subfigure}
+\caption{\textbf{SEM images of hydrogel-salt composites.} Scanning electron microscope images of the a) PAM-LiCl 4~g/g, b) PAM-LiCl 8~g/g, c) PVA-LiCl 4~g/g, and d) PAM-LiBr 4~g/g hydrogel-salt composites in their dried state. The hydrogels have a solid surface due to the crystallized salt and have no macropores, as no pore-forming step was followed during synthesis.}
+\label{fig:S2}
+\end{figure}
+
+\clearpage
+
+We also characterized the elastic modulus of the samples with different crosslinking density by compression tests. We synthesized PAM-LiCl 4~g/g samples with 0.1 and 10~mg/g crosslinker/PAM in petri dishes (Falcon, 35~$\times$~10~mm). We carried out compression tests of the as-synthesized samples using a TA.XT plus Texture Analyser, simultaneously measuring displacement and force. We obtained the stress and strain curves (Fig.~\ref{fig:S3}) by measuring the thickness and diameter of the samples in the as-synthesized state.
+
+\begin{figure}[htbp]
+\centering
+\begin{subfigure}{0.55\textwidth}
+\includegraphics[width=\textwidth]{figures/fig-004.jpg}
+\caption{Stress--strain curves}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.4\textwidth}
+\includegraphics[width=\textwidth]{figures/fig-003.jpg}
+\caption{PAM-LiCl 4~g/g, 10~mg/g crosslinker/PAM}
+\end{subfigure}\\[6pt]
+\begin{subfigure}{0.4\textwidth}
+\includegraphics[width=\textwidth]{figures/fig-005.jpg}
+\caption{PAM-LiCl 4~g/g, 0.1~mg/g crosslinker/PAM}
+\end{subfigure}
+\caption{\textbf{Mechanical properties of hydrogel-salt composites with different crosslinking density.} a)~Stress--strain curves for PAM-LiCl 4~g/g hydrogels with crosslinking contents of 10~mg/g and 0.1~mg/g. We calculate the elastic moduli from the linear portion of the stress--strain curves. The hydrogel with the higher crosslinker content had a higher modulus of 2.3~kPa, while the hydrogel with the lower crosslinking content had a modulus of 0.3~kPa. The higher modulus with higher crosslinking density agrees with previous literature.\cite{gao2022} As a result of the different mechanical properties, b)~the stiffer hydrogel does not significantly deform when a weight of 10~grams is applied on top, c)~in contrast with the lower stiffness hydrogel. All measurements of moduli and photos (S3b and S3c) correspond to hydrogel-salt composites in the as-fabricated state.}
+\label{fig:S3}
+\end{figure}
+
+\clearpage
+
+%======================================================================
+\section*{Supplementary Note S2: Thermodynamic model for hydrogel-salt composites}
+%======================================================================
+
+Here we develop a thermodynamic model for the Gibbs free energy change of a hydrogel-salt composite, $\Delta G$. Specifically, we define $\Delta G$ as the Gibbs free energy per unit of polymer volume. We then use this Gibbs free energy to estimate the water chemical potential and sorption enthalpy in hydrogels. We describe the hydrogel in terms of its molar concentration of water, ions, and polymer, $c_\mathrm{w}$, $c_\mathrm{i}$, and $c_\mathrm{p}$, respectively, where $c_\mathrm{i}$ corresponds to the $i$-th ion and all concentrations are here defined relative to the volume of polymer. With these definitions of concentrations, the volumes of water and of the $i$-th ion relative to the polymer volume are $\Omega_\mathrm{w} c_\mathrm{w}$ and $\Omega_\mathrm{i} c_\mathrm{i}$, respectively, where $\Omega_\mathrm{w}$ is the volume of a mole of water and $\Omega_\mathrm{i}$ is the volume of a mole of the $i$-th ion.
+
+We can write the volume fractions of water, the $i$-th ion, and polymer, $\phi_\mathrm{w}$, $\phi_\mathrm{i}$, and $\phi_\mathrm{p}$, as
+
+\begin{align}
+\phi_\mathrm{w} &= \frac{\Omega_\mathrm{w} c_\mathrm{w}}{\Omega_\mathrm{w} c_\mathrm{w} + \sum \Omega_\mathrm{i} c_\mathrm{i} + 1} \tag{S1}\\[4pt]
+\phi_\mathrm{i} &= \frac{\Omega_\mathrm{i} c_\mathrm{i}}{\Omega_\mathrm{w} c_\mathrm{w} + \sum \Omega_\mathrm{i} c_\mathrm{i} + 1} \tag{S2}\\[4pt]
+\phi_\mathrm{p} &= \frac{1}{\Omega_\mathrm{w} c_\mathrm{w} + \sum \Omega_\mathrm{i} c_\mathrm{i} + 1} \tag{S3}
+\end{align}
+
+We note that $\phi_\mathrm{w} + \sum \phi_\mathrm{i} + \phi_\mathrm{p} = 1$. Table~\ref{tab:S1} shows the values of $\Omega_\mathrm{w}$, $\Omega_\mathrm{i}$, and $c_\mathrm{i}$ considered in our model.
+
+We write the Gibbs free energy of the hydrogel-salt composite following the Flory--Rehner theory, as the sum of an entropic term due to mixing between the polymer, water, and ions, $T\Delta S_\mathrm{mix}$, the enthalpy of mixing between these components, $\Delta H_\mathrm{mix}$, and the Gibbs free energy related to the elasticity, $\Delta G_\mathrm{elas}$.\cite{chen2022}
+
+\begin{equation}
+\Delta G = -T\Delta S_\mathrm{mix} + \Delta H_\mathrm{mix} + \Delta G_\mathrm{elas}. \tag{S4}
+\end{equation}
+
+This description did not express the Gibbs free energy in terms of its natural thermodynamic variables: pressure and concentration.\cite{chen2022} Chen had reformulated the Flory--Rehner theory using Helmholtz free energy of the combined hydrogel and ambient and identified that the elastic energy term is related to the pressure inside the hydrogel.\cite{chen2022} The increased pressure can in principle lead to different thermodynamic properties of water inside the hydrogel, such as a reduced latent heat.\cite{chen2022} However, as discussed in Supplementary Note S6, this effect is small under the conditions studied here. As such, we will continue to use the Flory--Rehner notation.\cite{flory1953}
+
+In Eqn.~S4, the first two terms would also be present in a solution that contains polymer, water, and ions, while the last term is only present for either physically or chemically crosslinked gels.\cite{flory1953}
+
+The entropic mixing term, $T\Delta S_\mathrm{mix}$, can be expressed by considering mixing between the polymer, water, and ions.\cite{atkins2006}
+
+\begin{equation}
+T\Delta S_\mathrm{mix} = -RT\left(c_\mathrm{w} \ln \phi_\mathrm{w} + \sum c_\mathrm{i} \ln \phi_\mathrm{i} + c_\mathrm{p} \ln \phi_\mathrm{p}\right), \tag{S5}
+\end{equation}
+
+where $R$ is the ideal gas constant and $T$ is the absolute temperature.
+
+The enthalpic term can be expressed in three terms for the pairwise interactions between water, polymer, and ions.\cite{chen2022,flory1953,atkins2006}
+
+\begin{align}
+\Delta H_\mathrm{mix} &= \Delta H_\mathrm{mix,p-w} + \Delta H_\mathrm{mix,p-i} + \Delta H_\mathrm{mix,w-i} \notag\\
+&= RT\left[\chi_\mathrm{p-w} c_\mathrm{w}\right]\phi_\mathrm{p} + RT\left[\sum \chi_\mathrm{p-i} c_\mathrm{i}\right]\phi_\mathrm{p} + RT\left[c_\mathrm{w} \ln \gamma_\mathrm{w} + \sum c_\mathrm{i} \ln \gamma_\mathrm{i}\right], \tag{S6}
+\end{align}
+
+where the first term, $\Delta H_\mathrm{mix,p-w} = RT\left[\chi_\mathrm{p-w} c_\mathrm{w}\right]\phi_\mathrm{p}$, corresponds to polymer--water mixing enthalpy, the second term, $\Delta H_\mathrm{mix,p-i} = RT\left[\sum \chi_\mathrm{p-i} c_\mathrm{i}\right]\phi_\mathrm{p}$, corresponds to polymer--ion mixing enthalpy, and the last term, $\Delta H_\mathrm{mix,w-i} = RT\left[c_\mathrm{w} \ln \gamma_\mathrm{w} + \sum c_\mathrm{i} \ln \gamma_\mathrm{i}\right]$, corresponds to water--ion mixing enthalpy. These energetic terms are captured by the Flory chi parameter between polymer and water, $\chi_\mathrm{p-w}$,\cite{flory1953} the Flory chi parameter between the polymer and $i$-th ion, $\chi_\mathrm{p-i}$,\cite{chen2022} and the activity coefficients of water and the $i$-th ion in the salt solution, $\gamma_\mathrm{w}$ and $\gamma_\mathrm{i}$.\cite{atkins2006} In writing Eqn.~S6, we have considered a non-polyelectrolyte hydrogel (i.e.\ one without charges in its polymer structure) and we considered a simplified treatment for the polymer--ion interactions as captured only by the respective Flory chi parameter.\cite{chen2022} Furthermore, we have considered that all the nonidealities of ion--water mixing arise due to enthalpy. This allowed us to neglect non-ideal entropy of mixing for the water and ions, consistent with Eqn.~S5.
+
+Lastly, we write the elastic term following Flory--Rehner theory as\cite{rubinstein2003,bouklas2012}
+
+\begin{align}
+\Delta G_\mathrm{elas} &= \frac{N_\mathrm{c} RT}{2}\left(\lambda_{xx}^2 + \lambda_{yy}^2 + \lambda_{zz}^2 - 3 - \ln \lambda_{xx}\lambda_{yy}\lambda_{zz}\right) \notag\\
+&\quad + \frac{N_\mathrm{C} RT}{\lambda_{yy}\lambda_{zz}}\left(\lambda_{xx} - \frac{1}{2\lambda_{xx}}\right)\left(1 + \Omega_\mathrm{w} c_\mathrm{w} + \sum \Omega_\mathrm{i} c_\mathrm{i} - \lambda_{xx}\lambda_{yy}\lambda_{zz}\right), \tag{S7}
+\end{align}
+
+where $N_\mathrm{c}$ is the crosslinking density of the hydrogel. $\lambda_{xx}$, $\lambda_{yy}$, and $\lambda_{zz}$ are the hydrogel stretches along three perpendicular directions $x$, $y$, and $z$. The term $\frac{N_\mathrm{c} RT}{2}\left(\lambda_{xx}^2 + \lambda_{yy}^2 + \lambda_{zz}^2 - 3\right)$ accounts for the change in configuration entropy due to chain extension. The term $\frac{N_\mathrm{c} RT}{2}\left(\ln \lambda_{xx}\lambda_{yy}\lambda_{zz}\right)$ accounts for the change in entropy due to volume changes for the entire hydrogel. The last term arises from the incompressibility constraint, which can be treated with a Lagrange multiplier, $\frac{N_\mathrm{C} RT}{\lambda_{yy}\lambda_{zz}}\left(\lambda_{xx} - \frac{1}{2\lambda_{xx}}\right)$, and which sets that $\lambda_{xx}\lambda_{yy}\lambda_{zz} = 1 + \Omega_\mathrm{w} c_\mathrm{w} + \sum \Omega_\mathrm{i} c_\mathrm{i}$.\cite{bouklas2012}
+
+We can combine Eqns.~S4--S7 to write the Gibbs free energy of the hydrogel-salt composite. To simplify the expression, we will assume that the hydrogel expands only in the thickness direction, which we will consider the $x$-direction. This is consistent with common 1D expansion in water sorption applications\cite{li2020} and is representative of the conditions of our experiments. Therefore, only $\lambda_{xx}$ is a variable. The stretches in the $y$- and $z$-directions are constant, taken as $\lambda_{yy} = \lambda_{zz} = \lambda_0$. We also consider that the degree of polymerization is large. Then, the polymer chains have many monomers, but there are few polymer molecules. So we can consider $c_\mathrm{p} \approx 0$. With these assumptions, $\Delta G$ is given by:
+
+\begin{align}
+\Delta G &= RT\Bigg[c_\mathrm{w} \ln \phi_\mathrm{w} + \sum c_\mathrm{i} \ln \phi_\mathrm{i} + \chi_\mathrm{p-w} c_\mathrm{w} \phi_\mathrm{p} + \sum \chi_\mathrm{p-i} c_\mathrm{i}\, \phi_\mathrm{p} + c_\mathrm{w} \ln \gamma_\mathrm{w} + \sum c_\mathrm{i} \ln \gamma_\mathrm{i} \notag\\
+&\quad + \frac{N_\mathrm{c}}{2}\left(\lambda_{xx}^2 + 2\lambda_0^2 - 3 - \ln \lambda_{xx}\lambda_0^2\right) \notag\\
+&\quad + \frac{N_\mathrm{C}}{\lambda_0^2}\left(\lambda_{xx} - \frac{1}{2\lambda_{xx}}\right)\left(1 + \Omega_\mathrm{w} c_\mathrm{w} + \sum \Omega_\mathrm{i} c_\mathrm{i} - \lambda_{xx}\lambda_0^2\right)\Bigg], \tag{S8}
+\end{align}
+
+We use the previous thermodynamic framework to calculate the uptake and the enthalpy of sorption of hydrogel-salt composites as a function of hydrogel composition and of ambient conditions.
+
+\clearpage
+
+%======================================================================
+\section*{Supplementary Note S3: Thermodynamic model for uptake of hydrogel-salt composites}
+%======================================================================
+
+To derive expressions for the uptake, we note that this corresponds to an equilibrium property at which there is no mass transfer of moisture between the hydrogel and the ambient. The thermodynamic condition for mass transfer equilibrium is the equality of chemical potential.\cite{atkins2006} Therefore, for a hydrogel-salt composite in equilibrium with humid air, the chemical potential of water in the hydrogel, $\mu_\mathrm{w,hydrogel}$, and in the humid air, $\mu_\mathrm{w,air}$, must be identical:
+
+\begin{equation}
+\mu_\mathrm{w,air} = \mu_\mathrm{w,hydrogel} \tag{S9}
+\end{equation}
+
+The chemical potential of water vapor in the air is given by\cite{atkins2006}
+
+\begin{equation}
+\mu_\mathrm{w,air} = \mu_\mathrm{w}^0 + RT \ln p/p_\mathrm{sat} = \mu_\mathrm{w}^0 + RT \ln RH. \tag{S10}
+\end{equation}
+
+where $\mu_\mathrm{w}^0$ is the chemical potential of pure water, $p$ is the partial pressure of water vapor in the air, and $p_\mathrm{sat}$ is the saturation pressure of water. $RH = p/p_\mathrm{sat}$ is the relative humidity.
+
+The chemical potential of water in the hydrogel can be calculated from the Gibbs free energy of the hydrogel-salt composite as\cite{atkins2006}
+
+\begin{equation}
+\mu_\mathrm{w,hydrogel} = \mu_\mathrm{w}^0 + \frac{\partial \Delta G}{\partial c_\mathrm{w}} \tag{S11}
+\end{equation}
+
+From Eqns.~S8 and S11 we can then write:
+
+\begin{align}
+\left(\mu_\mathrm{w,hydrogel} - \mu_\mathrm{w}^0\right)/RT
+&= \ln \phi_\mathrm{w} + \left(1 - \phi_\mathrm{w}\right) - \frac{\Omega_\mathrm{w} \sum c_\mathrm{i}}{1 + \Omega_\mathrm{w} c_\mathrm{w} + \sum \Omega_\mathrm{i} c_\mathrm{i}} \notag\\
+&\quad + \chi_\mathrm{p-w}\left(\phi_\mathrm{p} - \frac{\phi_\mathrm{w}}{1 + \Omega_\mathrm{w} c_\mathrm{w} + \sum \Omega_\mathrm{i} c_\mathrm{i}}\right) - \frac{\sum \chi_\mathrm{p-i} c_\mathrm{i}\, \Omega_\mathrm{w}}{\left(1 + \Omega_\mathrm{w} c_\mathrm{w} + \sum \Omega_\mathrm{i} c_\mathrm{i}\right)^2} + \ln \gamma_\mathrm{w} \notag\\
+&\quad + c_\mathrm{w} \frac{\partial \ln \gamma_\mathrm{w}}{\partial c_\mathrm{w}} + \sum c_\mathrm{i} \frac{\partial \ln \gamma_\mathrm{i}}{\partial c_\mathrm{w}} + \frac{N_\mathrm{C} \Omega_\mathrm{w}}{\lambda_0^2}\left(\lambda_{xx} - \frac{1}{2\lambda_{xx}}\right) \tag{S12}
+\end{align}
+
+where we neglected the changes of the Flory chi parameters with the water concentration as these are typically small.\cite{graeber2023}
+
+We can further simplify Eqn.~S12 by noting that $\ln \phi_\mathrm{w} = \ln x_\mathrm{w} + \ln(1 - \phi_\mathrm{p})$, where we considered $\Omega_\mathrm{w} \approx \Omega_\mathrm{i}$, i.e.\ that the volume of ions and water molecules is similar. $x_\mathrm{w} = c_\mathrm{w}/(c_\mathrm{w} + \sum c_\mathrm{i})$ is the mole fraction of water relative to the salt solution contained in the hydrogel. We also use the Gibbs--Duhem relation $c_\mathrm{w}\frac{\partial \ln \gamma_\mathrm{w}}{\partial c_\mathrm{w}} + \sum c_\mathrm{i} \frac{\partial \ln \gamma_\mathrm{i}}{\partial c_\mathrm{w}} = 0$.\cite{stolen2003}
+
+\begin{align}
+\left(\mu_\mathrm{w,hydrogel} - \mu_\mathrm{w}^0\right)/RT
+&= \ln x_\mathrm{w}\gamma_\mathrm{w} + \ln(1 - \phi_\mathrm{p}) + \left(1 - \phi_\mathrm{w}\right) - \frac{\Omega_\mathrm{w} \sum c_\mathrm{i}}{1 + \Omega_\mathrm{w} c_\mathrm{w} + \sum \Omega_\mathrm{i} c_\mathrm{i}} \notag\\
+&\quad + \chi_\mathrm{p-w}\left(\phi_\mathrm{p} - \frac{\phi_\mathrm{w}}{1 + \Omega_\mathrm{w} c_\mathrm{w} + \sum \Omega_\mathrm{i} c_\mathrm{i}}\right) - \frac{\sum \chi_\mathrm{p-i} c_\mathrm{i}\, \Omega_\mathrm{w}}{\left(1 + \Omega_\mathrm{w} c_\mathrm{w} + \sum \Omega_\mathrm{i} c_\mathrm{i}\right)^2} \notag\\
+&\quad + \frac{N_\mathrm{C} \Omega_\mathrm{w}}{\lambda_0^2}\left(\lambda_{xx} - \frac{1}{2\lambda_{xx}}\right)
+= \mu_\mathrm{p-w} + \mu_\mathrm{w-i} + \mu_\mathrm{p-i} + \mu_\mathrm{elas}, \tag{S13}
+\end{align}
+
+where in the last equality we introduced four chemical potential terms accounting for the interactions between polymer and water, water and ions, polymer and ions, and elasticity, respectively. In these terms, the subscript identifies the type of interaction captured by this term. We define these as
+
+\begin{align}
+\frac{\mu_\mathrm{p-w}}{RT} &= \ln(1-\phi_\mathrm{p}) + \frac{1}{1 + \Omega_\mathrm{w} c_\mathrm{w} + \sum \Omega_\mathrm{i} c_\mathrm{i}} + \chi_\mathrm{p-w}\left(\frac{1 + \sum \Omega_\mathrm{i} c_\mathrm{i}}{\left(1 + \Omega_\mathrm{w} c_\mathrm{w} + \sum \Omega_\mathrm{i} c_\mathrm{i}\right)^2}\right), \tag{S14}\\[6pt]
+\frac{\mu_\mathrm{w-i}}{RT} &= \ln x_\mathrm{w}\gamma_\mathrm{w}, \tag{S15}\\[6pt]
+\frac{\mu_\mathrm{p-i}}{RT} &= \frac{\sum (\Omega_\mathrm{i} - \Omega_\mathrm{w}) c_\mathrm{i}}{1 + \Omega_\mathrm{w} c_\mathrm{w} + \sum \Omega_\mathrm{i} c_\mathrm{i}} - \frac{\sum \chi_\mathrm{p-i} c_\mathrm{i}\, \Omega_\mathrm{w}}{\left(1 + \Omega_\mathrm{w} c_\mathrm{w} + \sum \Omega_\mathrm{i} c_\mathrm{i}\right)^2}, \tag{S16}\\[6pt]
+\frac{\mu_\mathrm{elas}}{RT} &= \frac{N_\mathrm{C} \Omega_\mathrm{w}}{\lambda_0^2}\left(\lambda_{xx} - \frac{1}{2\lambda_{xx}}\right). \tag{S17}
+\end{align}
+
+with these definitions $\mu_\mathrm{w-i}$ is identical to the chemical potential of water in a salt solution,\cite{atkins2006} $\mu_\mathrm{p-i}$ becomes zero if there are no ions ($c_\mathrm{i} = 0$), and $\mu_\mathrm{elas}$ becomes zero if there are no crosslinks ($N_\mathrm{C} = 0$). We also note that if there are no ions ($c_\mathrm{i} = 0$), the chemical potential of water in the hydrogel (Eqn.~S13) becomes identical to the expression used to predict swelling behavior.\cite{bouklas2012}
+
+In order to identify the dominant interactions in the hydrogel, which dictate the hydrogel uptake, we estimate all previous chemical potential terms. We considered the properties of polyacrylamide as the polymer and lithium chloride as the salt as a starting point (Fig.~\ref{fig:S4}a), including the interaction parameter and the crosslinking density.\cite{graeber2023} However, the conclusions regarding the dominant chemical potential hold for values of interaction parameters and crosslinking density as we show through our parametric analysis (Fig.~\ref{fig:S4}a--d). In this parametric analysis, the interaction parameter was increased in an order of magnitude over the base case, representing an extreme case of enthalpic repulsion.\cite{flory1953} The crosslinking density was increased in four orders of magnitude, representing an extreme increase in number of crosslinks.\cite{diazmarin2023ihtc} Table~\ref{tab:S1} lists the values of the parameters used in our base estimation and Fig.~\ref{fig:S4} shows a comparison of the different chemical potential terms.
+
+\begin{figure}[htbp]
+\centering
+\begin{subfigure}{0.95\textwidth}
+\includegraphics[width=\textwidth]{figures/fig-006.jpg}
+\caption{a) base case; b) $\chi_\mathrm{p-w}=\chi_\mathrm{p-i}=4.95$; c) $N_\mathrm{c}=10000$~mol/m$^3$}
+\end{subfigure}\\[6pt]
+\begin{subfigure}{0.7\textwidth}
+\includegraphics[width=\textwidth]{figures/fig-007.jpg}
+\caption{d) $SL=1$; e) $\Omega_\mathrm{i} = 2.01\times10^{-5}$~m$^3$/mol}
+\end{subfigure}
+\caption{\textbf{Chemical potentials contributing to the chemical potential of water in the hydrogel.} Chemical potential terms, as described by Eqns.~S14--17, due to elasticity, polymer--water interactions, polymer--ion interactions, and water--ion interactions. a)~represents a base case where the parameters have been estimated as described in Table~S1. Chemical potential terms for different values of b)~interaction parameters $\chi$, c)~crosslinking density $N_\mathrm{C}$, d)~salt loading $SL$, and e)~ion volume $\Omega_\mathrm{i}$. Panels b--d represent changes of the parameters relative to the base case. Panel e shows the effect of the ion size by considering the molar volume as calculated from a chloride ion (with radius $\approx 200$~nm)\cite{marcus1988} instead of assuming that the molar volume is the same as that of water. For all parameters considered (b--e) the water--ion interactions are the dominant term. The salt mass fractions shown translate into a relative humidity range between 12\% and 88\%.}
+\label{fig:S4}
+\end{figure}
+
+Our analyses show that across all parameters considered the chemical potential due to water--ion interactions is the dominant one. This allows us to approximate $\mu_\mathrm{w,hydrogel} - \mu_\mathrm{w}^0 \approx \mu_\mathrm{w-i}$. Combining this with Eqns.~S10 and S15, we obtain:
+
+\begin{equation}
+x_\mathrm{w}\gamma_\mathrm{w} = RH. \tag{S18}
+\end{equation}
+
+Eqn.~S18 can be used to obtain the water to salt mass fraction as a function of humidity
+
+\begin{equation}
+\frac{m_\mathrm{w}}{m_\mathrm{s}} = \frac{x_\mathrm{w}\cdot i}{1-x_\mathrm{w}}\cdot \frac{MW_\mathrm{w}}{MW_\mathrm{s}} = \frac{RH/\gamma_\mathrm{w}\cdot i}{1-RH/\gamma_\mathrm{w}}\cdot \frac{MW_\mathrm{w}}{MW_\mathrm{s}} \tag{S19}
+\end{equation}
+
+where $i$ is the number of ions in the salt. Finally, by accounting for the additional polymer weight, we can obtain the uptake $U$ as
+
+\begin{equation}
+U = \frac{m_\mathrm{w}}{m_\mathrm{s}+m_\mathrm{p}} = \frac{1}{1 + 1/SL}\cdot \frac{RH/\gamma_\mathrm{w}\cdot i}{1-RH/\gamma_\mathrm{w}}\cdot \frac{MW_\mathrm{w}}{MW_\mathrm{s}} \tag{S20}
+\end{equation}
+
+The mass-based uptake, defined in Eqns.~S19 and S20, will be lower for salts with higher molar mass. Alternatively, we can define a molar uptake for salt solutions as $\frac{RH/\gamma_\mathrm{w}\cdot i}{1-RH/\gamma_\mathrm{w}}$, which more directly shows the interaction of ions with water molecules, without penalizing heavier ions.
+
+\clearpage
+
+\begin{table}[htbp]
+\centering
+\caption{Variables used to calculate chemical potentials}
+\label{tab:S1}
+\small
+\begin{tabular}{@{}p{1.8cm}p{3.3cm}p{9.5cm}@{}}
+\toprule
+Variable & Value used & Reference \\
+\midrule
+$\Omega_\mathrm{w}$ & $1.8\times10^{-5}$~m$^3$/mol & Calculated as $\Omega_\mathrm{w} = MW_\mathrm{w}/\rho_\mathrm{w}$, where $MW_\mathrm{w}$ is the molar mass of water (0.018~kg/mol) and $\rho_\mathrm{w}$ is the density of water (1000~kg/m$^3$) \\
+$\Omega_\mathrm{i}$ & $1.8\times10^{-5}$~m$^3$/mol & Considered identical to that of water, which is consistent with the assumptions of lattice models\cite{flory1953} \\
+$c_\mathrm{i}$ & $1.06\times10^{5}$~mol/m$^3$ & Calculated as $c_\mathrm{i} = SL\cdot \rho_\mathrm{poly}/MW_\mathrm{s}$, which corresponds to the moles of the $i$-th ion relative to the volume of polymer strands. $SL$ is the salt to polymer mass ratio, taken as 4, $\rho_\mathrm{poly}$ is the density of polymer, taken as 1122~kg/m$^3$ considering polyacrylamide, and $MW_\mathrm{s}$ is the molar mass of salt, taken as 0.0424~kg/mol, considering lithium chloride \\
+$\chi_\mathrm{p-w}$ & 0.495 & As measured in our previous work\cite{graeber2023} \\
+$\gamma_\mathrm{w}$ & Function of the water mole fraction relative to the salt solution & Using the correlation to experimental data developed by Conde\cite{conde2004} \\
+$\chi_\mathrm{p-i}$ & 0.495 & Considered to be of the same value as the interaction between water and polymer\cite{chen2022} \\
+$N_\mathrm{C}$ & 1~mol/m$^3$ & As estimated in our previous work from our elastic modulus measurements\cite{graeber2023} \\
+$c_\mathrm{w}^0$ & $3.05\times10^{5}$~mol/m$^3$ & Calculated as $c_\mathrm{w}^0 = c_\mathrm{i}\cdot \frac{MW_\mathrm{w}}{MW_\mathrm{s}}\cdot \frac{1-\varepsilon_\mathrm{max}}{\varepsilon_\mathrm{max}}$, which corresponds to the initial moles of water relative to the polymer volume. $\varepsilon_\mathrm{max}$ is the mass fraction of salt in the salt solution in the driest state considered for the hydrogel. We considered $\varepsilon_\mathrm{max}=0.45$, as this is the approximate mass fraction when lithium chloride deliquesces\cite{conde2004} \\
+$\lambda_0$ & 2.18 & Calculated from $\lambda_0^3 = (1 + \Omega_\mathrm{w} c_\mathrm{w}^0 + \sum \Omega_\mathrm{i} c_\mathrm{i})$ \\
+$\lambda_{xx}$ & Function of the water concentration & Calculated from $\lambda_{xx} = (1 + \Omega_\mathrm{w} c_\mathrm{w} + \sum \Omega_\mathrm{i} c_\mathrm{i})/\lambda_0^2$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\clearpage
+
+%======================================================================
+\section*{Supplementary Note S4: Uptakes normalized to salt uptake}
+%======================================================================
+
+\begin{figure}[htbp]
+\centering
+\begin{subfigure}{0.48\textwidth}
+\includegraphics[width=\textwidth]{figures/fig-008.jpg}
+\caption{PAM-LiCl hydrogels}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.48\textwidth}
+\includegraphics[width=\textwidth]{figures/fig-009.jpg}
+\caption{PAM-LiBr hydrogels}
+\end{subfigure}
+\caption{\textbf{Vapor uptake of hydrogel-salt composites normalized to the uptake of corresponding salt.} a)~Uptake of PAM-LiCl hydrogels with varying salt content normalized to the theoretical uptake of LiCl. The normalized uptake is approximately constant for different humidities, indicating that the isotherm shape is determined by the type of salt, in agreement with our model (Eqn.~5). The normalized uptake increases as a function of salt loading, as predicted by our model (Eqn.~5). b)~Uptake of PAM-LiBr hydrogels with varying salt content normalized to the theoretical uptake of LiBr. The results show similar trends with respect to humidity and salt loading relative to those of LiCl, in agreement with our model.}
+\label{fig:S5}
+\end{figure}
+
+\clearpage
+
+%======================================================================
+\section*{Supplementary Note S5: Hydrogel-salt composites from literature considered in uptake model}
+%======================================================================
+
+\begin{table}[htbp]
+\centering
+\caption{Hydrogel-salt composites from literature for uptake model}
+\label{tab:S2}
+\small
+\begin{tabular}{@{}p{5.2cm}p{2.3cm}p{7cm}@{}}
+\toprule
+Hydrogel & Salt type & Salt-to-polymer mass ratio \\
+\midrule
+Alginate-calcium chloride by Kallenberger and Fr\"oba\cite{kallenberger2018} & Calcium chloride & 3.17 as calculated from the reported composition of 76\% salt \\
+Alginate and graphene oxide-lithium chloride by Xu et al.\cite{xu2021} & Lithium chloride & 3.54 as calculated from the reported composition of 78\% salt \\
+Konjac glucomannan and cellulose-lithium chloride by Guo et al.\cite{guo2022} & Lithium chloride & 0.81 as calculated from the reported 7.3\% concentration of lithium ion in the hydrogel \\
+Poly(dodecylammonium-2-acrylamido-2-methylpropane sulfonate)-lithium chloride by Shan et al.\cite{shan2023} & Lithium chloride & 1.13 as calculated from the reported composition of 53\% salt \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\clearpage
+
+%======================================================================
+\section*{Supplementary Note S6: Thermodynamic model for enthalpy of desorption of hydrogel-salt composites}
+%======================================================================
+
+We use the thermodynamic model we developed to calculate expressions for the enthalpy of sorption of hydrogel-salt composites. The enthalpy of sorption corresponds to the heat released as a mole of water is captured into the sorbent. For a hydrogel-salt composite, this heat is the sum of the vaporization enthalpy $h_\mathrm{lv}$ and a term related to the mixing enthalpy:
+
+\begin{equation}
+h_\mathrm{sor} = h_\mathrm{lv} - \frac{\partial \Delta H_\mathrm{mix}}{\partial c_\mathrm{w}}. \tag{S21}
+\end{equation}
+
+Eqn.~S21 can be interpreted by considering the sorption process as a combination of, first, condensation of the water and then, mixing of the water into the hydrogel-salt composite. Combining Eqns.~S6 and S21,
+
+\begin{align}
+h_\mathrm{sor} &= h_\mathrm{lv} - RT\left[\chi_\mathrm{p-w}\left(\phi_\mathrm{p} - \frac{c_\mathrm{w}\Omega_\mathrm{w}}{\left(1+\Omega_\mathrm{w} c_\mathrm{w}+\sum \Omega_\mathrm{i} c_\mathrm{i}\right)^2}\right) - \frac{\sum \chi_\mathrm{p-i} c_\mathrm{i} \Omega_\mathrm{w}}{\left(1+\Omega_\mathrm{w} c_\mathrm{w}+\sum \Omega_\mathrm{i} c_\mathrm{i}\right)^2} + \ln \gamma_\mathrm{w}\right] \notag\\
+&= h_\mathrm{lv} + h_\mathrm{p-w} + h_\mathrm{p-i} + h_\mathrm{w-i}, \tag{S22}
+\end{align}
+
+where we used the Gibbs--Duhem relationship ($c_\mathrm{w}\frac{\partial \ln \gamma_\mathrm{w}}{\partial c_\mathrm{w}} + \sum c_\mathrm{i}\frac{\partial \ln \gamma_\mathrm{i}}{\partial c_\mathrm{w}}=0$\cite{stolen2003}) and we neglected the small changes of Flory parameter with composition.\cite{graeber2023} In Eqn.~S22 we defined three enthalpy terms, $h_\mathrm{p-w}$, $h_\mathrm{p-i}$, $h_\mathrm{w-i}$, corresponding to polymer--water, polymer--ion, and water--ion interactions, respectively. These are given as
+
+\begin{align}
+h_\mathrm{p-w} &= -RT\left[\chi_\mathrm{p-w}\left(\phi_\mathrm{p} - \frac{c_\mathrm{w}\Omega_\mathrm{w}}{\left(1+\Omega_\mathrm{w} c_\mathrm{w}+\sum \Omega_\mathrm{i} c_\mathrm{i}\right)^2}\right)\right], \tag{S23}\\[6pt]
+h_\mathrm{p-i} &= -RT\left[\frac{\sum \chi_\mathrm{p-i} c_\mathrm{i}\Omega_\mathrm{w}}{\left(1+\Omega_\mathrm{w} c_\mathrm{w}+\sum \Omega_\mathrm{i} c_\mathrm{i}\right)^2}\right], \tag{S24}\\[6pt]
+h_\mathrm{w-i} &= -RT\left[\ln \gamma_\mathrm{w}\right]. \tag{S25}
+\end{align}
+
+We calculate these different enthalpy terms and compare them to demonstrate that the sorption enthalpy is dominated by vaporization enthalpy and the water--ion interaction (Fig.~\ref{fig:S6}). We estimate all enthalpy terms using the parameters listed in Table~\ref{tab:S1}, which correspond to the properties of lithium chloride and polyacrylamide (Fig.~\ref{fig:S6}a). However, even for other values of interaction parameter and salt loading, the water--ion enthalpy dominates (Fig.~\ref{fig:S6}b and c).
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=0.85\textwidth]{figures/fig-010.jpg}
+\caption{\textbf{Enthalpies contributing to sorption enthalpy of water from the hydrogel.} Sorption enthalpy terms, as described by Eqns.~S23--25, due to polymer--water interactions, polymer--ion interactions, and water--ion interactions for different values of interaction parameters $\chi$, salt loading $SL$, and ion volume $\Omega_\mathrm{i}$. a)~represents a base case where the parameters have been estimated as described in Table~S1. b) and c)~represent changes of the parameters relative to the base case. d)~shows the effect of the ion size by considering the molar volume as calculated from a chloride ion (with radius $\approx 200$~nm)\cite{marcus1988} instead of assuming that the molar volume is the same as that of water. For all parameters considered the water--ion interactions are the dominant term. The salt mass fractions shown translate into a relative humidity range between 12\% and 88\%.}
+\label{fig:S6}
+\end{figure}
+
+As a consequence, we can write
+
+\begin{equation}
+h_\mathrm{sor} = h_\mathrm{lv} + h_\mathrm{w-i}, \tag{S26}
+\end{equation}
+
+where we have chosen not to write $h_\mathrm{w-i}$ as given in Eqn.~S25, but instead to use literature values for the mixing enthalpy of water and salts.\cite{conde2004} By doing this, our theory predictions account for nonideal entropy of mixing effects, which Eqn.~S25 neglects.
+
+In Eqn.~S26 we treat the vaporization enthalpy of water from a hydrogel as identical to that of bulk water. This neglects the possible latent heat reduction due to the higher internal pressure inside the hydrogel, which holds for the intermediate-to-low polymer volume fractions considered in this work ($<0.5$ typically for hydrogels with salts).\cite{chen2022}
+
+\clearpage
+
+%======================================================================
+\section*{Supplementary Note S7: Model for convection-limited moisture absorption and desorption into hydrogel-salt composites}
+%======================================================================
+
+Here we derive the governing equations predicting the dynamic absorption and desorption of moisture into hydrogel-salt composites. We consider that moisture is transferred from the ambient to the hydrogel driven by the vapor concentration difference between the ambient and over the hydrogel, $\Delta C$.
+
+\begin{equation}
+\Delta C = RH \cdot \left(\frac{P_\mathrm{sat}}{RT}\right)_\mathrm{amb} - \gamma_\mathrm{w} x_\mathrm{w} \cdot \left(\frac{P_\mathrm{sat}}{RT}\right)_\mathrm{hyd}, \tag{S27}
+\end{equation}
+
+where $P_\mathrm{sat}$ is the saturation pressure of water. In writing Eqn.~S27 we considered that the vapor concentration over the hydrogel, $\gamma_\mathrm{w} x_\mathrm{w} \cdot \left(\frac{P_\mathrm{sat}}{RT}\right)_\mathrm{hyd}$, is identical to the vapor concentration over a salt solution.\cite{diazmarin2024} This follows from our thermodynamic derivation (Supplementary Note S2) which showed that the chemical potential of water in the hydrogel-salt composite can be approximated as the chemical potential of water in a salt solution. Additionally, by writing the vapor concentration over the hydrogel in terms of the activity of the salt solution, $\gamma_\mathrm{w} x_\mathrm{w}$, we assumed that at the interface, the activity of water inside the hydrogel and in the vapor phase is identical.
+
+The molar flux of moisture into/from the hydrogel, $\dot{J}$ (mol/m$^2$/s), is proportional to the concentration difference, $\Delta C$,\cite{mills1994}
+
+\begin{equation}
+\dot{J} = g\Delta C = g\left(RH \cdot \left(\frac{P_\mathrm{sat}}{RT}\right)_\mathrm{amb} - \gamma_\mathrm{w} x_\mathrm{w} \cdot \left(\frac{P_\mathrm{sat}}{RT}\right)_\mathrm{hyd}\right), \tag{S28}
+\end{equation}
+
+where $g$ is the mass transfer convection coefficient (m/s).
+
+We describe the water content inside the hydrogel in terms of its molar concentration relative to the hydrogel volume in the most desorbed state, $c_\mathrm{w}$. The total mass of water inside the hydrogel at any given time, $m_\mathrm{w}$, will then be
+
+\begin{equation}
+m_\mathrm{w} = c_\mathrm{w} A H_0 MW_\mathrm{w}, \tag{S29}
+\end{equation}
+
+where $A$ is the cross-sectional area of the hydrogel and $H_0$ is the initial thickness of the hydrogel at its most desorbed state (e.g.\ $RH=20\%$ in Fig.~5).
+
+We consider mass conservation of water inside the hydrogel, where all the mass that is gained/lost comes from condensation/evaporation of water as described by Eqn.~S28:
+
+\begin{equation}
+\frac{dm_\mathrm{w}}{dt} = A MW_\mathrm{w} \dot{J}, \tag{S30}
+\end{equation}
+
+Combining Eqns.~S28--S30 we obtain
+
+\begin{equation}
+\frac{dc_\mathrm{w}}{dt} = \frac{g}{H_0}\left(RH \cdot \left(\frac{P_\mathrm{sat}}{RT}\right)_\mathrm{amb} - \gamma_\mathrm{w} x_\mathrm{w} \cdot \left(\frac{P_\mathrm{sat}}{RT}\right)_\mathrm{hyd}\right), \tag{S31}
+\end{equation}
+
+which is the governing equation for our dynamic absorption and desorption model (Eqn.~8 in the main text). Eqn.~S31 assumes convection-limited mass transfer. This assumption holds for low Biot numbers for the process, which can be calculated with Eqn.~10. For high Biot numbers (e.g.\ $>0.1$), diffusion within the hydrogel can be significant and should be modeled considering the spatially varying concentration of water in the hydrogel.\cite{graeber2023nano} Interestingly, Eqn.~S31 is the same as that used to describe moisture capture by salt solutions.\cite{diazmarin2024} This shows the similar mechanisms and convection-limited nature of moisture capture in both systems.
+
+Lastly, we highlight that to solve Eqn.~S31, we used experimental correlations previously reported in literature for the dependence of the water activity on water concentration, $\gamma_\mathrm{w} x_\mathrm{w}(c_\mathrm{w})$.\cite{conde2004,palacios2012} Additionally, we considered the salt solution density as constant at its value at $RH=20\%$. These, combined with the independent measurement of the convection coefficient (see Supplementary Note S8 for details), allowed us to predict the evolution of hydrogel uptake as a function of time and humidity without the need for empirical fitting parameters.
+
+\clearpage
+
+%======================================================================
+\section*{Supplementary Note S8: Measurement of convection mass transfer coefficient $g$ via evaporation measurements}
+%======================================================================
+
+We performed evaporation measurements to calculate the mass transfer convection coefficient in the environmental chamber used in our experiments, as described in our previous work.\cite{diazmarin2024} For this, a petri dish with the same dimensions as those used in the absorption experiments was placed on a mass balance in the environmental chamber at 25$^\circ$C and a controlled humidity (20\%, 30\%, 50\%, 70\%). The mass of water was tracked over time as shown in Fig.~\ref{fig:S7}a. The mass decreased linearly indicating a constant evaporation rate, which we calculated as the slope of the mass change curves.
+
+\begin{figure}[htbp]
+\centering
+\begin{subfigure}{0.48\textwidth}
+\includegraphics[width=\textwidth]{figures/fig-011.jpg}
+\caption{Mass change vs.\ time}
+\end{subfigure}
+\hfill
+\begin{subfigure}{0.48\textwidth}
+\includegraphics[width=\textwidth]{figures/fig-012.jpg}
+\caption{Evaporation rate vs.\ $(1-RH)$}
+\end{subfigure}
+\caption{\textbf{Water evaporation experiments to calculate the mass transfer convection coefficient.} a)~Mass change over time for evaporation of water in an environmental chamber at controlled humidity as measured in our previous work.\cite{diazmarin2024} The evaporation rate can be calculated as the slope of the mass change curves. b)~Evaporation rate at different humidities as a function of $(1-RH)$. We used a linear fit to the data to calculate the mass transfer coefficient.}
+\label{fig:S7}
+\end{figure}
+
+We consider Eqn.~S28 for pure water ($\gamma_\mathrm{w} x_\mathrm{w} = 1$) to calculate the mass transfer convection coefficient, $g$, based on the evaporation rate at different humidities
+
+\begin{equation}
+\text{Evaporation rate} = -\dot{J}\frac{D^2\pi}{4}MW_\mathrm{w} = g\frac{P_\mathrm{sat}}{RT}\frac{D^2\pi}{4}MW_\mathrm{w}(1-RH). \tag{S32}
+\end{equation}
+
+Therefore, we can estimate $g$ from the slope of an evaporation rate vs.\ $(1-RH)$ plot. This slope has a value of $g\frac{P_\mathrm{sat}}{RT}\frac{D^2\pi}{4}MW_\mathrm{w} = 0.0277$~g/min. From this, we calculate the mass transfer coefficient to be $g = 0.0095$~m/s. In this analysis we assumed that the mass transfer convection coefficient, and, therefore, the vapor boundary layer thickness, is independent of vapor concentration. This assumption is corroborated by the linear dependence of evaporation rate and $(1-RH)$ in Fig.~\ref{fig:S7}b.
+
+\clearpage
+
+%======================================================================
+\section*{Supplementary Note S9: Measured initial hydrogel thicknesses for kinetics experiments}
+%======================================================================
+
+We measured the thickness of the hydrogel-salt composites after they reached equilibrium, observed by negligible hydrogel mass changes, at 20\% relative humidity inside the environmental chamber (Fig.~5a). We measured the thickness at different locations along the hydrogel. The average thickness and standard deviation of our measurements are reported in Table~\ref{tab:S3}.
+
+\begin{table}[htbp]
+\centering
+\caption{Thickness of samples used in kinetics experiments.}
+\label{tab:S3}
+\begin{tabular}{@{}lcc@{}}
+\toprule
+Hydrogel & Average thickness (mm) & Thickness standard deviation (mm) \\
+\midrule
+PAM-LiCl 4~g/g & 2.34 & 0.17 \\
+PAM-LiCl 2~g/g & 2.16 & 0.30 \\
+PVA-LiCl 4~g/g & 2.15 & 0.51 \\
+PAM-LiBr 4~g/g & 1.60 & 0.08 \\
+PAM-LiCl 4~g/g, 0.1~mg/g crosslinker/PAM & 1.94 & 0.46 \\
+PAM-LiCl 4~g/g, 10~mg/g crosslinker/PAM & 1.80 & 0.08 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\clearpage
+
+%======================================================================
+\section*{Supplementary Note S10: Dynamic absorption and desorption of hydrogel-salt composites with different crosslinking content}
+%======================================================================
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.85\textwidth}{\centering \vspace{3cm} \textit{Figure S8: Absorption and desorption curves for PAM-LiCl 4~g/g hydrogels with 0.1~mg/g and 10~mg/g crosslinker/PAM (vector plot; not extracted as raster image --- see original PDF).} \vspace{3cm}}}
+\caption{\textbf{Absorption and desorption of hydrogel-salt composites with different crosslinking density.} Absorption and desorption of moisture into PAM-LiCl 4~g/g hydrogels starting from $RH=20\%$, then going to higher relative humidities of 30\%, 50\%, or 70\%, and finally ending at $RH=20\%$. Model and experiments agree well for both a hydrogel with a)~0.1~mg of crosslinker per g of PAM and b)~10~mg crosslinker per g of PAM. The crosslinking density does not impact the absorption-desorption process.}
+\label{fig:S8}
+\end{figure}
+
+These results taken together with Figs.~3e and 4d demonstrate that the crosslinking density does not play a crucial role in the sorption-desorption performance of hydrogel-salt composites. As a consequence, this suggests that the as-synthesized water content also does not play a role in the performance since a)~entanglements, which can act as crosslinks and are affected by the as-synthesized water content,\cite{kim2021} will not impact the absorption and b)~the equilibrium water content at a given humidity is not dependent on the initial water content.
+
+\clearpage
+
+%======================================================================
+\section*{Supplementary Note S11: Calculation of absorption and desorption timescales via exponential fitting}
+%======================================================================
+
+We calculated timescales for absorption and desorption by fitting the uptake as a function of time obtained from our model to exponential functions.\cite{diazmarin2022,elfil2023,aristov2012} For absorption, we fitted the uptake, $U(t)$, to the following equation
+
+\begin{equation}
+U(t) = U_\mathrm{eq}\left(1 - e^{-t/\tau_\mathrm{abs}}\right), \tag{S33}
+\end{equation}
+
+where $U_\mathrm{eq}$ is the equilibrium uptake and $\tau_\mathrm{abs}$ is the absorption timescale. Eqn.~S33 represents a growing uptake which asymptotically tends to its equilibrium value.
+
+For desorption, we fitted the uptake to
+
+\begin{equation}
+U(t) = U_\mathrm{eq}\, e^{-t/\tau_\mathrm{des}}, \tag{S34}
+\end{equation}
+
+where $\tau_\mathrm{des}$ is the desorption timescale. Eqn.~S34 represents a decreasing uptake which starts at its equilibrium value, $U_\mathrm{eq}$, and asymptotically tends to zero.
+
+Using the uptake and equilibrium uptake from our models, we obtained absorption and desorption timescales using Eqns.~S33 and S34, respectively. These timescales are a measure of the speed of the water capture process, which allows us to quantify the effect of humidity, salt content, and salt type on the absorption-desorption kinetics.
+
+\clearpage
+
+%======================================================================
+\section*{Supplementary Note S12: Linearized and ideal moisture capture}
+%======================================================================
+
+Here we consider the salt solution inside the hydrogel as an ideal solution ($\gamma_\mathrm{w}=1$) and linearize the corresponding governing equation. We start from Eqn.~8 with $\gamma_\mathrm{w}=1$ and $x_\mathrm{w} = c_\mathrm{w}/(c_\mathrm{w}+i\cdot c_\mathrm{s})$,
+
+\begin{equation}
+\frac{\partial c_\mathrm{w}}{\partial t} = \frac{g}{H_0}\frac{P_\mathrm{sat}}{RT}\left(RH - \frac{c_\mathrm{w}}{c_\mathrm{w}+i\cdot c_\mathrm{s}}\right), \tag{S35}
+\end{equation}
+
+In equilibrium, the vapor flux into/from the hydrogel is zero. Therefore, the equilibrium water concentration, $c_\mathrm{w,eq}$, satisfies
+
+\begin{equation}
+\left(RH - \frac{c_\mathrm{w,eq}}{c_\mathrm{w,eq}+i\cdot c_\mathrm{s}}\right) = 0, \tag{S36}
+\end{equation}
+
+Combining Eqns.~S35 and S36
+
+\begin{equation}
+\frac{\partial c_\mathrm{w}}{\partial t} = \frac{g}{H_0}\frac{P_\mathrm{sat}}{RT}\left(\frac{c_\mathrm{w,eq}}{c_\mathrm{w,eq}+i\cdot c_\mathrm{s}} - \frac{c_\mathrm{w}}{c_\mathrm{w}+i\cdot c_\mathrm{s}}\right), \tag{S37}
+\end{equation}
+
+We can rewrite Eqn.~S37 in terms of the difference between the equilibrium water concentration and the actual water concentration, $\Delta = c_\mathrm{w,eq} - c_\mathrm{w}$,
+
+\begin{equation}
+\frac{\partial c_\mathrm{w}}{\partial t} = \frac{g}{H_0}\frac{P_\mathrm{sat}}{RT}\left(\frac{c_\mathrm{w,eq}}{c_\mathrm{w,eq}+i\cdot c_\mathrm{s}} - \frac{c_\mathrm{w,eq}-\Delta}{c_\mathrm{w,eq}-\Delta+i\cdot c_\mathrm{s}}\right), \tag{S38}
+\end{equation}
+
+We linearize Eqn.~S38 in terms of $\Delta/(c_\mathrm{w,\infty}+c_\mathrm{s})$
+
+\begin{align}
+\frac{\partial c_\mathrm{w}}{\partial t} &= \frac{g}{H_0}\frac{P_\mathrm{sat}}{RT}\left(\frac{c_\mathrm{w,eq}}{c_\mathrm{w,eq}+i\cdot c_\mathrm{s}} - \frac{c_\mathrm{w,eq}}{c_\mathrm{w,eq}+i\cdot c_\mathrm{s}}\left(1+\frac{\Delta}{c_\mathrm{w,eq}+i\cdot c_\mathrm{s}}\right) + \frac{\Delta}{c_\mathrm{w,eq}+i\cdot c_\mathrm{s}}\right) \notag\\
+&= \frac{g}{H_0}\frac{P_\mathrm{sat}}{RT}\left(\Delta\, \frac{i\cdot c_\mathrm{s}}{\left(c_\mathrm{w,eq}+i\cdot c_\mathrm{s}\right)^2}\right), \tag{S39}
+\end{align}
+
+corresponding to Eqn.~9 of the main text.
+
+Eqn.~S39 is a simplified linear equation for the water capture process of a hydrogel-salt composite where the salt is considered an ideal solution and valid for small $\Delta = c_\mathrm{w,eq} - c_\mathrm{w}$.
+
+\clearpage
+
+%======================================================================
+\section*{Supplementary Note S13: Dynamic absorption and desorption for a thinner hydrogel-salt composite}
+%======================================================================
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.75\textwidth}{\centering \vspace{3cm} \textit{Figure S9: Dynamic absorption/desorption curve for a $\sim$1.2~mm-thick PAM-LiCl 4~g/g hydrogel-salt composite (vector plot; not extracted as raster image --- see original PDF).} \vspace{3cm}}}
+\caption{\textbf{Dynamic absorption and desorption of a PAM-LiCl hydrogel-salt composite with $\sim$1.2~mm thickness.} The timescales to reach equilibrium at different humidity are approximately reduced in half relative to the hydrogel-salt composite with $\sim$2.4~mm thickness (Fig.~5c).}
+\label{fig:S9}
+\end{figure}
+
+\clearpage
+
+%======================================================================
+\section*{Supplementary Note S14: Theoretical scaling of the absorption and desorption timescale}
+%======================================================================
+
+Here we derive a theoretical scaling for the absorption and desorption timescales based on our convection-limited description of moisture capture by hydrogel-salt composites.
+
+We start from our governing equation, Eqn.~8 in the main text.
+
+\begin{equation}
+\frac{\partial c_\mathrm{w}}{\partial t} = \frac{g}{H_0}\frac{P_\mathrm{sat}}{RT}\left(RH - \gamma_\mathrm{w} x_\mathrm{w}\right), \tag{S40}
+\end{equation}
+
+From a scaling perspective, we consider $c_\mathrm{w} \approx c_\mathrm{w,eq}$ and $t \approx \tau$, where $\tau$ is the timescale of the absorption-desorption process under our convection-limited description. We use the previous scalings in Eqn.~S40 to solve for $\tau$
+
+\begin{equation}
+\tau \sim \frac{H_0}{g}\cdot \frac{c_\mathrm{w,eq}}{\frac{P_\mathrm{sat}}{RT}(RH-\gamma_\mathrm{w} x_\mathrm{w})} \tag{S41}
+\end{equation}
+
+The last factor, $\dfrac{c_\mathrm{w,eq}}{\frac{P_\mathrm{sat}}{RT}(RH-\gamma_\mathrm{w} x_\mathrm{w})}$, depends on the humidity, salt type, and content in the hydrogel. We therefore replace this term by $f(RH, SL, \text{salt type})$ to obtain
+
+\begin{equation}
+\tau = f(RH, SL, \text{salt type})\, \frac{H_0}{g}, \tag{S42}
+\end{equation}
+
+corresponding to Eqn.~11 of the main text.
+
+We highlight that this scaling can be used to design hydrogel-salt composites and systems using these materials in order to achieve the desired timescales. This is illustrated in Fig.~\ref{fig:S10}, which shows the time required to reach equilibrium, which we have defined as $5\tau$, as a function of the initial hydrogel thickness and for different mass transfer coefficients. Fig.~\ref{fig:S10} was obtained by using the timescales obtained from our fitting (Fig.~5g and Eqn.~S33) to calculate $f(RH, SL, \text{salt type})$. Then, with $f(RH, SL, \text{salt type})$ we can use Eqn.~S42 to predict the timescale as a function of the initial thickness and mass transfer coefficient. We plot $5\tau$ as this is the time required to reach 99\% of the equilibrium value (Eqn.~S33), therefore, representing more accurately the time needed to reach equilibrium than $\tau$.
+
+\begin{figure}[htbp]
+\centering
+\fbox{\parbox{0.75\textwidth}{\centering \vspace{3cm} \textit{Figure S10: Time to equilibrium (5$\tau$) vs.\ initial thickness $H_0$ for $g=0.0095$~m/s and $g=0.02$~m/s (vector plot; not extracted as raster image --- see original PDF).} \vspace{3cm}}}
+\caption{\textbf{Time required to reach equilibrium during sorption as a function of the initial hydrogel-salt composite thickness and the mass transfer coefficient.} We considered absorption at 30\% RH for a PAM-LiCl hydrogel-salt composite with a 4~g/g salt loading. The time for equilibrium indicates the time needed to reach 99\% of the equilibrium uptake and it scales linearly with the thickness and inversely proportional to the mass transfer coefficient.}
+\label{fig:S10}
+\end{figure}
+
+Fig.~\ref{fig:S10} illustrates that by reducing the thickness of the hydrogel-salt composite, the time required to reach equilibrium is significantly reduced. For instance, for a 100~$\mu$m-thick hydrogel-salt composite the time required to reach equilibrium becomes $<100$~min. This time of $<100$~min agrees with the measurements by Guo et al.\cite{guo2022} for absorption at 30\% RH with a 100~$\mu$m-thick, porous konjac glucomannan and cellulose-lithium chloride hydrogel-salt composite. Similarly, Kallenberger and Fr\"oba\cite{kallenberger2018} measured an equilibrium time of $\sim$720~min for their alginate-calcium chloride hydrogel-salt composite with radii of $\sim$1~mm. This is also comparable with the scaling shown in Fig.~\ref{fig:S10}.
+
+Alternatively, the time required to reach equilibrium during absorption can be decreased by increasing the mass transfer coefficient. For instance, with a $g=0.02$~m/s, which results from a wind speed of 3~m/s,\cite{diazmarin2024} the time required to reach equilibrium for a 2~mm-thick hydrogel is reduced to approximately 500~min. For $H_0=3$~mm and $g=0.02$~m/s the time is approximately 700~min, comparable to that measured by Xu et al.\ for an alginate and graphene oxide-lithium chloride hydrogel-salt composite under 3~m/s wind speed.\cite{xu2021}
+
+\clearpage
+
+%======================================================================
+\section*{Supplementary Note S15: Calibration and estimation of error}
+%======================================================================
+
+Prior to the measurement of the sorption enthalpies, we performed several calibrations of the temperature and heat flow in the TGA-DSC machine to ensure accurate measurements. Specifically, we performed the following steps to ensure calibration of the temperature and heat flow at temperatures close to room temperature and higher temperatures.
+
+\begin{enumerate}
+\item First, we measured the melting point and enthalpy of indium. We used the measured values of melting temperature and enthalpy to adjust the machine calibration to match these theoretical results. Since indium melts at a relatively high temperature ($>150^\circ$C), this ensured calibration of temperature and heat flow at high temperature, but it did not guarantee calibration at room temperature.\cite{rsc_indium}
+
+\item Secondly, we measured the melting point of phenyl salicylate. We used this melting point ($\sim40^\circ$C) to calibrate the temperature measurements at conditions close to room temperature.\cite{pubchem_phenylsalicylate} We note that phenyl salicylate is hygroscopic and, therefore, it might contain moisture in its initial condition which is difficult to remove without melting it. As a consequence, the melting enthalpy of phenyl salicylate was not used in the calibration since the initial mass of phenyl salicylate was not accurately known.
+
+\item Thirdly, we measured the enthalpy of vaporization of water three separate times at a constant temperature. We highlight that these values (1800--2000~kJ/kg) were all lower than the enthalpy of vaporization of water ($\sim$2400~kJ/kg). We then used the average measured value to calibrate the heat flow measurement at room temperature. This essentially scaled the heat flux measurements such that the latent heat corresponds to the expected value of $\sim$2400~kJ/kg.
+
+\item Fourthly, we measured the enthalpy of vaporization of water three more times to ensure the self-consistency of our calibration. We measured values of 2436, 2464, and 2460~kJ/kg, which matched accurately the expected value of 2441~kJ/kg.
+
+\item Lastly, we measured the enthalpy of vaporization of isopropyl alcohol at room temperature to check the accuracy of our measurements against a known substance. We measured a value of 767~kJ/kg in good agreement with the expected value of 758~kJ/kg at $30^\circ$C.\cite{nist_isopropanol}
+\end{enumerate}
+
+We note that there are several possible sources of error throughout our measurements, including those stemming from our various calibration steps. Previous works have estimated the error of their measurements by repeating identical measurements several times and calculating the error due to repeatability.\cite{kim2016} This, however, is very time consuming, especially since each sample characterization that we performed in the TGA-DSC lasted four days. We instead considered that the main source of error in our measurements is that due to the selection of a heat flow baseline. That is, for all our measurements and after sorption had finalized, a nonzero heat flow value was recorded, which corresponded to our baseline. This nonzero heat flow was subtracted from the heat flow measurement throughout the entire sorption process. Ultimately, the heat flow measurement with the baseline subtracted was integrated over time and divided by the entire mass absorbed to calculate the enthalpy.
+
+Critically, we note that the baseline heat flow exhibited fluctuations from its average value. Depending on which value was chosen, the integrated enthalpy exhibited changes of $\sim$100~kJ/kg. We, therefore, chose to use the average value of the heat flow after sorption as our baseline and considered this difference of 100~kJ/kg as our error. This value is in line with errors reported in previous literature of sorption enthalpy measurements of hydrogel-salt composites following similar thermogravimetric-calorimetry approaches.\cite{lu2022}
+
+An additional potential error source is the convective heat flow between the TGA-DSC chamber and the sample due to the small temperature difference between the chamber and sample. If the sample is hotter than its surroundings, then it will convectively lose heat, leading to lower enthalpy measurements. To minimize these effects, all our measurements used a TGA-DSC pan that was sealed with a lid. We punched a small number of holes through the lid ($\sim$10--13) that served as vapor pathways into the sample inside the pan. These holes allowed us to slow down the absorption process, leading to an almost isothermal operation with temperature variations during absorption of $\sim$0.01$^\circ$C. We can estimate the convective heat transfer between the pan and the ambient, $Q$, as
+
+\begin{equation}
+Q = hA\Delta T, \tag{S43}
+\end{equation}
+
+where $h$ is the convective heat transfer coefficient between chamber and pan, $A$ is the surface area of the pan, and $\Delta T$ is the temperature difference between the pan and the ambient. We estimate $h\sim100~\mathrm{W/(m^2 K)}$, $A\sim0.0001$~m$^2$, and $\Delta T\sim0.01^\circ$C to estimate the heat transfer as $Q\sim0.1$~mW. This heat flow is lower than the measurements during absorption ($>1$~mW). However, this estimation suggests that for high temperature differences between pan and chamber it is possible that the convective heat flow can lead to an error in the measured enthalpies.
+
+Lastly, we also note that imperfect drying of the hydrogel-salt composites can also lead to error in the enthalpy measurements. In our experiments, we dried the samples in an oven at 90$^\circ$C for over four hours. Then, we also dried them in the TGA-DSC at 90$^\circ$C for 90 minutes. Despite this drying, it is possible that some moisture remained in the hydrogel-salt composites forming salt hydrates. As a result, as the samples underwent a humidity change from 0 to 20\%, the mass change and associated heat released will be affected by this remaining moisture. We hypothesize that this remaining moisture led to the higher deviations in the enthalpy measured at 10\% RH in Fig.~4c and 4d.
+
+\clearpage
+
+%======================================================================
+\bibliographystyle{unsrt}
+\begin{thebibliography}{99}
+
+\bibitem{gao2022} Gao, Y.; Cho, H. J. Quantifying the Trade-off between Stiffness and Permeability in Hydrogels. \textit{Soft Matter} \textbf{2022}, \textit{18} (40), 7735--7740. \url{https://doi.org/10.1039/D2SM01215D}.
+
+\bibitem{chen2022} Chen, G. Thermodynamics of Hydrogels for Applications in Atmospheric Water Harvesting, Evaporation, and Desalination. \textit{Physical Chemistry Chemical Physics} \textbf{2022}, \textit{24} (20), 12329--12345. \url{https://doi.org/10.1039/D2CP00356B}.
+
+\bibitem{flory1953} Flory, P. J. \textit{Principles of Polymer Chemistry}; Cornell University Press: Ithaca, N.\,Y., 1953.
+
+\bibitem{atkins2006} Atkins, P.; de Paula, J. \textit{Atkins' Physical Chemistry}; W. H. Freeman and Company: New York, 2006. \url{https://doi.org/10.1016/j.electacta.2006.09.003}.
+
+\bibitem{rubinstein2003} Rubinstein, M.; Colby, R. H. \textit{Polymer Physics}; Oxford University Press, 2003.
+
+\bibitem{bouklas2012} Bouklas, N.; Huang, R. Swelling Kinetics of Polymer Gels: Comparison of Linear and Nonlinear Theories. \textit{Soft Matter} \textbf{2012}, \textit{8} (31), 8194--8203. \url{https://doi.org/10.1039/C2SM25467K}.
+
+\bibitem{li2020} Li, R.; Shi, Y.; Wu, M.; Hong, S.; Wang, P. Photovoltaic Panel Cooling by Atmospheric Water Sorption--Evaporation Cycle. \textit{Nat Sustain} \textbf{2020}, \textit{3} (8), 636--643. \url{https://doi.org/10.1038/s41893-020-0535-4}.
+
+\bibitem{graeber2023} Graeber, G.; D\'iaz-Mar\'in, C. D.; Gaugler, L. C.; Zhong, Y.; El Fil, B.; Liu, X.; Wang, E. N. Extreme Water Uptake of Hygroscopic Hydrogels through Maximized Swelling-Induced Salt Loading. \textit{Advanced Materials} \textbf{2023}, 2211783. \url{https://doi.org/10.1002/ADMA.202211783}.
+
+\bibitem{stolen2003} St{\o}len, S.; Grande, T. \textit{Chemical Thermodynamics of Materials}, 1st ed.; John Wiley and Sons, 2003.
+
+\bibitem{diazmarin2023ihtc} D\'iaz-Mar\'in, C. D.; Lu, Z.; Hector, K. E.; Roper, M. A.; Graeber, G.; Liu, X.; Gaugler, L. C.; Zhang, L.; El Fil, B.; Grossman, J. C. Effect of Polymer Network on Sorption Mass Transfer in Hygroscopic Hydrogels. \textit{International Heat Transfer Conference 17} \textbf{2023}, 9. \url{https://doi.org/10.1615/IHTC17.10-10}.
+
+\bibitem{marcus1988} Marcus, Y. Ionic Radii in Aqueous Solutions. \textit{Chem Rev} \textbf{1988}, \textit{88} (8), 1475--1498. \url{https://doi.org/10.1021/CR00090A003}.
+
+\bibitem{conde2004} Conde, M. R. Properties of Aqueous Solutions of Lithium and Calcium Chlorides: Formulations for Use in Air Conditioning Equipment Design. \textit{International Journal of Thermal Sciences} \textbf{2004}, \textit{43} (4), 367--382. \url{https://doi.org/10.1016/J.IJTHERMALSCI.2003.09.003}.
+
+\bibitem{kallenberger2018} Kallenberger, P. A.; Fr\"oba, M. Water Harvesting from Air with a Hygroscopic Salt in a Hydrogel-Derived Matrix. \textit{Commun Chem} \textbf{2018}, \textit{1} (1), 1--6. \url{https://doi.org/10.1038/s42004-018-0028-9}.
+
+\bibitem{xu2021} Xu, J.; Li, T.; Yan, T.; Wu, S.; Wu, M.; Chao, J.; Huo, X.; Wang, P.; Wang, R. Ultrahigh Solar-Driven Atmospheric Water Production Enabled by Scalable Rapid-Cycling Water Harvester with Vertically Aligned Nanocomposite Sorbent. \textit{Energy Environ Sci} \textbf{2021}, \textit{14} (11), 5979--5994. \url{https://doi.org/10.1039/D1EE01723C}.
+
+\bibitem{guo2022} Guo, Y.; Guan, W.; Lei, C.; Lu, H.; Shi, W.; Yu, G. Scalable Super Hygroscopic Polymer Films for Sustainable Moisture Harvesting in Arid Environments. \textit{Nature Communications} \textbf{2022}, \textit{13} (1), 1--7. \url{https://doi.org/10.1038/s41467-022-30505-2}.
+
+\bibitem{shan2023} Shan, H.; Poredo\v{s}, P.; Ye, Z.; Qu, H.; Zhang, Y.; Zhou, M.; Wang, R.; Tan, S. C. All-Day Multicyclic Atmospheric Water Harvesting Enabled by Polyelectrolyte Hydrogel with Hybrid Desorption Mode. \textit{Advanced Materials} \textbf{2023}, \textit{35} (35), 2302038. \url{https://doi.org/10.1002/ADMA.202302038}.
+
+\bibitem{diazmarin2024} D\'iaz-Mar\'in, C. D.; Deshmukh, A.; Roper, M. A.; Lienhard, J. H.; Chen, G. Dynamic Water Absorption-Desorption by Aqueous Salt Solutions. \textit{Cell Rep Phys Sci} \textbf{2024}, 101929. \url{https://doi.org/10.1016/J.XCRP.2024.101929}.
+
+\bibitem{mills1994} Mills, A. F. \textit{Heat and Mass Transfer}; McGraw-Hill: New York, N.\,Y., 1994.
+
+\bibitem{graeber2023nano} Graeber, G.; D\'iaz-Mar\'in, C. D.; Gaugler, L. C.; El Fil, B. Intrinsic Water Transport in Moisture-Capturing Hydrogels. \textit{Nano Lett} \textbf{2023}, \textit{24} (13). \url{https://doi.org/10.1021/ACS.NANOLETT.3C04191}.
+
+\bibitem{palacios2012} Palacios-Bereche, R.; Gonzales, R.; Nebra, S. A. Exergy Calculation of Lithium Bromide--Water Solution and Its Application in the Exergetic Evaluation of Absorption Refrigeration Systems LiBr-H2O. \textit{Int J Energy Res} \textbf{2012}, \textit{36} (2), 166--181. \url{https://doi.org/10.1002/ER.1790}.
+
+\bibitem{kim2021} Kim, J.; Zhang, G.; Shi, M.; Suo, Z. Fracture, Fatigue, and Friction of Polymers in Which Entanglements Greatly Outnumber Cross-Links. \textit{Science} \textbf{2021}, \textit{374} (6564), 212--216. \url{https://doi.org/10.1126/SCIENCE.ABG6320}.
+
+\bibitem{diazmarin2022} D\'iaz-Mar\'in, C. D.; Zhang, L.; Lu, Z.; Alshrah, M.; Grossman, J. C.; Wang, E. N. Kinetics of Sorption in Hygroscopic Hydrogels. \textit{Nano Lett} \textbf{2022}, \textit{22} (3), 1100--1107. \url{https://doi.org/10.1021/ACS.NANOLETT.1C04216}.
+
+\bibitem{elfil2023} El Fil, B.; Li, X.; D\'iaz-Mar\'in, C. D.; Zhang, L.; Jacobucci, C. L. Significant Enhancement of Sorption Kinetics via Boiling-Assisted Channel Templating. \textit{Cell Rep Phys Sci} \textbf{2023}, 101549. \url{https://doi.org/10.1016/J.XCRP.2023.101549}.
+
+\bibitem{aristov2012} Aristov, Y. I.; Sapienza, A.; Ovoshchnikov, D. S.; Freni, A.; Restuccia, G. Reallocation of Adsorption and Desorption Times for Optimisation of Cooling Cycles. \textit{International Journal of Refrigeration} \textbf{2012}, \textit{35} (3), 525--531. \url{https://doi.org/10.1016/J.IJREFRIG.2010.07.019}.
+
+\bibitem{rsc_indium} Indium -- Element information, properties and uses $\vert$ Periodic Table. \url{https://www.rsc.org/periodic-table/element/49/indium} (accessed 2024-02-12).
+
+\bibitem{pubchem_phenylsalicylate} Phenyl salicylate $\vert$ C13H10O3 $\vert$ CID 8361 -- PubChem. \url{https://pubchem.ncbi.nlm.nih.gov/compound/Phenyl-salicylate\#section=Boiling-Point} (accessed 2024-02-12).
+
+\bibitem{nist_isopropanol} Isopropyl Alcohol. \url{https://webbook.nist.gov/cgi/cbook.cgi?ID=C67630&Mask=4} (accessed 2024-02-12).
+
+\bibitem{kim2016} Kim, H.; Cho, H. J.; Narayanan, S.; Yang, S.; Furukawa, H.; Schiffres, S.; Li, X.; Zhang, Y. B.; Jiang, J.; Yaghi, O. M.; Wang, E. N. Characterization of Adsorption Enthalpy of Novel Water-Stable Zeolites and Metal-Organic Frameworks. \textit{Scientific Reports} \textbf{2016}, \textit{6} (1), 1--8. \url{https://doi.org/10.1038/srep19097}.
+
+\bibitem{lu2022} Lu, H.; Shi, W.; Zhang, J. H.; Chen, A. C.; Guan, W.; Lei, C.; Greer, J. R.; Boriskina, S. V.; Yu, G. Tailoring the Desorption Behavior of Hygroscopic Gels for Atmospheric Water Harvesting in Arid Climates. \textit{Advanced Materials} \textbf{2022}, \textit{34} (37), 2205344. \url{https://doi.org/10.1002/ADMA.202205344}.
+
+\end{thebibliography}
+
+\end{document}

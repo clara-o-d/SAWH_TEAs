@@ -1,0 +1,380 @@
+\documentclass[11pt]{article}
+
+% ---------- Packages ----------
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{geometry}
+\geometry{margin=1in}
+\usepackage{amsmath,amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{caption}
+\usepackage[colorlinks=true, citecolor=blue, urlcolor=blue, linkcolor=blue]{hyperref}
+\usepackage{authblk}
+\usepackage{titlesec}
+\usepackage{fancyhdr}
+\usepackage{xcolor}
+
+% ---------- Header / Footer ----------
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small \textit{Article}}
+\fancyhead[R]{\small \href{https://doi.org/10.1038/s41467-024-53291-5}{https://doi.org/10.1038/s41467-024-53291-5}}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+% ---------- Section styling ----------
+\titleformat{\section}{\normalfont\Large\bfseries}{\thesection}{1em}{}
+\titleformat{\subsection}{\normalfont\large\bfseries}{\thesubsection}{1em}{}
+\titleformat{\subsubsection}{\normalfont\normalsize\bfseries}{\thesubsubsection}{1em}{}
+
+\title{\LARGE \textbf{Physics-based prediction of moisture-capture properties of hydrogels}}
+
+\author[1,*]{Carlos D. D\'iaz-Mar\'in}
+\author[1,2]{Lorenzo Masetti}
+\author[1]{Miles A. Roper}
+\author[3]{Kezia E. Hector}
+\author[1]{Yang Zhong}
+\author[4]{Zhengmao Lu}
+\author[1]{Omer R. Caylan}
+\author[1,5]{Gustav Graeber}
+\author[4]{Jeffrey C. Grossman}
+
+\affil[1]{Department of Mechanical Engineering, Massachusetts Institute of Technology, Cambridge, MA 02139, USA}
+\affil[2]{Department of Mechanical and Process Engineering, ETH Zurich, Zurich, Switzerland}
+\affil[3]{Department of Chemical Engineering, Massachusetts Institute of Technology, Cambridge, MA 02139, USA}
+\affil[4]{Department of Materials Science and Engineering, Massachusetts Institute of Technology, Cambridge, MA 02139, USA}
+\affil[5]{Department of Chemistry, Humboldt-Universit\"at zu Berlin, 12489 Berlin, Germany}
+\affil[*]{e-mail: \texttt{cddiaz@mit.edu}}
+
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\begin{center}
+\small
+\textbf{nature communications} \\[2pt]
+Received: 27 May 2024 \quad Accepted: 8 October 2024 \quad Published online: 17 October 2024 \\[4pt]
+DOI: \url{https://doi.org/10.1038/s41467-024-53291-5} \\[4pt]
+Nature Communications (2024) 15:8948
+\end{center}
+
+\vspace{1em}
+
+\begin{abstract}
+\noindent Moisture-capturing materials can enable potentially game-changing energy-water technologies such as atmospheric water production, heat storage, and passive cooling. Hydrogel composites recently emerged as outstanding moisture-capturing materials due to their low cost, high affinity for humidity, and design versatility. Despite extensive efforts to experimentally explore the large design space of hydrogels for high-performance moisture capture, there is a critical knowledge gap on our understanding behind the moisture-capture properties of these materials. This missing understanding hinders the fast development of novel hydrogels, material performance enhancements, and device-level optimization. In this work, we combine synthesis and characterization of hydrogel-salt composites to develop and validate a theoretical description that bridges this knowledge gap. Starting from a thermodynamic description of hydrogel-salt composites, we develop models that accurately capture experimentally measured moisture uptakes and sorption enthalpies. We also develop mass transport models that precisely reproduce the dynamic absorption and desorption of moisture into hydrogel-salt composites. Altogether, these results demonstrate the main variables that dominate moisture-capturing properties, showing a negligible role of the polymer in the material performance under all considered cases. Our insights guide the synthesis of next-generation humidity-capturing hydrogels and enable their system-level optimization in ways previously unattainable for critical water-energy applications.
+\end{abstract}
+
+Engineered materials that capture and release moisture from the air hold great potential towards combating grand humanity challenges related to water scarcity and climate change. Humidity in the air can be converted into drinking water through sorption-based atmospheric water harvesting (Fig.~\ref{fig:fig1})~\cite{kim2017,kim2018}. Alternatively, the enthalpy associated with water sorption can be used as a sustainable cooling mechanism for photovoltaic panels~\cite{li2020}, electronics~\cite{zeng2023}, and buildings~\cite{cui2016} or as a heat storage mechanism, resulting in high energy density thermal batteries (Fig.~\ref{fig:fig1})~\cite{shan2023a,narayanan2015}. These applications have motivated the development and study of numerous sorbent materials such as metal-organic frameworks (MOFs)~\cite{liu2020,canivet2014,kim2017b}, zeolites~\cite{ng2008,castillo2013,simonot1979}, and hygroscopic salts~\cite{punwani2002,li2018,zhang2021}. However, these sorbents suffer from performance limitations such as low capacity to capture moisture, slow capture and release (i.e., slow kinetics), and/or high energy requirements~\cite{zhong2024}.
+
+Hydrogel--salt composites emerged recently as absorbents that can overcome these previous limitations owing to their extreme capacity to capture moisture even in arid conditions~\cite{graeber2023,entezari2020,xu2021}, fast kinetics~\cite{xu2021,diazmarin2022a,guo2022}, and low sorption enthalpies~\cite{lu2022}. Additionally, hydrogel--salt composites are highly scalable, inexpensive, and can prevent practical problems, such as water leakage~\cite{graeber2023}. These properties further make hydrogel--salt composites attractive candidates for large-scale sorption.
+
+The high performance of hydrogel--salt composites has been achieved due to the vast design space that hydrogel--salt composites offer (Fig.~\ref{fig:fig1}a). In particular, many hydrogel variables across a large range of length scales can be designed to achieve desired properties. For instance, the hydrogel polymer chemistry, salt chemistry, salt content, crosslinking density, and geometry can be tuned during the synthesis to alter the final properties of the hydrogel composite~\cite{diazmarin2022a,diazmarin2022b,li2018b,kallenberger2018}. However, to date, there has been no guide connecting these synthesis variables to the moisture capture properties (uptake, kinetics, and sorption enthalpy), critically blocking further material and application progress (Fig.~\ref{fig:fig1}b). Previous works have elucidated hydrogel thermodynamics for atmospheric water harvesting~\cite{chen2022} and the absorption--desorption kinetics by salt solutions~\cite{diazmarin2024a}. However, there is still a missing understanding of the key synthesis variables that govern hydrogel moisture-capture performance. This has forced the development of new hydrogel composites via trial-and-error, demanding time-consuming and expensive synthesis and characterization. Furthermore, the lack of mechanistic understanding of hydrogel properties has led to conflicting reports and open questions, including the role of polymer chemistry in water uptake~\cite{graeber2023,lu2022}, the material-level and system-level properties that govern absorption--desorption kinetics~\cite{diazmarin2022a,guo2022,diazmarin2022b,shan2023b}, and the potential to reduce the sorption enthalpy due to favorable polymer--water interactions~\cite{lu2022,wei2023}. On a system level, these hydrogels are typically incorporated into a device, such as a water harvester or a thermal battery, for the desired application (Fig.~\ref{fig:fig1}c). The optimization of these devices requires rational choices of geometry, configuration, and material selection of device components~\cite{li2020,wilson2023,narayanan2014}. This design process, however, is currently hindered by the missing understanding of the mass transport properties of hydrogel--salt composites. All these limitations prevent hydrogel--salt composites from fulfilling their potential.
+
+In this work, we bridge the gap between hydrogel--salt composite composition and moisture-capture properties to demonstrate the key synthesis variables that govern hydrogel moisture-capture performance. To this end, we fabricate hydrogels varying the key synthesis variables (polymer chemistry, salt content, salt type, and crosslinking density). Subsequently, we characterize the hydrogel performance by measuring their uptake, sorption enthalpy, and absorption--desorption kinetics, as a function of relative humidity. Finally, we develop physics-based models that accurately explain all observed properties. For the theoretical understanding, we start with a thermodynamic description of the polymer-salt ion--water interactions. We use this framework to develop predictions for the uptake and sorption enthalpy as a function of hydrogel composition and relative humidity, which accurately reproduce our experimental measurements. These thermodynamic models demonstrate that the polymers that we tested and in fact, many reported in the literature, do not play a significant role in the thermodynamic properties of the hydrogel--salt composites. Consequently, the uptake is dominated by salt type and content, while the sorption enthalpy is dominated by salt type. Lastly, we use a convection-limited transport model to accurately predict the dynamic water capture and release of hydrogels in response to humidity changes. These transport models and experiments reveal critical phenomena, including longer absorption times as humidity is increased, slower kinetics of absorption than desorption, even in isothermal conditions, and the linear dependence of the absorption and desorption times on hydrogel thickness. These physics-based models enable the targeted design of next-generation hydrogel sorbents and application optimization in ways previously unattainable, ultimately representing a major step towards capturing moisture from the air for freshwater production, sustainable passive cooling, and heat-storing batteries.
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering \vspace{3.5cm} \textit{[Figure 1: Bridging the gap between hydrogel--salt composite composition and absorption properties to optimize application performance --- multi-scale synthesis variables (a); sorption properties: uptake $U$, absorption time $\tau_{\rm abs}$, desorption time $\tau_{\rm des}$, enthalpy $h$ (b); application performance in atmospheric water production, passive cooling, and thermal batteries (c).]} \vspace{3.5cm}}}
+\caption{\textbf{Bridging the gap between hydrogel--salt composite composition and absorption properties to optimize application performance.} \textbf{a} Synthesizing hydrogel--salt composites for moisture absorption offer various multi-scale variables that can be tuned, such as polymer and salt chemistry, salt content, crosslinking density, and geometry. \textbf{b} These synthesis variables determine the hydrogel sorption properties: gravimetric uptake $U$, absorption time $\tau_{\rm abs}$, desorption time $\tau_{\rm des}$, and sorption enthalpy $h$. \textbf{c} Through the design of these properties, the application performance can be optimized for high-performance atmospheric water production, passive cooling, and heat storage.}
+\label{fig:fig1}
+\end{figure}
+
+\section{Results}
+
+\subsection{Hydrogel--salt composites with different synthesis properties}
+
+We followed a one-pot synthesis process in which monomer, salt, and crosslinker are all dissolved and mixed in water (see Methods). We synthesized hydrogels with different (1) salt content, (2) crosslinker content, (3) salt type, and (4) polymer type, to comprehensively probe the effect of these variables (Fig.~\ref{fig:fig1}a) on the moisture-capture properties (Fig.~\ref{fig:fig1}b). Our starting point was a polyacrylamide (PAM) hydrogel with lithium chloride (LiCl) with 4~g of salt per g of polymer, which is representative of previous works~\cite{graeber2023,lu2022}. We then varied at least one parameter in the synthesis process to fabricate PAM--LiCl hydrogels with different (1) salt content, (2) crosslinking content, (3) salt type (PAM--lithium bromide (LiBr)), and/or (4) polymer chemistry (polyvinyl alcohol (PVA)-LiCl). This allowed us to methodically study the effect of the synthesis parameters on the moisture-capture properties. Figure~\ref{fig:fig2} shows photos of synthesized hydrogels: PAM--LiCl with 8~g of LiCl per g of polymer (Fig.~\ref{fig:fig2}a), PVA--LiCl with 4~g of LiCl per g of polymer (Fig.~\ref{fig:fig2}c), PAM--LiBr with 4~g of LiBr per g of polymer (Fig.~\ref{fig:fig2}e), and PAM--LiCl hydrogel with the same salt content as Fig.~\ref{fig:fig2}a, but 20 times higher crosslinker to monomer ratio (Fig.~\ref{fig:fig2}g). All hydrogels looked visually similar. They were all transparent and preserved the shape of the petri dish they gelated in, even as they were transferred to larger petri dishes.
+
+We validated the expected elemental composition of the hydrogels using electron dispersive X-ray spectroscopy (EDS, see Methods for details). PAM--LiCl 8~g/g contained carbon, nitrogen, and chloride elements (Fig.~\ref{fig:fig2}b), as expected from the polymer composition (C, N) and the salt (Cl). PVA--LiCl had a similar elemental composition (Fig.~\ref{fig:fig2}d) except for the absence of nitrogen, as expected from its monomer (CH$_2$CH). PAM--LiBr contained bromide instead of chloride (Fig.~\ref{fig:fig2}f), as expected from the salt. PAM--LiCl with a higher crosslinker content (Fig.~\ref{fig:fig2}h) had a similar elemental composition to that of PAM--LiCl with a lower crosslinking (Fig.~\ref{fig:fig2}b and Fig.~S1). Furthermore, the composition observed throughout all electron-dispersive X-ray spectroscopy experiments (Figs.~\ref{fig:fig2} and S1) shows a uniform distribution of the salt throughout the hydrogel--salt composites, as indicated by the even presence of Cl and Br. We also measured the elastic modulus of PAM--LiCl with varying crosslinker content (Fig.~S3). A higher crosslinker content resulted in a higher modulus, as expected, due to the formation of more chemical crosslinks~\cite{subramani2020}.
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering \vspace{4.5cm} \textit{[Figure 2: Synthesized hydrogels --- photographs and EDS elemental maps (C, N, Cl, Br) of PAM--LiCl 8~g/g (a,b), PVA--LiCl 4~g/g (c,d), PAM--LiBr 4~g/g (e,f), and PAM--LiCl 10~mg/g crosslinker/PAM (g,h).]} \vspace{4.5cm}}}
+\caption{\textbf{Synthesized hydrogels.} Synthesized hydrogels with different salt content, monomer, salt, and crosslinker content, including \textbf{a} PAM--LiCl, \textbf{c} PVA--LiCl, \textbf{e} PAM--LiBr, and \textbf{g} PAM--LiCl with 10~mg/g of crosslinker per polymer. The hydrogels had salt-to-polymer mass ratios of 8, 4, 4, and 4, respectively. Elemental compositions of hydrogels obtained with electron dispersive X-ray spectroscopy follow the expectation based on the synthesis variables. \textbf{b} PAM--LiCl contained C, N, and Cl. \textbf{d} PVA--LiCl had no N due to the different monomers. \textbf{f} PAM--LiBr had Br instead of Cl. \textbf{h} PAM--LiCl 10~mg/g crosslinker/PAM had a similar composition as PAM--LiCl with a lower crosslinking.}
+\label{fig:fig2}
+\end{figure}
+
+\subsection{Thermodynamic framework for uptake and sorption enthalpy prediction}
+
+Hydrogel--salt composites are composed of a crosslinked polymer network containing water and dissolved ions (Fig.~\ref{fig:fig3}a)~\cite{graeber2023,li2018b,kallenberger2018,diazmarin2022b,shan2023b}. To gain an understanding of the interactions between polymer, water, and ions, we first develop a thermodynamic description of hydrogel--salt composites starting from the Flory--Rehner theory for hydrogel swelling~\cite{flory1953} (see Supplementary Note S2 for detailed derivation). We write the Gibbs free energy change per volume of polymer of the hydrogel--salt composite, $\Delta G = -T\Delta S_{\rm mix} + \Delta H_{\rm mix} + \Delta G_{\rm elas}$, as the sum of terms due to (1) entropy of mixing $\Delta S_{\rm mix}$ between polymer, water, and ions, (2) enthalpy of mixing $\Delta H_{\rm mix}$ between polymer, water, and ions, and (3) Gibbs free energy due to hydrogel elastic expansion $\Delta G_{\rm elas}$, where $T$ is the absolute temperature. In a reformulation of the Flory--Rehner theory, Chen clarified that $\Delta G_{\rm elas}$ represents the pressure dependence of the chemical potential~\cite{chen2022,flory1953,chen2022b}. In general, the pressure inside the hydrogel will be higher~\cite{chen2022}. However, under the conditions studied in this work, this effect does not significantly change the thermodynamic properties such as uptake or enthalpy.
+
+We can calculate the chemical potential of water in the hydrogel, $\mu_{w,\mathrm{hydrogel}}$, as
+\begin{equation}
+\mu_{w,\mathrm{hydrogel}} = \mu_w^0 + \frac{\partial \Delta G}{\partial c_w} = \mu_w^0 + \mu_{p-w} + \mu_{w-i} + \mu_{p-i} + \mu_{\mathrm{elas}}
+\label{eq:1}
+\end{equation}
+where $c_w$ is the molar concentration of water and $\mu_w^0$ is the chemical potential of pure water. We define four chemical potential terms $\mu_{p-w}$, $\mu_{w-i}$, $\mu_{p-i}$, and $\mu_{\mathrm{elas}}$, which respectively represent interactions between polymer--water, water-ions, polymer-ions, and elasticity, as indicated by the subscripts (Fig.~\ref{fig:fig3}a)~\cite{chen2022}. Expressions of these chemical potential terms are given in Supplementary Note S3.
+
+We use Eq.~\ref{eq:1} to derive an expression for the uptake of hydrogel--salt composites as a function of the relative humidity, $RH$. To this end, we note that the uptake corresponds to an equilibrium property, quantifying the hydrogel mass as it has equilibrated in an environment with a given $RH$ and normalized to its fully dried weight. Since the hydrogel is in equilibrium with the environment, the chemical potential of water in the air and in the hydrogel must be the same, representing that there is no moisture transfer between ambient and hydrogel (Fig.~\ref{fig:fig3}a)~\cite{dill2010}.
+\begin{equation}
+\mu_{w,\mathrm{air}} = \mu_{w,\mathrm{hydrogel}}
+\label{eq:2}
+\end{equation}
+
+We write the chemical potential of water in the air assuming ideal gas behavior~\cite{atkins2006,cengel2019}
+\begin{equation}
+\mu_{w,\mathrm{air}} = \mu_w^0 + RT \ln RH.
+\label{eq:3}
+\end{equation}
+
+For the chemical potential of water in the hydrogel, we performed a parametric analysis (Fig.~S4) to determine the dominant chemical potential terms in Eq.~\ref{eq:1}. Our results, shown in Fig.~S4, demonstrate that the water-ion interactions, $\mu_{w-i}$, dominate the chemical potential of water in the hydrogel (i.e., $\mu_{w,\mathrm{hydrogel}} \approx \mu_w^0 + \mu_{w-i}$) and that under the considered assumptions the polymer does not typically play a significant role in the hydrogel--salt composite thermodynamics. Therefore,
+\begin{equation}
+\mu_{w,\mathrm{hydrogel}} = \mu_w^0 + RT \ln x_w \gamma_w,
+\label{eq:4}
+\end{equation}
+where $x_w$ is the water mole fraction relative to the moles of water and ions and $\gamma_w$ is the activity coefficient of water in the salt solution~\cite{atkins2006}. Here we consider that the activity coefficient is unchanged by the presence of the polymer. Combining Eqs.~\ref{eq:2}--\ref{eq:4}, we derive an expression for the uptake $U$
+\begin{equation}
+U = \frac{m_w}{m_s + m_p} = \frac{1}{1 + 1/SL} \cdot \frac{RH/\gamma_w \cdot i}{1 - RH/\gamma_w} \cdot \frac{MW_w}{MW_s},
+\label{eq:5}
+\end{equation}
+where $m_w$, $m_s$, and $m_p$ are the masses of water, salt, and polymer, respectively. $SL$ is the salt-to-polymer mass ratio, $i$ is the number of ions per molecule of salt, and $MW_w$ and $MW_s$ are the molar masses of water and salt, respectively. In Eq.~\ref{eq:5}, the second factor in the last equality is the uptake of the pure salt. The first factor accounts for the uptake reduction due to the polymer weight, reflecting the negligible contribution of the polymer to the hydrogel chemical potential.
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering \vspace{5cm} \textit{[Figure 3: Equilibrium between water in the hydrogel and the air dictates uptake as a function of humidity --- schematic of polymer--water, water-ion, and polymer-ion interactions (a); uptake vs.\ RH for different salt content (b), polymer chemistry (c), salt type (d), crosslinking density (e), and comparison to literature hydrogels (f).]} \vspace{5cm}}}
+\caption{\textbf{Equilibrium between water in the hydrogel and the air dictates uptake as a function of humidity.} \textbf{a} Polymer--water, water-ion, and polymer--ion interactions dictate the chemical potential of water in the hydrogel, which, in equilibrium, equals the chemical potential of the water in the air. The model, developed starting from this equality of chemical potentials, accurately predicts the experimentally measured uptakes of hydrogels with \textbf{b} different salt content, \textbf{c} different polymer chemistries, \textbf{d} different salt types, and \textbf{e} different crosslinking densities. \textbf{f} The model also predicts accurately the uptakes of various hydrogels reported in the literature~\cite{xu2021,guo2022,kallenberger2018,shan2023b}.}
+\label{fig:fig3}
+\end{figure}
+
+Figure~\ref{fig:fig3}b--e shows the comparison of our model (Eq.~\ref{eq:5}) and our experimentally measured uptakes (see Methods for details) for a wide range of hydrogels. Critically, Eq.~\ref{eq:5} shows that the uptake of a hydrogel--salt composite can be predicted at varying humidities without any fitting parameters based on the salt properties ($\gamma_w$, $MW_s$, and $i$) and the salt content in the hydrogel ($SL$). In particular, the activity coefficient is a function of the salt-to-water concentration. Therefore, we use experimentally measured values of activity~\cite{palacios2012,conde2004} and knowledge of the salt type and salt content to predict water uptakes of our synthesized hydrogels. In our results, we observed a striking agreement between the model and experiments across the entire humidity range. Figure~\ref{fig:fig3}b shows the uptakes of PAM hydrogels with varying amounts of LiCl. Our model and experiments both reflect a strong increase in uptake as the salt content is increased. For instance, the uptakes at $RH = 70\%$ of a PAM, PAM--LiCl 1~g/g, and PAM--LiCl 8~g/g are 0.19, 1.76, and 3.52~g/g, respectively. As the salt content is increased, the uptake becomes increasingly closer to that of the salt, which is the maximum uptake attainable (Eq.~\ref{eq:5} as $SL$ tends to infinity, see Fig.~S5). Practically, this implies that maximizing the salt loading will maximize the hydrogel moisture uptake~\cite{graeber2023}. Figure~\ref{fig:fig3}c compares hydrogels with different polymer chemistry (PAM and PVA), showing almost identical uptake between both. This is captured in our model and reflects the negligible role of polymer--ion, and polymer--water interactions for these polymers (Fig.~\ref{fig:fig3}a). Figure~\ref{fig:fig3}d shows the uptakes of hydrogels with LiBr salt. The experiments and model reflect again the increasing uptake with increasing salt content, as also seen in Fig.~\ref{fig:fig3}b for LiCl. However, in contrast to LiCl, the uptakes are lower. For instance, at $RH = 70\%$, the uptake of a PAM--LiBr 4~g/g hydrogel is less than half of that of PAM--LiCl 4~g/g. This is captured in our model through the differences in molar mass and activity coefficient. Figure~\ref{fig:fig3}e shows the uptake of hydrogels with different crosslinking densities, which have almost identical values, reflecting the negligible role of the elasticity term in Eq.~\ref{eq:1}.
+
+With our model, we can also explain the uptake of hydrogel--salt composites previously reported by other groups (Fig.~\ref{fig:fig3}f), with different polymer chemistries, salt types and content, and crosslinking properties. Specifically, we considered four previous hydrogels (see Supplementary Note S5 for details): (a) alginate--calcium chloride by Kallenberger and Fr\"oba~\cite{kallenberger2018}, (b) alginate and graphene oxide--lithium chloride by Xu et al.~\cite{xu2021}, konjac glucomannan and cellulose-lithium chloride by Guo et al.~\cite{guo2022}, and poly(dodecylammonium-2-acrylamido-2-methylpropanesulfonate)-lithium chloride by Shan et al.~\cite{shan2023b}. As seen in Fig.~\ref{fig:fig3}f, our model (Eq.~\ref{eq:5}) can capture with remarkable accuracy the experimentally measured uptakes of these different hydrogels, even those with ionic polymers. This further demonstrates the broad applicability of our model in predicting the uptakes of hydrogels with varying polymer chemistries and salt types. As the hydrogels used in these experiments include polyelectrolytes, the relative unimportance of the polymers suggests that the number of charges due to the polyelectrolyte are small~\cite{chen2022,english1996,brannon1991}. However, future work can expand on our model and experiments to comprehensively study moisture absorption by polyelectrolytes.
+
+We also used the thermodynamic description of the hydrogel--salt composite to develop a prediction of the sorption enthalpy (see Supplementary Note S6 for detailed derivation). The sorption enthalpy is a crucial variable as it correlates to the energy intensity of atmospheric water production and to the energy and power achievable in energy storage and cooling. We calculate the sorption enthalpy, $h_{\mathrm{sor}}$, from the mixing enthalpy between polymer, water, and ions, $\Delta H_{\mathrm{mix}}$,
+\begin{equation}
+h_{\mathrm{sor}} = h_{lv} - \frac{\partial \Delta H_{\mathrm{mix}}}{\partial c_w},
+\label{eq:6}
+\end{equation}
+where $h_{lv}$ is the vaporization enthalpy of water. Eq.~S6 shows an expression for the mixing enthalpy, $\Delta H_{\mathrm{mix}}$, as a function of the concentration of water and ions and other hydrogel properties. Combining Eq.~\ref{eq:6} and S6, we write
+\begin{equation}
+h_{\mathrm{sor}} = h_{lv} + h_{p-w} + h_{p-i} + h_{w-i} \approx h_{lv} + h_{w-i},
+\label{eq:7}
+\end{equation}
+where $h_{p-w}$, $h_{p-i}$, and $h_{w-i}$ are enthalpy terms corresponding to interactions between polymer--water, polymer-ions, and water-ions, respectively. The last approximation in Eq.~\ref{eq:7} reflects the dominant behavior of the water-ion interaction term, as demonstrated through our parametric analysis (Fig.~S6). Consequently, Eq.~\ref{eq:7} implies that the sorption enthalpy of a hydrogel--salt composite can be calculated as the sum of the vaporization enthalpy of water and the mixing enthalpy of water and salt, which has been widely characterized for salts~\cite{conde2004,yuan2005}. The polymer interactions are not typically significant in the enthalpy.
+
+We validated our sorption enthalpy model, Eq.~\ref{eq:7}, with sorption enthalpy measurements performed using thermogravimetric-differential calorimetry at controlled humidities (see Methods for details) of our synthesized hydrogels. Specifically, for the theoretical prediction, we calculated the mixing enthalpy due to water and salt ions, $h_{w-i}$, using previous correlations for mixing of water--LiCl~\cite{conde2004} and water--LiBr~\cite{yuan2005} as a function of composition. Our model captures the observed experimental trends across the different salt content, salt types, polymer chemistries, and crosslinking densities studied (Fig.~\ref{fig:fig4}). Figure~\ref{fig:fig4}a shows the enthalpy as a function of humidity for PAM--LiCl hydrogels with different salt content. The model and measurements show that the enthalpy is highest at the lowest relative humidity with values of approximately 2800--2900~kJ/kg. Even at this highest value, the sorption enthalpy is only 20\% higher than the vaporization enthalpy of water~\cite{zhong2024,brannon1991}. This comparatively low absorption enthalpy implies a more energetically efficient operation in atmospheric water production~\cite{li2023,li2022}. Both our measurements and model show that the sorption enthalpy decreases as the humidity increases (Fig.~\ref{fig:fig4}a). The sorption enthalpy tends to the value of the vaporization enthalpy of water at high humidity, reflecting the negligible contribution of the mixing enthalpy of water and ions, $h_{w-i}$, at low salt concentrations as captured by Eq.~\ref{eq:7}.
+
+Across all humidities, the sorption enthalpies are similar regardless of the salt content, as predicted by our model. Figure~\ref{fig:fig4}b shows the sorption enthalpies of hydrogels with different polymer chemistries (PAM and PVA). Our model accurately captures the experimental measurements, demonstrating that polymer chemistry has a negligible role in the sorption enthalpy under the studied cases. Figure~\ref{fig:fig4}c shows the sorption enthalpies of a PAM--LiBr 4~g/g hydrogel compared with pure LiBr salt. We measured enthalpies as high as 3400~kJ/kg, which are higher than those measured for LiCl hydrogels (2800--2900~kJ/kg). These enthalpies, which were measured from $RH = 0\%$ to 20\%, capture the heat released as the anhydrous salt (e.g., LiCl) forms hydrates (e.g., LiCl--H$_2$O) and then deliquesces into a salt solution~\cite{xu2021}. Therefore, the sorption enthalpy differences between LiCl and LiBr hydrogel composites at low RH can be attributed to the different properties of the anhydrous salt, such as the different deliquescence humidities and hydrate formation enthalpies~\cite{conde2004,herold2016,greenspan1977}. After deliquescence ($RH > 20\%$), the enthalpies of hydrogel-LiBr composites were similar to those of PAM--LiCl (Fig.~\ref{fig:fig4}a), reflecting similar mixing enthalpies of the salt solutions. This suggests similar energetic requirements for desorption for different salts. Figure~\ref{fig:fig4}d shows the enthalpies as a function of humidity for hydrogels with different crosslinking densities, demonstrating comparable enthalpies even as the crosslinker content was changed by two orders of magnitude. We note that the highest deviation observed occurred as the anhydrous salt captures moisture at $RH = 20\%$, which can arise because of imperfect drying of the samples, which could have retained some moisture. Further error sources are discussed in Supplementary Note S15.
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering \vspace{5cm} \textit{[Figure 4: Model and experimental results of sorption enthalpies of hydrogel--salt composites --- enthalpy vs.\ RH for different salt content (a), polymer chemistry (b), salt type (c), and crosslinking density (d), all compared to the water vaporization enthalpy.]} \vspace{5cm}}}
+\caption{\textbf{Model and experimental results of sorption enthalpies of hydrogel--salt composites.} The model prediction shows reasonable agreement with the experimentally measured sorption enthalpies of hydrogel--salt composites with \textbf{a} different salt content, \textbf{b} different polymer chemistries, \textbf{c} a different salt type, and \textbf{d} different crosslinking densities. The enthalpy monotonically decreases with humidity, approaching the value of the vaporization enthalpy of water. Hydrogels with different salt content, polymer chemistry, and crosslinking density exhibited similar enthalpies. The model captures the observed trends. Measurement errors arise due to noise in the heat flux baseline at equilibrium, heat exchange with the ambient, possible imperfect drying of samples, and possible imperfect equilibration at higher humidities.}
+\label{fig:fig4}
+\end{figure}
+
+\subsection{Dynamic moisture absorption and desorption by hydrogels}
+
+In addition to the uptake and sorption enthalpy, which are thermodynamic properties, the absorption performance is also critically determined by the absorption--desorption kinetics. Typically, fast kinetics are desired to maximize the water production rate in atmospheric water production or the cooling power in cooling and energy storage. The absorption and desorption kinetics depend on the time-dependent transport of moisture between the ambient and the hydrogel--salt composite. Elucidating these processes, therefore, requires understanding the mass transport mechanisms of water in a hydrogel--salt system. In a typical absorption system, a hydrogel--salt composite is in an environment at a given temperature and humidity (Fig.~\ref{fig:fig5}a). Water mass transport is driven by the vapor concentration difference between the ambient and the hydrogel surface, $\Delta C = C_{\mathrm{amb}} - C_{\mathrm{hyd}} = RH \cdot \left(\frac{P_{\mathrm{sat}}}{RT}\right)_{\mathrm{amb}} - \gamma_w x_w \cdot \left(\frac{P_{\mathrm{sat}}}{RT}\right)_{\mathrm{hyd}}$~\cite{diazmarin2024a}, where $P_{\mathrm{sat}}$ is the water vapor saturation pressure at temperature $T$. If the ambient vapor concentration, $C_{\mathrm{amb}}$, is higher than the vapor concentration at the hydrogel surface, $C_{\mathrm{hyd}}$, moisture is transferred from the ambient into the hydrogel. During this process, water vapor molecules are first convected from the ambient to the hydrogel surface (Fig.~\ref{fig:fig5}b). At the surface, the vapor condenses into the lower vapor pressure hydrogel. Next, the water molecules diffuse in the hydrogel from the high water concentration surface into the bulk (Fig.~\ref{fig:fig5}b). Here, we neglect the diffusion process, assuming that convection is the limiting process of humidity transport. This assumption can be quantified through a Biot number (Eq.~\ref{eq:10}) and follows from previous work demonstrating that diffusion is negligible during absorption--desorption of humidity into salt solutions for a wide range of system conditions~\cite{diazmarin2024a}. We can then describe the water concentration in the hydrogel as uniform and consider a mass balance for the entire hydrogel to obtain the evolution of the water concentration (see Supplementary Note S7 for derivation)
+\begin{equation}
+\frac{\partial c_w}{\partial t} = \frac{g}{H_0}\left[RH \cdot \left(\frac{P_{\mathrm{sat}}}{RT}\right)_{\mathrm{amb}} - \gamma_w x_w \cdot \left(\frac{P_{\mathrm{sat}}}{RT}\right)_{\mathrm{hyd}}\right] = \frac{g}{H_0} \frac{P_{\mathrm{sat}}}{RT}\left(RH - \gamma_w x_w\right),
+\label{eq:8}
+\end{equation}
+where $g$ is the mass transfer convection coefficient (m/s), and $H_0$ is the initial thickness of the hydrogel in its most desorbed state. $c_w$ is here defined as the molar concentration of water relative to the hydrogel volume in its most desorbed state. Equation~\ref{eq:8} reflects how mass transfer between the hydrogel and ambient is driven by the difference of water vapor concentration between the ambient and the hydrogel. In the last equality of Eq.~\ref{eq:8}, we assumed that the hydrogel and the environment are at the same temperature. This assumption accurately describes our experiments where absorption and desorption are driven by relative humidity rather than temperature~\cite{diazmarin2024a}.
+
+\begin{figure}[t]
+\centering
+\fbox{\parbox{0.9\textwidth}{\centering \vspace{6cm} \textit{[Figure 5: Absorption--desorption kinetics and mass transfer in hydrogel--salt composites --- environmental chamber setup (a); convection/diffusion mass transfer schematic (b); uptake vs.\ time for PAM--LiCl 4~g/g (c) and hydrogels with different salt content (d), polymer chemistry (e), salt type (f); combined timescale vs.\ salt content (g); cycled water vs.\ salt content (h); uptake vs.\ time for a thicker hydrogel (i).]} \vspace{6cm}}}
+\caption{\textbf{Absorption--desorption kinetics and mass transfer in hydrogel--salt composites.} \textbf{a} Environmental chamber with controlled humidity and temperature used to characterize the dynamic absorption and desorption of moisture into hydrogel--salt composites by measuring their weight over time. \textbf{b} Mass transfer mechanisms of convection and diffusion of water as it is captured into the hydrogel. Diffusion is negligible relative to convection. Model and experiments showing great agreement of the absorption and desorption of moisture for \textbf{c} a PAM--LiCl 4~g/g hydrogel and hydrogels with different \textbf{d} salt content, \textbf{e} polymer chemistry, and \textbf{f} salt chemistry. \textbf{g} Model predictions of the combined absorption and desorption timescale and its increase with humidity and salt content. \textbf{h} Cycled water, defined as the ratio of uptake to timescale, shows a nonmonotonic behavior with salt content. \textbf{i} Moisture absorption--desorption of a hydrogel 50\% thicker ($\sim$3.2~mm thick at $RH = 20\%$), showing slower kinetics and a good agreement with our model.}
+\label{fig:fig5}
+\end{figure}
+
+Equation~\ref{eq:8} allows to predict the water concentration, and therefore the uptake, as a function of time depending on the different relevant parameters ($RH$, $g$, $H_0$, $SL$, $\gamma_w$). These properties can be selected during hydrogel synthesis ($H_0$, $SL$, $\gamma_w$) or correspond to system properties ($RH$, $g$). We performed absorption--desorption experiments with synthesized hydrogel--salt composites in environments with controlled temperature and $RH$ (see Methods for details). By further measuring $g$ (see Supplementary Note S8) and $H_0$ (see Table~S3), we could solve Eq.~\ref{eq:8} for a given experiment without the need for fitting parameters, in contrast with previous works~\cite{xu2021,park2022}.
+
+Figure~\ref{fig:fig5}c--f shows the comparison between our model (Eq.~\ref{eq:8}) and experimental results of absorption and desorption for hydrogels with different compositions as they started from $RH = 20\%$, absorbed moisture at a higher $RH$ (either 30\%, 50\%, or 70\%), and then desorbed water back at $RH = 20\%$. For all hydrogel--salt composites, we observe a great agreement between our model and the experiments. Figure~\ref{fig:fig5}c shows the absorption--desorption of a PAM--LiCl 4~g/g hydrogel. The hydrogel reaches uptakes of 0.12~g/g, 0.43~g/g, and 0.91~g/g at $RH = 30\%$, 50\%, and 70\%, respectively. The absorption times, after which the uptake stabilizes at its equilibrium value, are $\tau_{\mathrm{abs}} = 2430$, 2630, and 3200~min, respectively. This highlights the increasingly larger absorption times at higher humidity, where the uptakes are also higher. In the next step, the hydrogel takes $\tau_{\mathrm{des}} = 1010$, 1377, and 1800~min to desorb back to $RH = 20\%$. This highlights the lower desorption time relative to absorption. Figure~\ref{fig:fig5}d shows the absorption--desorption of a PAM--LiCl 2~g/g hydrogel, which also exhibits similar features, but with a slightly lower uptake than PAM--LiCl 4~g/g, as expected from our previous results of Fig.~\ref{fig:fig3}. PVA--LiCl 4~g/g shows similar behavior as PAM--LiCl 4~g/g, reflecting the negligible role of polymer chemistry in their water sorption kinetics (Fig.~\ref{fig:fig5}e). Similarly, the crosslinking density plays a negligible role in their sorption kinetics (see Fig.~S8), in contrast with the strong impact of crosslinking in hydrogel swelling kinetics~\cite{diazmarin2023}. PAM--LiBr 4~g/g exhibited both faster kinetics, partially due to its lower thickness (Table~S3), and lower uptakes, consistent with Fig.~\ref{fig:fig3}d.
+
+The previous experimental and theoretical results show an interesting coupling between the uptake and the kinetics. As the uptake increases, either by increasing the humidity, changing the salt type (from LiBr to LiCl, for instance), or by increasing the salt content, the absorption--desorption cycle becomes slower. We can further illustrate this effect by using our model to simulate absorption--desorption of PAM--LiCl hydrogels with varying salt content and identical thickness. We can then calculate a timescale for the absorption and desorption processes by fitting the model uptake to exponential functions (see Supplementary Note S11 for details). Figure~\ref{fig:fig5}g shows the total timescale (equal to the sum of the absorption and desorption timescales) as a function of salt content for different relative humidities. The combined timescale is a measure of the entire absorption--desorption speed. This timescale increases significantly as the humidity increases. For instance, for a PAM--LiCl 4~g/g hydrogel, the timescale increases from 8.5~h at 30\% RH to 13.8~h at 70\% RH. The combined timescale increases also as the salt content of the hydrogel increases. For instance, a PAM--LiCl 4~g/g hydrogel has a combined timescale of 13.8~h at 70\% RH, while this timescale grows to 15~h for a PAM--LiCl 12~g/g hydrogel.
+
+We can understand the decrease in water capture rate with increasing uptake starting from Eq.~\ref{eq:8}. By considering an ideal solution ($\gamma_w = 1$) and linearizing the right-hand side of Eq.~\ref{eq:8} with respect to $(c_{w,\mathrm{eq}} - c_w)$, the difference between the equilibrium water concentration $c_{w,\mathrm{eq}}$ and the actual water concentration, we obtain (see Supplementary Note S12)
+\begin{equation}
+\frac{\partial c_w}{\partial t} = \frac{g}{H_0}\frac{P_{\mathrm{sat}}}{RT}\left(c_{w,\mathrm{eq}} - c_w\right)\left[\frac{i \cdot c_s}{\left(c_{w,\mathrm{eq}} + i \cdot c_s\right)^2}\right],
+\label{eq:9}
+\end{equation}
+where $c_s$ is the salt concentration relative to the hydrogel volume at its initial state. The right-hand side of Eq.~\ref{eq:9} is linear in $(c_{w,\mathrm{eq}} - c_w)$, similar to the typical linear driving force models used for absorption by zeolites and MOFs~\cite{sircar2000,elfil2023}. The last term in Eq.~\ref{eq:9}, $\frac{i \cdot c_s}{\left(c_{w,\mathrm{eq}} + i \cdot c_s\right)^2}$, decreases with higher equilibrium water concentrations $c_{w,\mathrm{eq}}$. This implies that for higher $c_{w,\mathrm{eq}}$, the increase of water concentration (left-hand side of Eq.~\ref{eq:9}) is slower. $c_{w,\mathrm{eq}}$ is higher for higher humidity, more hygroscopic salts, or higher salt content. Therefore, Eq.~\ref{eq:9} explains the observed slower kinetics for higher RH, LiCl (relative to LiBr, Fig.~\ref{fig:fig5}c,f), and the hydrogels with a higher salt content (Fig.~\ref{fig:fig5}g).
+
+We highlight that the increase in timescale as the salt content is increased has been previously observed experimentally~\cite{guo2022,lu2022,guan2022b}. However, our work mechanistically elucidates this behavior through models, providing insights into the optimization of moisture-capturing hydrogels. This potential for optimization is exemplified in Fig.~\ref{fig:fig5}h, where the cycled water, defined as the uptake divided by the combined absorption and desorption timescale, is plotted as a function of salt content for different humidities. The cycled water is a critical variable, correlated to the water production rate in atmospheric water capture or the cooling power~\cite{li2020,wilson2023}. Interestingly, the cycled water does not exhibit a monotonic behavior with the salt content. This arises from the simultaneous increase in the uptake and timescale with salt content. For instance, when capturing water between $RH = 20$--30--20\% and $RH = 20$--70--20\%, the highest cycled water occurs for hydrogels with 4~g LiCl/g PAM. In contrast, for $RH = 20$--50--20\%, the highest cycled water amount (1.04~g water/g hydrogel/day) occurs for a salt content of 12~g LiCl/g PAM. This points to the relevance of carefully optimizing the salt content of the hydrogel--salt composites, which our model enables, for a given operation application.
+
+Lastly, we highlight the ability to design the hydrogel thickness using our model. Figure~\ref{fig:fig5}i shows the absorption--desorption of a PAM--LiCl 4~g/g hydrogel with a thickness of $\sim$3.2~mm, which is 50\% larger than that of the hydrogel used in Fig.~\ref{fig:fig5}c. Our model captures accurately the observed experimental results, even for a thicker hydrogel where diffusion might be more significant. This agreement is consistent with our previous work, where absorption--desorption of moisture into salt solutions was found to be accurately described by a convection-limited description if the ratio of convection resistance to diffusion resistance is small~\cite{diazmarin2024a}. We quantified this ratio in terms of a modified Biot number, $\mathrm{Bi}$
+\begin{equation}
+\mathrm{Bi} = \frac{R_{\mathrm{diff}}}{R_{\mathrm{conv}}} = \frac{H_0 g}{D_w}\left[\frac{i \cdot c_s \cdot \frac{P_{\mathrm{sat}}}{RT}}{\left(c_{w,\infty} + i \cdot c_s\right)^2}\right]
+\label{eq:10}
+\end{equation}
+where $D_w$ is the diffusion coefficient of water in the sorbent~\cite{graeber2024}. In our previous work, we found that if $\mathrm{Bi} < 0.1$, which is the case in common sorption applications, then moisture absorption and desorption behave as convection-limited.
+
+Thicker hydrogels exhibited, as expected, the same uptakes as the thinner ones (Fig.~\ref{fig:fig5}c). However, the time taken to absorb and desorb, even at the same relative humidities, is higher for the thicker hydrogel. For instance, the thick hydrogel requires $\sim$3600, 4200, and 4800~min to reach its equilibrium uptake at $RH = 30\%$, 50\%, and 70\%, respectively. This is $\sim$1.5$\times$ more time than the time required for the thinner hydrogel with identical composition (Fig.~\ref{fig:fig5}c). Similarly, the time required to reach equilibrium is reduced by using thinner hydrogel--salt composites, as shown in Fig.~S9 for a $\sim$1~mm thick hydrogel. We can get further insights into the thickness dependence of the absorption--desorption cycle from Eq.~\ref{eq:8}. From this equation, we describe the timescale $\tau$ as (see Supplementary Note S14 for derivation)
+\begin{equation}
+\tau = f\left(RH, SL, \text{salt type}\right) \frac{H_0}{g},
+\label{eq:11}
+\end{equation}
+where $f(RH, SL, \text{salt type})$ is a function of the relative humidity, salt content, and salt type in the hydrogel. As noted in our previous discussion, $f$ increases with higher humidity, salt content, and more hygroscopic salts, resulting in longer absorption--desorption times for higher uptakes. Critically, Eq.~\ref{eq:11} shows a linear dependence of the absorption timescale with the initial thickness, as we observed in Fig.~\ref{fig:fig5}i, and with $1/g$. Previous works had experimentally shown faster kinetics for thinner hydrogels~\cite{guo2022,guan2022b} and for faster external convection~\cite{xu2021}. However, our work demonstrates the fundamental origin of this enhancement and provides a prediction of the absorption--desorption time as a function of these parameters. This advancement is critical for the optimized design of moisture-capturing systems. For instance, with our model, we can predict the kinetics enhancement arising from using airflow to accelerate moisture capture and choose desirable operations that achieve a balance between fast kinetics and low airflow energy use~\cite{narayanan2014}. Alternatively, our model can guide the selection of hydrogel thicknesses that achieve desirable kinetics. Such selection should consider the favorable fast kinetics and lower material cost of thin hydrogels while balancing the lower total water contained in thin hydrogels toward achieving optimized sorption.
+
+\section{Discussion}
+
+We developed thermodynamic and transport models that predict the uptake, sorption enthalpy, and kinetics of moisture capture with hydrogel--salt composites. We synthesized hydrogel--salt composites with varying salt content, polymer chemistry, salt type, and crosslinking density and experimentally characterized their uptake, sorption enthalpy, and kinetics. Our experimental measurements validate, over a large range of parameters, the accuracy of our model in predicting the observed moisture-capture properties. Our work determines the critical parameters that govern each of these properties and shows a relatively negligible role of the polymer in the performance of all analyzed polymers. Specifically, the uptake is determined by the salt type and content, the sorption enthalpy is determined by the salt type, and the kinetics by the salt type, content, and hydrogel thickness. By developing physics-based models that predict these crucial properties from the hydrogel composition, our work is a major step enabling (1) the targeted design of hydrogel--salt composites with desired performance, (2) material-level performance enhancements, and (3) the optimization of systems that use hydrogel--salt composites for moisture capture. These new opportunities are critical to fulfilling the potential of moisture capture for freshwater production, energy storage, and sustainable cooling.
+
+\section{Methods}
+
+\subsection{Hydrogel synthesis}
+
+We synthesized hydrogels based on a one-pot approach, where polymer, salts, and other components, such as initiator, crosslinker, and accelerator, were all mixed in water. For all hydrogels, we first dissolved the salt (4.18, 8.36, 16.72, and 33.44~g for the hydrogels that had 1, 2, 4, and 8~g of salt per g of polymer, respectively) in 50~mL water. LiCl and LiBr were obtained from Sigma (310468 and 746479, respectively). The solution was then covered to prevent evaporation and left to cool down to room temperature. For polyacrylamide hydrogels, we added sequentially 4.18~g of acrylamide (Sigma, A8887), the N,N'-methylenebisacrylamide (MBA, Sigma, 146072) as crosslinker (2.5~mg for the base recipe, 50~mg for the hydrogels with 10~mg/g of crosslinker per g of monomer, and 0.5~mg for the hydrogels with 0.1~mg/g of crosslinker per g of monomer), 7.1~mg of ammonium persulfate (APS, Sigma, A3678) as initiator, and 6~$\mu$L of N,N,N$'$,N$'$-tetramethylethylendiamin (TEMED, Sigma, T9281) as accelerator. 8~mL of solution were poured into a petri dish (Falcon, 60$\times$15~mm), covered with the lid, and left to gelate at room temperature. For the PAM--LiCl 2~g/g hydrogel that was tested in the environmental chamber, we poured 12.8~mL of solution, to ensure similar thicknesses at the initial state of $RH = 20\%$. For the hydrogels with lithium bromide, we used 21.3~mg of APS and 64~$\mu$L of TEMED instead, as gelation did not occur for lower amounts of initiator and accelerator. For the polyvinyl alcohol (PVA, Sigma, 363138) hydrogels, we added 4.18~g of the PVA into the salt solution. We sealed the beaker containing the solution with parafilm and mixed it overnight over a hot plate at 90$^\circ$C. After the PVA was fully dissolved, we poured 8~mL of solution into a different beaker and added 800~$\mu$L of 1.2~M hydrochloric acid (HCl) and 100~$\mu$L of glutaraldehyde (Fisher Scientific, O29571) as crosslinker, while mixing with a magnetic stirring bar. The solution was finally poured in a petri dish, covered, and left to gelate at room temperature. Both the PAM and the PVA recipe yielded nonporous hydrogels.
+
+\subsection{Electron dispersive X-ray spectroscopy (EDS)}
+
+We used a Zeiss Gemini 450 SEM instrument for scanning electron microscope (SEM) and EDS characterization. We loaded the samples onto aluminum stubs using adhesive carbon tape and deposited 5~nm Au/Pd layer onto all samples using PELCO SC-7 sputter coater prior to SEM and EDS. We used an Oxford AZtec 100 EDS detector attached to a Zeiss Gemini 450 SEM EDS and a working distance of 8.5~mm, under 10.00~kV accelerating voltage and 1~nA beam current. We used the AZtecLive software to construct the maps.
+
+\subsection{Dynamic vapor sorption (DVS) experiments}
+
+We characterized the sorption isotherms using the dynamic vapor sorption vacuum instrument (Surface Measurement Systems Ltd.). Initially, we dried the samples at 80$^\circ$C for 10~h, followed by a thermal equilibration at 25$^\circ$C for 3~h. Next, we recorded the mass of samples at a series of RH steps (from 0 to 90\%) by regulating the partial pressure of water vapor at 25$^\circ$C. For sample equilibrium at each step of RH, we used an equilibrium criterion of 0.005\%~sample~min$^{-1}$, i.e., a percentage change in sample mass per minute, to ensure precise measurements. The measurements stopped at a maximum stage time of 2000~min at $RH = 90\%$.
+
+\subsection{Differential calorimetry during absorption experiments}
+
+We measured the sorption enthalpy using a combined thermogravimetric analysis and differential scanning calorimetry instrument with a sorption interface capable of controllably varying the humidity (Mettler Toledo, TGA/DSC~3+). Initially, we dried the samples in an oven at 90$^\circ$C for over 4~h. Then, we tested the dried samples in the TGA--DSC. To further remove moisture from the samples, we also dried them in the TGA--DSC at 90$^\circ$C for 90~min. We sequentially increased the relative humidity in the sample chamber in a series of steps ($RH = 0$--20--30--50--70\%). The mass of the sample and the released heat flux were simultaneously measured. At each step, the samples reached equilibrium, as observed by negligible changes in mass. Finally, the sorption enthalpy was calculated as the integral of the heat flux with the horizontal baseline corresponding to the steady state of the step and divided by the mass change of the sample in the step. Prior to all measurements we performed several calibration steps for the temperature and the heat flux (see Supplementary Note S15 for details). We used the results from our calibration to estimate the error of our measurements reported in Fig.~\ref{fig:fig4}.
+
+\subsection{Absorption--desorption experiments for kinetics}
+
+We carried out kinetics experiments by placing the hydrogel--salt composite samples in the Petri dishes they were synthesized in inside an environmental chamber (KMF 115, BINDER) at controlled humidity and temperature (Fig.~\ref{fig:fig5}a). The temperature was kept at 25$^\circ$C throughout all experiments. Initially, we set the relative humidity to 20\%. The samples stabilized at this condition until the changes in mass were negligible. Then, we increased the humidity to a higher value (30\%, 50\%, or 70\%) and kept it at that condition until the mass of the hydrogels had stabilized. Next, we lowered the humidity back to 20\%. We repeated this process three times for each hydrogel sample, with absorption humidities of 30\%, 50\%, and 70\%. We continuously recorded the mass of the hydrogel samples during the entire absorption--desorption process and used it to calculate the experimental uptake as a function of time for all samples. We calculated the reported uptakes relative to the weights at the $RH = 20\%$ condition, which are higher than the weights in a fully dried condition.
+
+\section*{Data availability}
+All the data needed to evaluate the conclusions in the paper are present in the paper and/or the Supplementary information. Source data are provided with this paper.
+
+\section*{Acknowledgements}
+C.D.D.\ gratefully acknowledges financial support from the Office of Energy Efficiency and Renewable Energy for funding under Grant No.\ DE-EE0009679 and the MIT Martin Family Sustainability Fellowship. G.G.\ acknowledges funding by the Swiss National Science Foundation via a Postdoc Mobility grant (P400P2\_194367). O.R.C.\ acknowledges the Air Force Office of Scientific Research under Grant No.\ FA9550-23-1-0055 with Dr.\ Ali Sayir as program manager. This work made use of the MRSEC Shared Experimental Facilities at MIT, supported by the National Science Foundation under award number DMR-1419807. This work was carried out in part through the use of MIT.nano's facilities. C.D.D.\ gratefully acknowledges the supervision and mentorship of Prof.\ Gang Chen as well as discussions on various aspects of hydrogel thermodynamics. C.D.D.\ gratefully acknowledges his advisor, Prof.\ Evelyn N.\ Wang, for her guidance on this work until the date of her confirmation (12/22/2022) by the U.S.\ Senate to serve as director of the Advanced Research Projects Agency-Energy (ARPA-E).
+
+\section*{Author contributions}
+C.D.D.\ conceptualized the study and designed the experiments. C.D.D., L.M., M.A.R., and K.E.H.\ synthesized hydrogel--salt composites. C.D.D., L.M., M.A.R., Y.Z., and O.R.C.\ characterized the hydrogels. C.D.D., L.M., G.G., Z.L., and J.C.G.\ analyzed data. C.D.D.\ wrote the initial paper. All authors contributed to the revision and edition process.
+
+\section*{Competing interests}
+The authors declare no competing interests.
+
+\section*{Additional information}
+\textbf{Supplementary information} The online version contains supplementary material available at \url{https://doi.org/10.1038/s41467-024-53291-5}.
+
+\textbf{Correspondence and requests for materials} should be addressed to Carlos D. D\'iaz-Mar\'in.
+
+\textbf{Peer review information} Nature Communications thanks Qiang Fu, who co-reviewed with Shudi Mao, and the other anonymous reviewers for their contribution to the peer review of this work. A peer review file is available.
+
+\textbf{Reprints and permissions information} is available at \url{http://www.nature.com/reprints}.
+
+\textbf{Publisher's note} Springer Nature remains neutral with regard to jurisdictional claims in published maps and institutional affiliations.
+
+\bigskip
+\noindent Open Access This article is licensed under a Creative Commons Attribution-NonCommercial-NoDerivatives 4.0 International License, which permits any non-commercial use, sharing, distribution and reproduction in any medium or format, as long as you give appropriate credit to the original author(s) and the source, provide a link to the Creative Commons licence, and indicate if you modified the licensed material. You do not have permission under this licence to share adapted material derived from this article or parts of it. The images or other third party material in this article are included in the article's Creative Commons licence, unless indicated otherwise in a credit line to the material. If material is not included in the article's Creative Commons licence and your intended use is not permitted by statutory regulation or exceeds the permitted use, you will need to obtain permission directly from the copyright holder. To view a copy of this licence, visit \url{http://creativecommons.org/licenses/by-nc-nd/4.0/}.
+
+\bigskip
+\noindent \copyright\ The Author(s) 2024
+
+% ---------------- References ----------------
+\begin{thebibliography}{99}
+
+\bibitem{kim2017} Kim, H. et al. Water harvesting from air with metal-organic frameworks powered by natural sunlight. \textit{Science} \textbf{356}, 430--434 (2017).
+
+\bibitem{kim2018} Kim, H. et al. Adsorption-based atmospheric water harvesting device for arid climates. \textit{Nat. Commun.} \textbf{9}, 1--8 (2018).
+
+\bibitem{li2020} Li, R., Shi, Y., Wu, M., Hong, S. \& Wang, P. Photovoltaic panel cooling by atmospheric water sorption--evaporation cycle. \textit{Nat. Sustain.} \textbf{3}, 636--643 (2020).
+
+\bibitem{zeng2023} Zeng, J. et al. Moisture thermal battery with autonomous water harvesting for passive electronics cooling. \textit{Cell Rep. Phys. Sci.} \url{https://doi.org/10.1016/j.xcrp.2023.101250} (2023).
+
+\bibitem{cui2016} Cui, S. et al. Bio-inspired effective and regenerable building cooling using tough hydrogels. \textit{Appl. Energy} \textbf{168}, 332--339 (2016).
+
+\bibitem{shan2023a} Shan, H. et al. Harvesting thermal energy and freshwater from air through sorption thermal battery enabled by polyzwitterionic gel. \textit{ACS Energy Lett.} \url{https://doi.org/10.1021/acsenergylett.3c01836} (2023).
+
+\bibitem{narayanan2015} Narayanan, S. et al. Thermal battery for portable climate control. \textit{Appl. Energy} \textbf{149}, 104--116 (2015).
+
+\bibitem{liu2020} Liu, X., Wang, X. \& Kapteijn, F. Water and metal--organic frameworks: from interaction toward utilization. \textit{Chem. Rev.} \textbf{120}, 8303--8377 (2020).
+
+\bibitem{canivet2014} Canivet, J., Fateeva, A., Guo, Y., Coasne, B. \& Farrusseng, D. Water adsorption in MOFs: fundamentals and applications. \textit{Chem. Soc. Rev.} \textbf{43}, 5594--5617 (2014).
+
+\bibitem{kim2017b} Kim, H. et al. Water harvesting from air with metal-organic frameworks powered by natural sunlight. \textit{Science} \textbf{356}, 430--434 (2017).
+
+\bibitem{ng2008} Ng, E. P. \& Mintova, S. Nanoporous materials with enhanced hydrophilicity and high water sorption capacity. \textit{Microporous Mesoporous Mater.} \textbf{114}, 1--26 (2008).
+
+\bibitem{castillo2013} Castillo, J. M., Silvestre-Albero, J., Rodriguez-Reinoso, F., Vlugt, T. J. H. \& Calero, S. Water adsorption in hydrophilic zeolites: experiment and simulation. \textit{Phys. Chem. Chem. Phys.} \textbf{15}, 17374--17382 (2013).
+
+\bibitem{simonot1979} Simonot-Grange, M. H. Thermodynamic and structural features of water sorption in zeolites. \textit{Clays Clay Min.} \textbf{27}, 423--428 (1979).
+
+\bibitem{punwani2002} Punwani, D., Chi, C. W. \& Wasan, D. T. Dynamic sorption by hygroscopic salts. A comparative study. \textit{Ind. Eng. Chem. Process Des. Dev.} \textbf{7}, 410--415 (2002).
+
+\bibitem{li2018} Li, R., Shi, Y., Shi, L., Alsaedi, M. \& Wang, P. Harvesting water from air: using anhydrous salt with sunlight. \textit{Environ. Sci. Technol.} \textbf{52}, 5398--5406 (2018).
+
+\bibitem{zhang2021} Zhang, Q. N. et al. Hygroscopic property of inorganic salts in atmospheric aerosols measured with physisorption analyzer. \textit{Atmos. Environ.} \textbf{247}, 118171 (2021).
+
+\bibitem{zhong2024} Zhong, Y. et al. Bridging materials innovations to sorption-based atmospheric water harvesting devices. \textit{Nat. Rev. Mater.} \url{https://doi.org/10.1038/s41578-024-00665-2} (2024).
+
+\bibitem{graeber2023} Graeber, G. et al. Extreme water uptake of hygroscopic hydrogels through maximized swelling-induced salt loading. \textit{Adv. Mater.} \url{https://doi.org/10.1002/adma.202211783} (2023).
+
+\bibitem{entezari2020} Entezari, A., Ejeian, M. \& Wang, R. Super atmospheric water harvesting hydrogel with alginate chains modified with binary salts. \textit{ACS Mater. Lett.} \textbf{2}, 471--477 (2020).
+
+\bibitem{xu2021} Xu, J. et al. Ultrahigh solar-driven atmospheric water production enabled by scalable rapid-cycling water harvester with vertically aligned nanocomposite sorbent. \textit{Energy Environ. Sci.} \textbf{14}, 5979--5994 (2021).
+
+\bibitem{diazmarin2022a} D\'iaz-Mar\'in, C. D. et al. Kinetics of sorption in hygroscopic hydrogels. \textit{Nano Lett.} \textbf{22}, 1100--1107 (2022).
+
+\bibitem{guo2022} Guo, Y. et al. Scalable super hygroscopic polymer films for sustainable moisture harvesting in arid environments. \textit{Nat. Commun.} \textbf{13}, 1--7 (2022).
+
+\bibitem{lu2022} Lu, H. et al. Tailoring the desorption behavior of hygroscopic gels for atmospheric water harvesting in arid climates. \textit{Adv. Mater.} \textbf{34}, 2205344 (2022).
+
+\bibitem{diazmarin2022b} D\'iaz-Mar\'in, C. D. et al. Heat and mass transfer in hygroscopic hydrogels. \textit{Int. J. Heat. Mass Transf.} \textbf{195}, 123103 (2022).
+
+\bibitem{li2018b} Li, R. et al. Hybrid hydrogel with high water vapor harvesting capacity for deployable solar-driven atmospheric water generator. \textit{Environ. Sci. Technol.} \textbf{52}, 11367--11377 (2018).
+
+\bibitem{kallenberger2018} Kallenberger, P. A. \& Fr\"oba, M. Water harvesting from air with a hygroscopic salt in a hydrogel--derived matrix. \textit{Commun. Chem.} \textbf{1}, 1--6 (2018).
+
+\bibitem{chen2022} Chen, G. Thermodynamics of hydrogels for applications in atmospheric water harvesting, evaporation, and desalination. \textit{Phys. Chem. Chem. Phys.} \textbf{24}, 12329--12345 (2022).
+
+\bibitem{diazmarin2024a} D\'iaz-Mar\'in, C. D., Deshmukh, A., Roper, M. A., Lienhard, J. H. \& Chen, G. Dynamic water absorption-desorption by aqueous salt solutions. \textit{Cell Rep. Phys. Sci.} \textbf{5}, 101929 (2024).
+
+\bibitem{shan2023b} Shan, H. et al. All-day multicyclic atmospheric water harvesting enabled by polyelectrolyte hydrogel with hybrid desorption mode. \textit{Adv. Mater.} \textbf{35}, 2302038 (2023).
+
+\bibitem{wei2023} Wei, D. et al. Water activation in solar-powered vapor generation. \textit{Adv. Mater.} \url{https://doi.org/10.1002/ADMA.202212100} (2023).
+
+\bibitem{wilson2023} Wilson, C. T. et al. Design considerations for next-generation sorbent-based atmospheric water-harvesting devices. \textit{Device} \textbf{1}, 100052 (2023).
+
+\bibitem{narayanan2014} Narayanan, S., Yang, S., Kim, H. \& Wang, E. N. Optimization of adsorption processes for climate control and thermal energy storage. \textit{Int. J. Heat. Mass Transf.} \textbf{77}, 288--300 (2014).
+
+\bibitem{subramani2020} Subramani, R. et al. The influence of swelling on elastic properties of polyacrylamide hydrogels. \textit{Front. Mater.} \textbf{7}, 212 (2020).
+
+\bibitem{flory1953} Flory, P. J. \textit{Principles of Polymer Chemistry.} (Cornell University Press, Ithaca, N.Y., 1953).
+
+\bibitem{chen2022b} Chen, G. Donnan equilibrium revisited: coupling between ion concentrations, osmotic pressure, and Donnan potential. \textit{J. Micromech. Mol. Phys.} \textbf{7}, 127--134 (2022).
+
+\bibitem{dill2010} Dill, K. A. \& Bromberg, S. \textit{Molecular Driving Forces: Statistical Thermodynamics in Biology, Chemistry, Physics, and Nanoscience.} (CRC Press, 2010). \url{https://doi.org/10.4324/9780203809075}.
+
+\bibitem{atkins2006} Atkins, P. \& de Paula, J. \textit{Atkins' Physical Chemistry.} (W. H. Freeman and Company, New York, 2006). \url{https://doi.org/10.1016/j.electacta.2006.09.003}.
+
+\bibitem{cengel2019} Cengel, Y., Boles, M. \& Kanoglu, M. \textit{Thermodynamics: An Engineering Approach.} (McGraw Hill Education, New York, 2019).
+
+\bibitem{palacios2012} Palacios-Bereche, R., Gonzales, R. \& Nebra, S. A. Exergy calculation of lithium bromide--water solution and its application in the exergetic evaluation of absorption refrigeration systems LiBr-H$_2$O. \textit{Int. J. Energy Res.} \textbf{36}, 166--181 (2012).
+
+\bibitem{conde2004} Conde, M. R. Properties of aqueous solutions of lithium and calcium chlorides: formulations for use in air conditioning equipment design. \textit{Int. J. Therm. Sci.} \textbf{43}, 367--382 (2004).
+
+\bibitem{english1996} English, A. E. et al. Equilibrium swelling properties of polyampholytic hydrogels. \textit{J. Chem. Phys.} \textbf{104}, 8713--8720 (1996).
+
+\bibitem{brannon1991} Brannon-Peppas, L. \& Peppas, N. A. Equilibrium swelling behavior of pH-sensitive hydrogels. \textit{Chem. Eng. Sci.} \textbf{46}, 715--722 (1991).
+
+\bibitem{yuan2005} Yuan, Z. \& Herold, K. E. Thermodynamic properties of aqueous lithium bromide using a multiproperty free energy correlation. \textit{HVACR Res.} \textbf{11}, 377--393 (2005).
+
+\bibitem{li2023} Li, A. C. et al. Thermodynamic limits of sorption-based atmospheric water harvesting using hygroscopic hydrogels. \textit{Int. Heat. Transf. Conf. 17} \url{https://doi.org/10.1615/IHTC17.10-40} (2023).
+
+\bibitem{li2022} Li, A. C. et al. Thermodynamic limits of atmospheric water harvesting with temperature-dependent adsorption. \textit{Appl. Phys. Lett.} \textbf{121}, 164102 (2022).
+
+\bibitem{herold2016} Herold, K. E., Radermacher, R. \& Klein, S. A. \textit{Absorption Chillers and Heat Pumps.} (CRC Press, Boca Raton, 2016). \url{https://doi.org/10.1201/B19625}.
+
+\bibitem{greenspan1977} Greenspan, L. Humidity fixed points of binary saturated aqueous solutions. \textit{J. Res. Natl Bureau Stand.} \textbf{81A}, 89--96 (1977).
+
+\bibitem{park2022} Park, H. et al. Enhanced atmospheric water harvesting with sunlight-activated sorption ratcheting. \textit{ACS Appl. Mater. Interfaces} \textbf{14}, 2237--2245 (2022).
+
+\bibitem{diazmarin2023} D\'iaz-Mar\'in, C. D. et al. Effect of polymer network on sorption mass transfer in hygroscopic hydrogels. \textit{Int. Heat. Transf. Conf. 17}, 9 (2023).
+
+\bibitem{sircar2000} Sircar, S. \& Hufton, J. R. Why does the linear driving force model for adsorption kinetics work? \textit{Adsorption} \textbf{6}, 137--147 (2000).
+
+\bibitem{elfil2023} El Fil, B., Li, X., D\'iaz-Mar\'in, C. D., Zhang, L. \& Jacobucci, C. L. Significant enhancement of sorption kinetics via boiling-assisted channel templating. \textit{Cell Rep. Phys. Sci.} \url{https://doi.org/10.1016/J.XCRP.2023.101549} (2023).
+
+\bibitem{guan2022b} Guan, W., Lei, C., Guo, Y., Shi, W. \& Yu, G. Hygroscopic-microgels-enabled rapid water extraction from arid air. \textit{Adv. Mater.} \url{https://doi.org/10.1002/ADMA.202207786} (2022).
+
+\bibitem{graeber2024} Graeber, G., D\'iaz-Mar\'in, C. D., Gaugler, L. C. \& El Fil, B. Intrinsic water transport in moisture-capturing hydrogels. \textit{Nano Lett.} \textbf{24}, 3858--3865 (2024).
+
+\end{thebibliography}
+
+\end{document}
