@@ -33,7 +33,8 @@ import sys
 import time
 from collections import Counter
 from concurrent.futures import ProcessPoolExecutor, as_completed
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
+from datetime import date
 from pathlib import Path
 
 import matplotlib.colors as mcolors
@@ -48,15 +49,217 @@ for _p in (_SCRIPTS, _SRC, _ANALYSIS_DIR):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from lcow_random_global_map_solar import (  # noqa: E402
+from solar_lumped.economics import LCOEconomicParams  # noqa: E402
+from solar_lumped.physics import get_salt  # noqa: E402
+from solar_lumped.simulation import DeviceConfig  # noqa: E402
+from solar_lumped.simulation import (  # noqa: E402
     FAIL_LCO,
-    SaltAttemptResult,
-    SiteResult,
-    parse_salt_names,
-    run_sites,
+    passive_gel_temperature_c,
+    profile_diagnostics,
+    simulate_salt_lcow,
 )
+from solar_lumped.weather import fetch_year_weather  # noqa: E402
+from solar_lumped.weather import profile_from_day_df  # noqa: E402
+from solar_lumped.weather import representative_mean_day_df, site_row_from_hourly  # noqa: E402
 
 _FAIL_LCO = FAIL_LCO
+
+
+@dataclass(slots=True)
+class SiteResult:
+    lat: float
+    lon: float
+    rh_high: float
+    rh_low: float
+    temp_high_c: float
+    temp_low_c: float
+    solar_irradiance_w_per_m2: float
+    gel_temperature_c: float
+    best_salt: str
+    best_sl: float
+    best_lcow: float
+    infeasible: bool
+    desorption_aw: float = float("nan")
+    daily_yield_m3_per_m2: float = float("nan")
+    eta_thermal: float = float("nan")
+    backend: str = "solar_lumped"
+
+
+@dataclass(slots=True)
+class SaltAttemptResult:
+    lat: float
+    lon: float
+    salt: str
+    feasible: bool
+    lcow: float
+    yield_kg_m2: float
+    eta_thermal: float
+    gel_temperature_c: float
+    desorption_aw: float
+    failure_reason: str = ""
+
+
+def parse_salt_names(names: list[str] | None) -> tuple[str, ...]:
+    """Validate and de-duplicate salt names, preserving the given try-order."""
+    if not names:
+        return ("LiCl",)
+    out: list[str] = []
+    for raw in names:
+        name = raw.strip()
+        if not name:
+            continue
+        get_salt(name)
+        if name not in out:
+            out.append(name)
+    if not out:
+        raise ValueError("At least one salt name is required.")
+    return tuple(out)
+
+
+def _build_device_config(salt_name: str, **mm: float) -> DeviceConfig:
+    return DeviceConfig(
+        salt_name=salt_name,
+        salt_to_polymer_ratio=mm["salt_loading"],
+        hydrogel_thickness_m=mm["hydrogel_thickness_mm"] * 1e-3,
+        vapor_gap_m=mm["vapor_gap_mm"] * 1e-3,
+        insulation_gap_m=mm["insulation_gap_mm"] * 1e-3,
+        tilt_deg=mm["tilt_deg"],
+        fin_area_ratio=mm["fin_area_ratio"],
+    )
+
+
+def run_sites(
+    lats: list[float],
+    lons: list[float],
+    *,
+    year: int,
+    sleep_s: float,
+    cache_dir: str | None,
+    econ: LCOEconomicParams | None = None,
+    salt_names: tuple[str, ...] | None = None,
+    salt_loading: float = 4.0,
+    tilt_deg: float = 35.0,
+    fin_area_ratio: float = 7.1,
+    hydrogel_thickness_mm: float = 4.0,
+    vapor_gap_mm: float = 40.0,
+    insulation_gap_mm: float = 5.0,
+    cyclic_initial: bool = True,
+    cyclic_warmup_cycles: int = 1,
+    stop_at_first_feasible: bool = False,
+) -> tuple[list[SiteResult], list[SaltAttemptResult]]:
+    """Simulate every (lat, lon) against each candidate salt; keep the cheapest feasible one."""
+    n = len(lats)
+    print(f"Open-Meteo: historical forecast for {year}, {n} site(s).", flush=True)
+    if cache_dir is not None:
+        print(f"  Weather cache: {cache_dir}", flush=True)
+    econ = econ or LCOEconomicParams()
+    salts = salt_names or ("LiCl",)
+    geom = {
+        "salt_loading": salt_loading,
+        "tilt_deg": tilt_deg,
+        "fin_area_ratio": fin_area_ratio,
+        "hydrogel_thickness_mm": hydrogel_thickness_mm,
+        "vapor_gap_mm": vapor_gap_mm,
+        "insulation_gap_mm": insulation_gap_mm,
+    }
+    results: list[SiteResult] = []
+    all_attempts: list[SaltAttemptResult] = []
+    t_batch = time.perf_counter()
+
+    for i, (lat, lon) in enumerate(zip(lats, lons, strict=True), start=1):
+        t_site = time.perf_counter()
+        print(f"  [{i}/{n}] ({lat:+.4f}, {lon:+.4f})  fetching weather…", end="", flush=True)
+        try:
+            df = fetch_year_weather(lat, lon, year, cache_dir=cache_dir)
+            row = site_row_from_hourly(df)
+            profile = profile_from_day_df(representative_mean_day_df(df, reference_day=date(year, 6, 15)))
+            diag = profile_diagnostics(profile)
+        except Exception as exc:
+            print(f"  → weather failed ({exc})  ({time.perf_counter() - t_site:.1f}s)", flush=True)
+            results.append(SiteResult(
+                lat=lat, lon=lon, rh_high=float("nan"), rh_low=float("nan"),
+                temp_high_c=float("nan"), temp_low_c=float("nan"),
+                solar_irradiance_w_per_m2=float("nan"), gel_temperature_c=float("nan"),
+                best_salt="none", best_sl=float("nan"), best_lcow=_FAIL_LCO, infeasible=True,
+            ))
+            if sleep_s > 0.0 and i < n:
+                time.sleep(sleep_s)
+            continue
+
+        rh_high = float(row.get("rh_high_frac", diag["rh_high"]))
+        rh_low = float(row.get("rh_low_frac", diag["rh_low"]))
+        temp_high = float(row.get("temperature_high_c", diag["temp_high_c"]))
+        temp_low = float(row.get("temperature_low_c", diag["temp_low_c"]))
+        solar_peak = float(row.get("solar_irradiance_w_per_m2", diag["solar_irradiance_w_per_m2"]))
+        t_gel_passive = passive_gel_temperature_c(profile, _build_device_config(salts[0], **geom))
+        print(
+            f"  RH max={rh_high:.3f}  T max={temp_high:.1f}C  "
+            f"I={solar_peak:.0f}W/m²  T_gel(passive)={t_gel_passive:.1f}C",
+            flush=True,
+        )
+
+        best_name, best_lcow, best_sim = "none", _FAIL_LCO, None
+        for j, salt in enumerate(salts, start=1):
+            t_salt = time.perf_counter()
+            print(f"    salt {j}/{len(salts)} {salt}  ", end="", flush=True)
+            sim = simulate_salt_lcow(
+                profile, _build_device_config(salt, **geom), econ, rh_abs=rh_high,
+                cyclic_initial=cyclic_initial, cyclic_warmup_cycles=cyclic_warmup_cycles,
+            )
+            salt_dt = time.perf_counter() - t_salt
+            all_attempts.append(SaltAttemptResult(
+                lat=lat, lon=lon, salt=salt, feasible=sim.feasible, lcow=sim.lcow,
+                yield_kg_m2=sim.yield_kg_m2, eta_thermal=sim.eta_thermal,
+                gel_temperature_c=sim.gel_temperature_c, desorption_aw=sim.desorption_aw,
+                failure_reason=sim.failure_reason,
+            ))
+            if not sim.feasible:
+                print(f"skipped — {sim.failure_reason or 'infeasible'}  ({salt_dt:.1f}s)", flush=True)
+                continue
+            leader = ""
+            if sim.lcow < best_lcow:
+                best_lcow, best_name, best_sim = sim.lcow, salt, sim
+                leader = "  ★ best so far"
+            print(
+                f"LCOW=${sim.lcow:.4f}/m³  yield={sim.yield_kg_m2:.4f} kg/m²  "
+                f"η={sim.eta_thermal:.3f}  T_gel={sim.gel_temperature_c:.1f}C  "
+                f"a_w,des={sim.desorption_aw:.3f}  ({salt_dt:.1f}s){leader}",
+                flush=True,
+            )
+            if stop_at_first_feasible:
+                break
+
+        dt = time.perf_counter() - t_site
+        if best_sim is None or best_lcow >= 0.99 * _FAIL_LCO:
+            print(f"  → site infeasible (no salt passed)  ({dt:.1f}s)", flush=True)
+            results.append(SiteResult(
+                lat=lat, lon=lon, rh_high=rh_high, rh_low=rh_low, temp_high_c=temp_high,
+                temp_low_c=temp_low, solar_irradiance_w_per_m2=solar_peak,
+                gel_temperature_c=t_gel_passive, best_salt="none", best_sl=salt_loading,
+                best_lcow=_FAIL_LCO, infeasible=True,
+            ))
+        else:
+            print(
+                f"  → winner {best_name}  LCOW=${best_lcow:.4f}/m³  "
+                f"yield={best_sim.yield_kg_m2:.4f} kg/m²  ({dt:.1f}s total)",
+                flush=True,
+            )
+            results.append(SiteResult(
+                lat=lat, lon=lon, rh_high=rh_high, rh_low=rh_low, temp_high_c=temp_high,
+                temp_low_c=temp_low, solar_irradiance_w_per_m2=solar_peak,
+                gel_temperature_c=best_sim.gel_temperature_c, best_salt=best_name,
+                best_sl=salt_loading, best_lcow=best_lcow, infeasible=False,
+                desorption_aw=best_sim.desorption_aw,
+                daily_yield_m3_per_m2=best_sim.yield_kg_m2 / 1000.0,
+                eta_thermal=best_sim.eta_thermal,
+            ))
+
+        if sleep_s > 0.0 and i < n:
+            time.sleep(sleep_s)
+
+    elapsed = time.perf_counter() - t_batch
+    print(f"  All sites done in {elapsed:.1f}s (avg {elapsed / max(n, 1):.1f}s / site, incl. sleep).", flush=True)
+    return results, all_attempts
 _OUT_DIR = _REPO / "outputs" / "lcow_global"
 # Pass --salts to try others as a feasibility fallback (tried in order, first feasible wins).
 _DEFAULT_SALTS: tuple[str, ...] = ("LiCl",)

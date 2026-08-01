@@ -4,8 +4,8 @@
   A. Simulate every day of the year sequentially (gel state carried over from
      one day to the next) and average the daily yields.
   B. Build a single representative mean/diurnal day (averaged across the year)
-     and cycle it to a steady periodic state, as the global-map scripts
-     (lcow_full_global_map.py, lcow_random_global_map.py) do for speed.
+     and cycle it to a steady periodic state, as lcow_full_global_map_solar.py
+     does for speed.
   C. Build one representative mean/diurnal day per calendar month, cycle each
      to its own steady periodic state, and average the 12 results (weighted
      by days present). ~12x the cost of B, far cheaper than A.
