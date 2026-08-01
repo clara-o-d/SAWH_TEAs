@@ -40,7 +40,6 @@ from solar_lumped.weather import (
     representative_mean_day_profile,
     replay_profile,
 )
-from solar_lumped.physics import DEFAULT_MOF_NAME
 from solar_lumped.physics import TILT_DEG
 from solar_lumped.physics import (
     DRY_COMPOSITE_DENSITY_KG_M3,
@@ -54,38 +53,17 @@ from solar_lumped.physics import (
     water_activity_from_c_w,
 )
 from solar_lumped.physics import C_W_MAX_MOL_M3, C_W_MIN_MOL_M3
-from solar_lumped.physics import SorbentKind, inventory_label, inventory_prefix
+from solar_lumped.physics import inventory_label, inventory_prefix
 from solar_lumped.physics import c_w_from_water_in_gel_l_m2
 from solar_lumped.weather import fig_s1_initial_c_w
 
 
-def _lcow_kwargs(config: DeviceConfig) -> dict:
-    if config.sorbent == "mof":
-        props = config.mof()
-        return {
-            "sorbent": "mof",
-            "mof_mass_kg_m2": props.m_ads_kg_m2,
-            "mof_price_usd_per_kg": props.price_usd_per_kg,
-        }
-    return {"sorbent": "hydrogel"}
-
-
-def _initial_loading_from_water_l_m2(
-    water_l_m2: float,
-    config: DeviceConfig,
-) -> float:
-    if config.sorbent == "mof":
-        props = config.mof()
-        if props.m_ads_kg_m2 <= 0.0:
-            raise ValueError("MOF m_ads_kg_m2 must be positive")
-        return water_l_m2 / props.m_ads_kg_m2
+def _initial_loading_from_water_l_m2(water_l_m2: float, config: DeviceConfig) -> float:
     return c_w_from_water_in_gel_l_m2(water_l_m2, config.hydrogel_thickness_m)
 
 
 def _config_overrides(config: DeviceConfig) -> dict:
     out = {
-        "sorbent": config.sorbent,
-        "mof_name": config.mof_name,
         "salt_name": config.salt_name,
         "salt_to_polymer_ratio": config.salt_to_polymer_ratio,
         "hydrogel_thickness_m": config.hydrogel_thickness_m,
@@ -125,8 +103,6 @@ def _apply_physics_overrides(
 
 def build_device_config(
     *,
-    sorbent: SorbentKind = "hydrogel",
-    mof: str = DEFAULT_MOF_NAME,
     salt: str = "LiCl",
     salt_loading: float = 4.0,
     hydrogel_thickness_mm: float = 4.0,
@@ -143,8 +119,6 @@ def build_device_config(
     """
     get_salt(salt)
     kwargs: dict[str, object] = {
-        "sorbent": sorbent,
-        "mof_name": mof,
         "salt_name": salt,
         "salt_to_polymer_ratio": salt_loading,
         "hydrogel_thickness_m": hydrogel_thickness_mm * 1e-3,
@@ -166,8 +140,6 @@ def _build_config(args: argparse.Namespace) -> DeviceConfig:
     if tilt is None:
         tilt = 25.0 if args.weather_mode == "atacama-replay" else TILT_DEG
     return build_device_config(
-        sorbent=args.sorbent,
-        mof=args.mof,
         salt=args.salt,
         salt_loading=args.salt_loading,
         hydrogel_thickness_mm=args.hydrogel_thickness_mm,
@@ -492,17 +464,6 @@ def register_solar_sim_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument("--lon", type=float, default=None)
     p.add_argument("--year", type=int, default=2024)
     p.add_argument("--cache-dir", type=str, default=str(_REPO / ".weather_cache"))
-    p.add_argument(
-        "--sorbent",
-        choices=("hydrogel", "mof"),
-        default="hydrogel",
-        help="Sorbent material: PAM-salt hydrogel (default) or MOF (tabulated MIL-100(Fe) isotherm)",
-    )
-    p.add_argument(
-        "--mof",
-        default=DEFAULT_MOF_NAME,
-        help="MOF catalog name when --sorbent mof",
-    )
     p.add_argument("--salt", type=str, default="LiCl")
     p.add_argument("--salt-loading", type=float, default=4.0)
     p.add_argument("--hydrogel-thickness-mm", type=float, default=4.0)
@@ -556,8 +517,6 @@ def default_solar_sim_args() -> argparse.Namespace:
 
 def output_tag(args: argparse.Namespace, config: DeviceConfig) -> str:
     tag = args.weather_mode
-    if config.sorbent == "mof":
-        tag += f"_{config.mof_name}"
     if args.lat is not None:
         tag += f"_lat{args.lat:.4f}_lon{args.lon:.4f}_{args.year}"
     return tag
@@ -618,9 +577,9 @@ def run_solar_simulation(
     h_initial: float | None = None
     if args.initial_water_l_m2 is not None:
         c_w_initial = _initial_loading_from_water_l_m2(args.initial_water_l_m2, config)
-    elif config.sorbent == "hydrogel" and args.weather_mode == "fig-s1-replay":
+    elif args.weather_mode == "fig-s1-replay":
         c_w_initial = fig_s1_initial_c_w(h_m=config.hydrogel_thickness_m)
-    elif config.sorbent == "hydrogel" and args.weather_mode == "baseline":
+    elif args.weather_mode == "baseline":
         c_w_initial = baseline_initial_c_w(h_m=config.hydrogel_thickness_m)
 
     use_cycled, n_warmup = _cyclic_settings(
@@ -663,7 +622,6 @@ def run_solar_simulation(
         cyclic_warmup_cycles=n_warmup,
     )
 
-    lcow_kw = _lcow_kwargs(config)
     simplified = bool(args.simplified)
     lcow = lcow_from_daily_yield(
         yield_kg,
@@ -672,7 +630,6 @@ def run_solar_simulation(
         hydrogel_thickness_m=config.hydrogel_thickness_m,
         econ=econ,
         simplified=simplified,
-        **lcow_kw,
     )
     breakdown = lcow_cost_breakdown_from_daily_yield(
         yield_kg,
@@ -681,7 +638,6 @@ def run_solar_simulation(
         hydrogel_thickness_m=config.hydrogel_thickness_m,
         econ=econ,
         simplified=simplified,
-        **lcow_kw,
     )
 
     return SolarSimResult(
@@ -758,7 +714,7 @@ def main() -> None:
     n_days = 1
 
     print(f"Weather mode: {args.weather_mode}")
-    print(f"Sorbent: {config.sorbent}" + (f" ({config.mof_name})" if config.sorbent == "mof" else f" ({config.salt_name})"))
+    print(f"Sorbent: PAM-{config.salt_name} hydrogel")
     if args.weather_mode == "real":
         print(f"Year aggregated to mean diurnal profile: {args.year}")
     print(f"Days simulated: {n_days}")

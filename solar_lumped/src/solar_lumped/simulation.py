@@ -20,7 +20,6 @@ from scipy.optimize import brentq
 from solar_lumped.economics import LCOEconomicParams, lcow_from_daily_yield
 from solar_lumped.physics import (
     CP_AL_J_KG_K,
-    DEFAULT_MOF_NAME,
     DRY_COMPOSITE_DENSITY_KG_M3,
     EPS_ABS,
     EPS_ABS_IR_CASE2,
@@ -39,20 +38,17 @@ from solar_lumped.physics import (
     SALT_TO_POLYMER_RATIO_DEFAULT,
     STEFAN_BOLTZMANN_W_M2_K4,
     SaltProperties,
-    SorbentKind,
     TAU_GLASS,
     TILT_DEG,
     VAPOR_GAP_TRANSPORT_MIN_M,
     DeviceThermalParams,
     MassTransferParams,
-    MofProperties,
     ThermalState,
     clamp_temperature_c,
     clip_loading,
     condenser_h_conv_w_m2_k,
     desorption_water_activity,
     evaluate_mass_rates,
-    get_mof,
     get_salt,
     hollands_vapor_gap_h_conv_w_m2_k,
     initial_loading,
@@ -71,8 +67,6 @@ from solar_lumped.weather import DailyWeatherProfile, PhaseProfile, day_weather_
 
 @dataclass(frozen=True, slots=True)
 class DeviceConfig:
-    sorbent: SorbentKind = "hydrogel"
-    mof_name: str = DEFAULT_MOF_NAME
     salt_name: str = "LiCl"
     salt_to_polymer_ratio: float = SALT_TO_POLYMER_RATIO_DEFAULT
     hydrogel_thickness_m: float = H0_M
@@ -110,24 +104,7 @@ class DeviceConfig:
     def salt(self) -> SaltProperties:
         return get_salt(self.salt_name)
 
-    def mof(self) -> MofProperties:
-        return get_mof(self.mof_name)
-
     def mass_params(self) -> MassTransferParams:
-        if self.sorbent == "mof":
-            props = self.mof()
-            return MassTransferParams(
-                g_conv_m_s=props.g_conv_m_s,
-                h0_ref_m=self.hydrogel_thickness_m,
-                vapor_gap_m=self.vapor_gap_m,
-                tilt_deg=self.tilt_deg,
-                c_s_mol_m3=0.0,
-                ions_per_formula=1,
-                rho_solution_kg_m3=1000.0,
-                salt_name="MOF",
-                formula_weight_g_mol=1.0,
-                salt_to_polymer_ratio=1.0,
-            )
         s = self.salt()
         fw = (
             self.salt_formula_weight_g_mol
@@ -155,9 +132,7 @@ class DeviceConfig:
     def thermal_params(self) -> DeviceThermalParams:
         if self.thermal is not None:
             return self.thermal
-        if self.sorbent == "mof":
-            h_des = self.mof().h_des_j_per_kg
-        elif self.salt_name == "LiCl":
+        if self.salt_name == "LiCl":
             # Wilson Table S3 COMSOL value (2320 kJ/kg), not the broader Díaz-Marín
             # literature range in salt_heat_of_desorption.csv (~2850 kJ/kg).
             h_des = H_DES_J_PER_KG
@@ -269,8 +244,7 @@ def _m_des_calc(
         config=config,
         vapor_gap_m=vapor_gap_m,
     )
-    if config.sorbent == "hydrogel":
-        m_calc = m_des_kg_s_m2_from_dc_w(dc, h0_ref_m=mass.h0_ref_m)
+    m_calc = m_des_kg_s_m2_from_dc_w(dc, h0_ref_m=mass.h0_ref_m)
     return m_calc, state.t_gel_c, dc, state
 
 
@@ -295,7 +269,7 @@ def evaluate_coupled_rates(
     h_amb_cond: float | None = None,
 ) -> CoupledRates:
     """(dloading/dt, dH/dt, dT_cond/dt) with self-consistent T_gel and m_des. ``c_w`` is
-    hydrogel mol/m³ or MOF kg/kg per ``config.sorbent``; ``h_amb_cond`` models fan-forced
+    the hydrogel brine concentration in mol/m³; ``h_amb_cond`` models fan-forced
     condenser cooling decoupled from ambient wind (None reuses ``h_amb``)."""
     gap_eff = max(vapor_gap_m - h_m, 0.0)
     q_sol = max(0.0, q_solar_w_m2)

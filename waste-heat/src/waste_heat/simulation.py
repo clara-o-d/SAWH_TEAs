@@ -19,9 +19,7 @@ from waste_heat.physics import (
     C_VAC_MAX_KG_S_PA_M2,
     C_VAC_MIN_KG_S_PA_M2,
     C_W_MIN_HYDROGEL,
-    DEFAULT_MOF_NAME,
     DEFAULT_SALT_NAME,
-    DEFAULT_SORBENT,
     G_CHAMBER_M_S,
     H0_M,
     H_AMB_W_M2_K,
@@ -39,20 +37,17 @@ from waste_heat.physics import (
     T_WH_IN_C,
     VAPOR_GAP_M,
     ContactorThermalParams,
-    MofProperties,
     ThermalEnvironment,
     clamp_temperature_c,
     dT_a_dt,
     dT_cond_dt,
     dT_d_dt,
     fluxes_for_control,
-    get_mof,
     h_ads_j_per_kg,
     h_des_j_per_kg,
     initial_bed_states,
     inventory_column,
     inventory_ylabel,
-    is_hydrogel,
     mass_rates,
     mass_state_size,
     rh_outside_desorber,
@@ -60,9 +55,6 @@ from waste_heat.physics import (
     water_kg_m2_bed,
 )
 from waste_heat.weather import HalfCycleProfile
-
-SorbentKind = Literal["hydrogel", "mof"]
-
 
 @dataclass(frozen=True, slots=True)
 class ControllerParams:
@@ -75,7 +67,6 @@ class ControllerParams:
 
 @dataclass(frozen=True, slots=True)
 class DeviceConfig:
-    sorbent: SorbentKind = DEFAULT_SORBENT  # type: ignore[assignment]
     salt_name: str = DEFAULT_SALT_NAME
     salt_to_polymer_ratio: float = SALT_TO_POLYMER_RATIO
     hydrogel_thickness_m: float = H0_M
@@ -83,15 +74,11 @@ class DeviceConfig:
     g_conv_m_s: float = G_CHAMBER_M_S
     vapor_gap_m: float = VAPOR_GAP_M
     tilt_deg: float = TILT_DEG
-    mof_name: str = DEFAULT_MOF_NAME
     tau_half_s: float = TAU_HALF_S
     rh_desorber_switch: float = RH_DESORBER_SWITCH
     p_cond_pa: float = P_COND_PA
     controller: ControllerParams | None = None
     thermal: ContactorThermalParams | None = None
-
-    def mof(self) -> MofProperties:
-        return get_mof(self.mof_name)
 
     def thermal_params(self) -> ContactorThermalParams:
         if self.thermal is not None:
@@ -108,11 +95,6 @@ class DeviceConfig:
     def datacenter_baseline(cls, **overrides: object) -> DeviceConfig:
         return cls(**overrides)  # type: ignore[arg-type]
 
-    @classmethod
-    def mof_baseline(cls, **overrides: object) -> DeviceConfig:
-        base = {"sorbent": "mof"}
-        base.update(overrides)
-        return cls(**base)  # type: ignore[arg-type]
 @dataclass
 class ControllerState:
     integral_ads_kg_m2: float = 0.0
@@ -167,9 +149,7 @@ def _parse_mass_state(
     *,
     config: DeviceConfig,
 ) -> tuple[float, float, float, float]:
-    if is_hydrogel(config):
-        return float(state[0]), float(state[1]), float(state[2]), float(state[3])
-    return float(state[0]), float(state[1]), config.hydrogel_thickness_m, config.hydrogel_thickness_m
+    return float(state[0]), float(state[1]), float(state[2]), float(state[3])
 
 
 def evaluate_coupled_rates(
@@ -203,14 +183,10 @@ def evaluate_coupled_rates(
         config=config,
     )
 
-    if is_hydrogel(config):
-        dy_mass = np.array(
-            [sorbent.d_loading_a, sorbent.d_h_a, sorbent.d_loading_d, sorbent.d_h_d],
-            dtype=float,
-        )
-    else:
-        dy_mass = np.array([sorbent.d_loading_a, sorbent.d_loading_d], dtype=float)
-
+    dy_mass = np.array(
+        [sorbent.d_loading_a, sorbent.d_h_a, sorbent.d_loading_d, sorbent.d_h_d],
+        dtype=float,
+    )
     dta = dT_a_dt(
         t_a_c=t_a,
         m_ads_kg_s_m2=sorbent.m_ads_kg_s_m2,
@@ -335,35 +311,31 @@ def _pack_y0(
     t_d: float,
     t_cond: float,
 ) -> np.ndarray:
-    if is_hydrogel(config):
-        return np.array([loading_a, h_a, loading_d, h_d, t_a, t_d, t_cond], dtype=float)
-    return np.array([loading_a, loading_d, t_a, t_d, t_cond], dtype=float)
+    return np.array([loading_a, h_a, loading_d, h_d, t_a, t_d, t_cond], dtype=float)
 
 
 def _clip_mass_state(y: np.ndarray, config: DeviceConfig) -> np.ndarray:
     out = y.copy()
-    if is_hydrogel(config):
-        h_min = config.hydrogel_thickness_m
-        out[1] = max(float(out[1]), h_min)
-        out[3] = max(float(out[3]), h_min)
-        if out[1] > h_min + 1e-12 and float(out[0]) >= C_W_MIN_HYDROGEL:
-            pass
-        elif float(out[1]) <= h_min + 1e-12:
-            out[1] = h_min
+    h_min = config.hydrogel_thickness_m
+    out[1] = max(float(out[1]), h_min)
+    out[3] = max(float(out[3]), h_min)
+    if out[1] > h_min + 1e-12 and float(out[0]) >= C_W_MIN_HYDROGEL:
+        pass
+    elif float(out[1]) <= h_min + 1e-12:
+        out[1] = h_min
     return out
 
 
 def _unpack_half_result(y_stack: np.ndarray, config: DeviceConfig) -> dict:
-    if is_hydrogel(config):
-        return {
-            "q_a": y_stack[:, 0],
-            "h_a": y_stack[:, 1],
-            "q_d": y_stack[:, 2],
-            "h_d": y_stack[:, 3],
-            "t_a_c": y_stack[:, 4],
-            "t_d_c": y_stack[:, 5],
-            "t_cond_c": y_stack[:, 6],
-        }
+    return {
+        "q_a": y_stack[:, 0],
+        "h_a": y_stack[:, 1],
+        "q_d": y_stack[:, 2],
+        "h_d": y_stack[:, 3],
+        "t_a_c": y_stack[:, 4],
+        "t_d_c": y_stack[:, 5],
+        "t_cond_c": y_stack[:, 6],
+    }
     return {
         "q_a": y_stack[:, 0],
         "q_d": y_stack[:, 1],
@@ -515,10 +487,9 @@ def run_half_cycle(
             dy = np.concatenate([rates.dy_mass, np.array(
                 [rates.dT_a_dt, rates.dT_d_dt, rates.dT_cond_dt]
             )])
-            if is_hydrogel(config):
-                h_min = config.hydrogel_thickness_m
-                if float(state[1]) <= h_min + 1e-12:
-                    dy[1] = max(0.0, dy[1])
+            h_min = config.hydrogel_thickness_m
+            if float(state[1]) <= h_min + 1e-12:
+                dy[1] = max(0.0, dy[1])
             return dy
 
         y = _clip_mass_state(y, config)
@@ -626,19 +597,13 @@ def swap_roles(
 
 
 def _state_to_vec(state: CycleState, config: DeviceConfig) -> np.ndarray:
-    """Drop the h_a/h_d slots for MOF configs, where they're always None."""
     la, ld, ha, hd, ta, td, tc = state
-    if is_hydrogel(config):
-        return np.array([la, ld, ha, hd, ta, td, tc], dtype=float)
-    return np.array([la, ld, ta, td, tc], dtype=float)
+    return np.array([la, ld, ha, hd, ta, td, tc], dtype=float)
 
 
 def _vec_to_state(vec: np.ndarray, config: DeviceConfig) -> CycleState:
-    if is_hydrogel(config):
-        la, ld, ha, hd, ta, td, tc = (float(v) for v in vec)
-        return la, ld, ha, hd, ta, td, tc
-    la, ld, ta, td, tc = (float(v) for v in vec)
-    return la, ld, None, None, ta, td, tc
+    la, ld, ha, hd, ta, td, tc = (float(v) for v in vec)
+    return la, ld, ha, hd, ta, td, tc
 
 
 def _initial_state(
@@ -711,8 +676,7 @@ def find_cyclic_state(
 ) -> CycleState:
     """Steady periodic post-cycle state for an indefinitely repeated profile, via restarted
     vector Aitken Δ² extrapolation (~3-6 rounds) instead of the 100+ cycles plain iteration
-    can need. Same algorithm as find_cyclic_state, over this device's 7-field cycle state
-    (5 for MOF, which has no hydrogel thickness).
+    can need. Same algorithm as find_cyclic_state, over this device's 7-field cycle state.
 
     Pairs with a stable period-2 orbit instead of a fixed point plateau ``rel_step``; that is
     detected as ``stall_rounds`` rounds without a ``stall_ratio`` shrink and answered by
@@ -957,14 +921,10 @@ def _tracked_half_series(
         t_partner = half.t_a_c
 
     ctrl_p = config.controller_params()
-    if is_hydrogel(config):
-        assert h is not None
-        water = np.array(
-            [water_in_gel_l_m2(float(q_k), float(h_k), config=config) for q_k, h_k in zip(q, h)]
-        )
-    else:
-        water = np.array([water_kg_m2_bed(float(q_k), config=config) for q_k in q])
-
+    assert h is not None
+    water = np.array(
+        [water_in_gel_l_m2(float(q_k), float(h_k), config=config) for q_k, h_k in zip(q, h)]
+    )
     m_ads = np.asarray(half.m_ads_kg_s_m2, dtype=float)
     m_des = np.asarray(half.m_des_kg_s_m2, dtype=float)
     m_eq = np.minimum(m_ads, m_des)
@@ -1024,14 +984,9 @@ def _tracked_half_series(
         c_vac[k] = controls.c_vac_kg_s_pa_m2
         rh_gap[k] = rh_outside_desorber(float(half.t_d_c[k]), float(half.t_cond_c[k]))
 
-    if is_hydrogel(config):
-        assert h is not None
-        c_w = np.asarray(q, dtype=float)
-        h_arr = np.asarray(h, dtype=float)
-    else:
-        c_w = np.asarray(q, dtype=float)
-        h_arr = np.full(n, config.hydrogel_thickness_m)
-
+    assert h is not None
+    c_w = np.asarray(q, dtype=float)
+    h_arr = np.asarray(h, dtype=float)
     operating_role = np.array([tracked_phase] * n, dtype=object)
     return WaterInventorySeries(
         time_s=np.asarray(half.time_s, dtype=float) + t_offset_s,
@@ -1231,8 +1186,6 @@ def write_water_inventory_csv(path: Path, series: WaterInventorySeries, *, confi
         "rh_vapor_gap",
         "c_vac_kg_s_pa_m2",
     ]
-    if not is_hydrogel(config):
-        fields = [f for f in fields if f not in ("c_w_mol_m3", "h_m")]
     with path.open("w", newline="") as f:
         w = csv.writer(f)
         w.writerow(fields)

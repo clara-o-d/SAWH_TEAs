@@ -183,28 +183,22 @@ def lcow_from_daily_yield(
     econ: LCOEconomicParams,
     cycles_per_day: float = 1.0,
     salt_price_usd_per_kg: float | None = None,
-    sorbent: str = "hydrogel",
-    mof_mass_kg_m2: float = 0.0,
-    mof_price_usd_per_kg: float = 0.0,
     simplified: bool = False,
 ) -> float:
     """Scalar LCOW (USD/m³), same structure as lcow_zsr_at_sl. ``simplified=True`` drops the
     DI-water and non-acrylamide polymer (APS/MBA/TEMED) terms from the hydrogel line."""
     if daily_yield_kg_per_m2 <= 0.0 or not math.isfinite(daily_yield_kg_per_m2):
         return FAIL_LCO
-    if sorbent == "hydrogel" and (
+    if (
         salt_to_polymer_ratio <= 0.0 or not math.isfinite(salt_to_polymer_ratio)
     ):
         return FAIL_LCO
 
     annual_water_yield_kg = float(cycles_per_day) * 365.0 * float(daily_yield_kg_per_m2)
     sorbent_replacement = _sorbent_replacement_annual_usd(
-        sorbent=sorbent,
         salt_name=salt_name,
         salt_to_polymer_ratio=salt_to_polymer_ratio,
         hydrogel_thickness_m=hydrogel_thickness_m,
-        mof_mass_kg_m2=mof_mass_kg_m2,
-        mof_price_usd_per_kg=mof_price_usd_per_kg,
         econ=econ,
         salt_price_usd_per_kg=salt_price_usd_per_kg,
         simplified=simplified,
@@ -225,19 +219,14 @@ def lcow_from_daily_yield(
 
 def _sorbent_replacement_annual_usd(
     *,
-    sorbent: str,
     salt_name: str,
     salt_to_polymer_ratio: float,
     hydrogel_thickness_m: float,
-    mof_mass_kg_m2: float,
-    mof_price_usd_per_kg: float,
     econ: LCOEconomicParams,
     salt_price_usd_per_kg: float | None = None,
     simplified: bool = False,
 ) -> float:
     gel_lifetime = econ.hydrogel_lifetime_years
-    if sorbent == "mof":
-        return mof_mass_kg_m2 * mof_price_usd_per_kg / gel_lifetime
     sl = salt_to_polymer_ratio
     dry_mass = dry_composite_mass_kg(hydrogel_thickness_m)
     salt_price = (
@@ -282,9 +271,6 @@ def lcow_cost_breakdown_from_daily_yield(
     econ: LCOEconomicParams,
     cycles_per_day: float = 1.0,
     salt_price_usd_per_kg: float | None = None,
-    sorbent: str = "hydrogel",
-    mof_mass_kg_m2: float = 0.0,
-    mof_price_usd_per_kg: float = 0.0,
     simplified: bool = False,
 ) -> LcowCostBreakdown | None:
     """Per-term LCOW breakdown, same segments as lcow_cost_breakdown_usd_per_m3.
@@ -297,9 +283,6 @@ def lcow_cost_breakdown_from_daily_yield(
         econ=econ,
         cycles_per_day=cycles_per_day,
         salt_price_usd_per_kg=salt_price_usd_per_kg,
-        sorbent=sorbent,
-        mof_mass_kg_m2=mof_mass_kg_m2,
-        mof_price_usd_per_kg=mof_price_usd_per_kg,
         simplified=simplified,
     )
     if not math.isfinite(lcow) or lcow >= 0.99 * FAIL_LCO:
@@ -327,37 +310,33 @@ def lcow_cost_breakdown_from_daily_yield(
         maintenance_annual += maint_frac * line_cost
     segments.append(("Maintenance", _lcow_seg(maintenance_annual)))
 
-    if sorbent == "mof":
-        mof_annual = mof_mass_kg_m2 * mof_price_usd_per_kg / gel_lifetime
-        segments.append(("MOF sorbent", _lcow_seg(mof_annual)))
-    else:
-        salt_price = (
-            salt_price_usd_per_kg
-            if salt_price_usd_per_kg is not None
-            else get_salt_price_usd_per_kg(salt_name)
+    salt_price = (
+        salt_price_usd_per_kg
+        if salt_price_usd_per_kg is not None
+        else get_salt_price_usd_per_kg(salt_name)
+    )
+    salt_annual = salt_price * sl / (1.0 + sl) * dry_mass / gel_lifetime
+    segments.append(("Hydrogel: salt", _lcow_seg(salt_annual)))
+    # Split the blended polymer cost back into ingredients by renormalized Table S1
+    # share; simplified mode bills acrylamide only.
+    ingredients = (
+        (_polymer_fractions[0], econ.c_am_usd_per_kg, "Hydrogel: acrylamide (AM)"),
+    ) if simplified else (
+        (_polymer_fractions[0], econ.c_am_usd_per_kg, "Hydrogel: acrylamide (AM)"),
+        (_polymer_fractions[1], econ.c_aps_usd_per_kg, "Hydrogel: APS"),
+        (_polymer_fractions[2], econ.c_mba_usd_per_kg, "Hydrogel: MBA"),
+        (_polymer_fractions[3], econ.c_temed_usd_per_kg, "Hydrogel: TEMED"),
+    )
+    for frac, econ_price, label in ingredients:
+        ingredient_annual = (
+            (frac / _polymer_fraction_sum) * econ_price / (1.0 + sl) * dry_mass / gel_lifetime
         )
-        salt_annual = salt_price * sl / (1.0 + sl) * dry_mass / gel_lifetime
-        segments.append(("Hydrogel: salt", _lcow_seg(salt_annual)))
-        # Split the blended polymer cost back into ingredients by renormalized Table S1
-        # share; simplified mode bills acrylamide only.
-        ingredients = (
-            (_polymer_fractions[0], econ.c_am_usd_per_kg, "Hydrogel: acrylamide (AM)"),
-        ) if simplified else (
-            (_polymer_fractions[0], econ.c_am_usd_per_kg, "Hydrogel: acrylamide (AM)"),
-            (_polymer_fractions[1], econ.c_aps_usd_per_kg, "Hydrogel: APS"),
-            (_polymer_fractions[2], econ.c_mba_usd_per_kg, "Hydrogel: MBA"),
-            (_polymer_fractions[3], econ.c_temed_usd_per_kg, "Hydrogel: TEMED"),
+        segments.append((label, _lcow_seg(ingredient_annual)))
+    if not simplified:
+        water_annual = (
+            WATER_RATIO_PER_KG_DRY_COMPOSITE * econ.c_water_gel_usd_per_kg * dry_mass / gel_lifetime
         )
-        for frac, econ_price, label in ingredients:
-            ingredient_annual = (
-                (frac / _polymer_fraction_sum) * econ_price / (1.0 + sl) * dry_mass / gel_lifetime
-            )
-            segments.append((label, _lcow_seg(ingredient_annual)))
-        if not simplified:
-            water_annual = (
-                WATER_RATIO_PER_KG_DRY_COMPOSITE * econ.c_water_gel_usd_per_kg * dry_mass / gel_lifetime
-            )
-            segments.append(("Hydrogel: water", _lcow_seg(water_annual)))
+        segments.append(("Hydrogel: water", _lcow_seg(water_annual)))
 
     return LcowCostBreakdown(items=tuple(segments))
 
@@ -385,14 +364,11 @@ def npv_from_daily_yield(
     econ: LCOEconomicParams,
     cycles_per_day: float = 1.0,
     salt_price_usd_per_kg: float | None = None,
-    sorbent: str = "hydrogel",
-    mof_mass_kg_m2: float = 0.0,
-    mof_price_usd_per_kg: float = 0.0,
 ) -> NpvResult | None:
     """NPV and payback period (USD/m2 of device footprint) for one site."""
     if daily_yield_kg_per_m2 <= 0.0 or not math.isfinite(daily_yield_kg_per_m2):
         return None
-    if sorbent == "hydrogel" and (
+    if (
         salt_to_polymer_ratio <= 0.0 or not math.isfinite(salt_to_polymer_ratio)
     ):
         return None
@@ -401,12 +377,9 @@ def npv_from_daily_yield(
     gross_annual_water_m3 = econ.utilization_factor * (annual_water_yield_kg / KG_WATER_PER_M3)
 
     sorbent_replacement = _sorbent_replacement_annual_usd(
-        sorbent=sorbent,
         salt_name=salt_name,
         salt_to_polymer_ratio=salt_to_polymer_ratio,
         hydrogel_thickness_m=hydrogel_thickness_m,
-        mof_mass_kg_m2=mof_mass_kg_m2,
-        mof_price_usd_per_kg=mof_price_usd_per_kg,
         econ=econ,
         salt_price_usd_per_kg=salt_price_usd_per_kg,
     )

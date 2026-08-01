@@ -192,6 +192,27 @@ Same value, same equation, different symbol.
 \begin{itemize}
 \item $h_{conv,g}$: Hollands et al.\ natural convection between parallel plates in the vapor gap
 $L_g - H$ (tilt-dependent; Eqs.~S3--S4).
+\item \textbf{Tilt and solar gain (optional POA, off by default).} Wilson's Eq.~4 drives the
+absorber with the site's \emph{horizontal} irradiance (GHI), so by default the tilt $\theta$
+enters the model \emph{only} through the two Hollands gap correlations -- tilting the device
+changes internal natural convection but not the energy it collects, which makes $\theta$
+monotone in the wrong direction for a solar collector. Passing
+\code{profile\_from\_day\_df(..., poa\_tilt\_deg=$\theta$)} (CLI:
+\code{grid\_param\_sweep.py --poa}) instead transposes GHI onto the tilted aperture via the
+Erbs et al.\ (1982) diffuse-fraction split plus Liu \& Jordan isotropic-sky transposition,
+\begin{equation}
+Q_{POA} = DNI\max(0,\cos\theta_{AOI}) + DHI\,\frac{1+\cos\beta}{2}
++ GHI\,\rho_g\,\frac{1-\cos\beta}{2},
+\label{eq:poa}
+\end{equation}
+so a single $\theta$ then trades solar gain against gap convection simultaneously. At
+$\beta = 0$ Eq.~\eqref{eq:poa} reduces exactly to $Q_{POA} = GHI$. Kept opt-in because
+enabling it changes every real-weather yield number; the day/night phase split stays keyed
+on GHI so phase boundaries are unaffected. Example (Cambridge, summer solstice, 4\,mm gel):
+with GHI the mean flux is 595\,W/m$^2$ at every tilt and yield rises monotonically
+$0^\circ \to 60^\circ$ (1.882 $\to$ 1.904\,kg/m$^2$) purely via gap convection; with POA the
+flux varies (595 $\to$ 449\,W/m$^2$) and yield acquires an interior optimum near
+$15^\circ$ (1.927\,kg/m$^2$).
 \item $\varepsilon_{gc} = 1/(1/\varepsilon_{gel} + 1/\varepsilon_{Al} - 1)$: parallel-plate
 radiative exchange (Eq.~S2).
 \item $U_{gel}$: series-resistance gel--absorber conductance (updated from the single-layer
@@ -325,8 +346,8 @@ per-ingredient cost. MOF sorbent instead uses mass $\times$ price / lifetime dir
 \item \textbf{Utilization factor} is a single multiplicative derating of the physics-simulated
 gross annual yield (daily yield $\times$ 365 $\times$ cycles/day), meant to stand in for real-world
 downtime / non-ideal weather years -- not a modeled reliability/availability process.
-\item \textbf{Electricity cost} only applies to the optional active/electric-heat-assist mode; the
-reproduced passive-solar baseline has zero electric heat and therefore zero electricity cost.
+\item \textbf{No energy cost:} the device is passive solar -- no electricity, electric-heat
+assist, or per-cycle energy term exists in this package (see Eq.~\eqref{eq:annual-cost}).
 \item \textbf{Out of scope:} water transport/distribution, land, installation labor, permitting,
 and end-of-life salvage value are not modeled.
 \item \textbf{No escalation:} all costs are unescalated real USD (no inflation or fuel/material
@@ -385,14 +406,21 @@ $C_{sorbent} = m_{MOF}\,c_{MOF} / L_{gel}$ directly.)
 \textbf{Annualized device cost:}
 \begin{equation}
 C_{annual} = CRF \cdot f_{inv}\,C_{device} + C_{sorbent} + f_{maint}\,C_{device}
-+ C_{energy,fixed} + C_{elec} + C_{cycle,extra}
 \label{eq:annual-cost}
 \end{equation}
 where $C_{device} = \sum_j C_{BOM,j}$ (six BOM line items),
-$f_{inv}$ is the total investment factor, $f_{maint}$ the maintenance cost fraction,
-$C_{elec} = p_{elec}\,\dot{Q}_{elec}\,t_{des}\cdot 365 / 1000$ is the optional active-heating
-electricity cost (USD/kWh $\times$ W/m$^2$ $\times$ h/day $\times$ days/yr, converted to kWh), and
-$C_{cycle,extra}$ charges a fixed energy cost per half-cycle beyond one per day.
+$f_{inv}$ is the total investment factor, and $f_{maint}$ the maintenance cost fraction.
+
+\textbf{No purchased-energy term:} this device is passive solar, so $C_{annual}$ has no
+electricity, electric-heat-assist, or per-extra-cycle energy term at all --
+\code{LCOEconomicParams} carries no \code{electricity\_price\_usd\_per\_kwh},
+\code{desorption\_hours\_per\_day}, or \code{max\_electric\_heat\_w\_per\_m2} field. Those
+knobs previously existed but were provably inert: the electricity cost was
+$p_{elec}\,\dot{Q}_{elec}\,t_{des}\cdot 365/1000$ and $\dot{Q}_{elec}$ was hard-zero on
+every solar code path, so LCOW was bit-identical for any electricity price or desorption
+duration (verified: \$0/kWh through \$100/kWh all give the same LCOW to the last digit).
+Multi-cycle operation and supplemental/parasitic electric loads are modelled in the
+\code{waste\_heat} package, which is where those terms belong.
 
 \textbf{LCOW:}
 \begin{equation}
@@ -440,9 +468,10 @@ back into the ODE integration.
 ($g_{chamber}$ in \code{table\_s3.py} vs.\ \code{mass\_transfer\_convection\_coefficient\_m\_s}
 in \code{lcow\_economic\_params.csv}) is a single physical quantity kept in two files; a change
 to one without the other would silently desynchronize the model.
-\item \code{desorption\_hours\_per\_day} (economics, fixed at 12h) is not derived from the
-physics day/night split, which can vary by site/season in real-weather mode -- a mismatch here
-biases the electricity-cost term for the optional active-heating case.
+\item \emph{(Resolved.)} \code{desorption\_hours\_per\_day} used to be pinned at 12\,h in
+economics while the physics day/night split varies by site/season. It is now simply gone: its
+only consumer was the electricity-cost term, which was itself inert (see
+Eq.~\eqref{eq:annual-cost}), so there was nothing left to keep synchronized.
 \item \textbf{Case~2 default (2026-07):} \code{sawh\_bayesopt} (\code{design\_space.py},
 \code{evaluator.py}, \code{bayesopt.py}, and the \code{run\_bayesopt.py}/\code{hp\_sweep.py} CLI
 flags) also now defaults its own case-selection axis to \code{case2}, and \code{case1} there is

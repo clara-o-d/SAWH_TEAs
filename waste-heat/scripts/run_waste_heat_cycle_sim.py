@@ -16,9 +16,7 @@ if str(_SRC) not in sys.path:
 
 from waste_heat.physics import rh_outside_desorber
 from waste_heat.physics import (
-    DEFAULT_MOF_NAME,
     DEFAULT_SALT_NAME,
-    DEFAULT_SORBENT,
     G_CHAMBER_M_S,
     H0_M,
     H_AMB_W_M2_K,
@@ -31,7 +29,7 @@ from waste_heat.physics import (
     T_AMB_C,
     T_WH_IN_C,
 )
-from waste_heat.physics import inventory_label, is_hydrogel
+from waste_heat.physics import inventory_label
 from waste_heat.simulation import ControllerParams, DeviceConfig
 from waste_heat.simulation import (
     detailed_daily_series,
@@ -64,12 +62,10 @@ def _build_config(args: argparse.Namespace) -> DeviceConfig:
             k_p_per_kg_s_m2=base.k_p_per_kg_s_m2,
         )
     return DeviceConfig(
-        sorbent=args.sorbent,
         salt_name=args.salt,
         salt_to_polymer_ratio=args.salt_loading,
         hydrogel_thickness_m=args.hydrogel_thickness_mm * 1e-3,
         g_conv_m_s=args.g_conv,
-        mof_name=args.mof,
         tau_half_s=args.max_half_cycle_min * 60.0,
         rh_desorber_switch=args.rh_desorber_switch,
         p_cond_pa=args.p_cond_mbar * 100.0,
@@ -93,8 +89,6 @@ def _build_profile(args: argparse.Namespace, config: DeviceConfig):
 
 def _output_tag(args: argparse.Namespace) -> str:
     tag = args.profile.replace("-", "_")
-    if args.sorbent == "mof":
-        tag += f"_{args.mof}"
     if args.daily:
         tag += "_daily"
     if args.warmup_cycles > 0:
@@ -105,7 +99,7 @@ def _output_tag(args: argparse.Namespace) -> str:
 
 
 def _inventory_prefix(config: DeviceConfig) -> str:
-    return "water_in_gel" if is_hydrogel(config) else "water_in_mof"
+    return "water_in_gel"
 
 
 def _write_inventory_outputs(
@@ -164,12 +158,10 @@ def _half_cycle_note(half_a, half_b, config: DeviceConfig) -> str:
 def main() -> None:
     p = argparse.ArgumentParser(description="Waste-heat two-bed SAWH simulation")
     p.add_argument("--profile", default="datacenter-baseline")
-    p.add_argument("--sorbent", choices=("hydrogel", "mof"), default=DEFAULT_SORBENT)
     p.add_argument("--salt", default=DEFAULT_SALT_NAME)
     p.add_argument("--salt-loading", type=float, default=SALT_TO_POLYMER_RATIO)
     p.add_argument("--hydrogel-thickness-mm", type=float, default=H0_M * 1e3)
     p.add_argument("--g-conv", type=float, default=G_CHAMBER_M_S)
-    p.add_argument("--mof", default=DEFAULT_MOF_NAME)
     p.add_argument(
         "--max-half-cycle-min",
         type=float,
@@ -235,7 +227,6 @@ def main() -> None:
 
     config = _build_config(args)
     profile = _build_profile(args, config)
-    print(f"Sorbent: {config.sorbent}")
 
     if args.daily:
         yield_kg, eta, results = run_daily_operation(

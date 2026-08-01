@@ -95,7 +95,7 @@ def build_device_config(
     )
 
 
-def monthly_mean_profiles(df) -> list[tuple[int, DailyWeatherProfile, int]]:
+def monthly_mean_profiles(df, *, poa_tilt_deg: float | None = None) -> list[tuple[int, DailyWeatherProfile, int]]:
     """One representative mean-day profile per calendar month present in *df*.
 
     Returns (month, profile, n_days_in_month) so callers can day-weight the average.
@@ -109,13 +109,13 @@ def monthly_mean_profiles(df) -> list[tuple[int, DailyWeatherProfile, int]]:
             continue
         ref_day = month_df.index[len(month_df) // 2].date()
         mean_day_df = representative_mean_day_df(month_df, reference_day=ref_day)
-        profile = profile_from_day_df(mean_day_df)
+        profile = profile_from_day_df(mean_day_df, poa_tilt_deg=poa_tilt_deg)
         n_days = len(pd.unique(month_df.index.date))
         out.append((m, profile, n_days))
     return out
 
 
-def single_mean_profile(df) -> list[tuple[int, DailyWeatherProfile, int]]:
+def single_mean_profile(df, *, poa_tilt_deg: float | None = None) -> list[tuple[int, DailyWeatherProfile, int]]:
     """One representative mean-day profile for the whole year. Validated against the full
     365-day simulation across 3 climates: within ~0.2% at low-variance (desert, LCOW-
     competitive) sites, ~14-21% off at high-variance ones. Use --resolution monthly to
@@ -124,7 +124,7 @@ def single_mean_profile(df) -> list[tuple[int, DailyWeatherProfile, int]]:
 
     ref_day = df.index[len(df) // 2].date()
     mean_day_df = representative_mean_day_df(df, reference_day=ref_day)
-    profile = profile_from_day_df(mean_day_df)
+    profile = profile_from_day_df(mean_day_df, poa_tilt_deg=poa_tilt_deg)
     n_days = len(pd.unique(df.index.date))
     return [(0, profile, n_days)]
 
@@ -248,6 +248,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--salt-loading", type=float, default=4.0)
     p.add_argument("--insulation-gap-mm", type=float, default=5.0)
     p.add_argument("--tilt-deg", type=float, default=TILT_DEG)
+    p.add_argument(
+        "--poa",
+        action="store_true",
+        help=(
+            "Drive the absorber with plane-of-array irradiance at --tilt-deg instead of "
+            "raw GHI (Erbs + Liu-Jordan isotropic). Off by default: Wilson's Eq. 4 uses "
+            "GHI, so tilt otherwise only affects Hollands gap convection. With --poa, "
+            "tilt trades solar gain against gap convection at once."
+        ),
+    )
     p.add_argument("--hydrogel-thickness-mm", type=float, nargs="+", default=list(DEFAULT_HYDROGEL_THICKNESS_MM))
     p.add_argument("--fin-area-ratio", type=float, nargs="+", default=list(DEFAULT_FIN_AREA_RATIO))
     p.add_argument("--vapor-gap-mm", type=float, nargs="+", default=list(DEFAULT_VAPOR_GAP_MM))
@@ -342,8 +352,14 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Fetching {args.year} weather [cache={args.cache_dir}]…", flush=True)
     df = fetch_year_weather(lat, lon, args.year, cache_dir=args.cache_dir)
 
-    profiles = single_mean_profile(df) if args.resolution == "single" else monthly_mean_profiles(df)
-    print(f"Built {len(profiles)} {args.resolution} mean-day profile(s)", flush=True)
+    poa_tilt_deg = args.tilt_deg if args.poa else None
+    builder = single_mean_profile if args.resolution == "single" else monthly_mean_profiles
+    profiles = builder(df, poa_tilt_deg=poa_tilt_deg)
+    print(
+        f"Built {len(profiles)} {args.resolution} mean-day profile(s)"
+        + (f" [POA @ {args.tilt_deg:g} deg tilt]" if args.poa else " [GHI]"),
+        flush=True,
+    )
 
     mean_rh, mean_t_amb, mean_solar = mean_weather_stats(profiles)
     print(

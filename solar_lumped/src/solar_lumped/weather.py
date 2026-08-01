@@ -469,6 +469,109 @@ PHASE_HOURS = 12.0
 STEPS_PER_PHASE = int(round(PHASE_HOURS * 3600.0 / PHASE_DT_S))
 SOLAR_NIGHT_THRESHOLD_W_M2 = 5.0
 
+# --- Optional plane-of-array (POA) irradiance transposition ---
+#
+# OFF BY DEFAULT. Wilson's Eq. 4 drives the absorber with Q_solar taken straight
+# from the site's horizontal irradiance (GHI), and ``tilt_deg`` enters the model
+# *only* through the Hollands tilted-plate Nusselt correlation for the two air
+# gaps (physics.py::hollands_vapor_gap_h_conv_w_m2_k). That makes tilt a pure
+# internal-natural-convection knob: tilting the device changes gap convection but
+# not the solar energy it collects, which is backwards for a solar collector.
+#
+# Enabling POA (``profile_from_day_df(..., poa_tilt_deg=...)``) transposes GHI
+# onto the tilted aperture, so a single ``tilt_deg`` then trades solar gain
+# against gap convection simultaneously -- the coupling needed to optimize tilt
+# for real. Left opt-in because switching it on changes every real-weather yield
+# number, so all existing GHI-based results stay reproducible untouched.
+#
+# Method: Erbs et al. (1982) diffuse-fraction decomposition of GHI into DNI/DHI,
+# then Liu & Jordan isotropic-sky transposition. Isotropic is the conservative
+# choice (it ignores circumsolar/horizon brightening, so it slightly *under*-
+# predicts POA for tilted surfaces facing the sun) and needs no extra inputs.
+POA_DEFAULT_ALBEDO: float = 0.2  # generic ground reflectance (Duffie & Beckman)
+_SOLAR_CONSTANT_W_M2: float = 1367.0
+# Below ~3 deg solar elevation the DNI = (GHI - DHI)/cos(zenith) division blows
+# up on near-zero cos(zenith); clamp rather than emit a spurious POA spike.
+_MIN_COS_ZENITH: float = 0.05
+
+
+def plane_of_array_w_m2(
+    ghi_w_m2: np.ndarray,
+    index: pd.DatetimeIndex,
+    *,
+    latitude_deg: float,
+    longitude_deg: float,
+    tilt_deg: float,
+    surface_azimuth_deg: float | None = None,
+    albedo: float = POA_DEFAULT_ALBEDO,
+) -> np.ndarray:
+    """Transpose horizontal irradiance (GHI) onto a tilted aperture.
+
+    ``surface_azimuth_deg`` is measured clockwise from north (180 = due south);
+    ``None`` picks the equator-facing orientation from the latitude's sign, which
+    is what both study sites want (Cambridge +42 -> south, Atacama -23 -> north).
+
+    Returns POA in W/m^2, same shape as ``ghi_w_m2``. At ``tilt_deg == 0`` this is
+    an exact identity (POA == GHI): the beam term collapses to DNI*cos(zenith) =
+    GHI - DHI, the isotropic sky term to DHI, and the ground term to zero.
+    """
+    ghi = np.asarray(ghi_w_m2, dtype=float)
+    if surface_azimuth_deg is None:
+        surface_azimuth_deg = 180.0 if latitude_deg >= 0.0 else 0.0
+
+    # --- Solar position (Duffie & Beckman ch. 1) ---
+    doy = np.asarray(index.dayofyear, dtype=float)
+    b = np.radians(360.0 / 365.0 * (doy - 81.0))
+    # Equation of time (min) and longitude correction give *true solar* time; using
+    # raw clock time would bias the apparent solar noon by up to ~1 h and therefore
+    # bias the optimal tilt/azimuth.
+    eot_min = 9.87 * np.sin(2.0 * b) - 7.53 * np.cos(b) - 1.5 * np.sin(b)
+    utc_offset_h = np.asarray(
+        [(ts.utcoffset().total_seconds() / 3600.0) if ts.utcoffset() is not None else 0.0 for ts in index],
+        dtype=float,
+    )
+    clock_h = np.asarray(index.hour, dtype=float) + np.asarray(index.minute, dtype=float) / 60.0
+    solar_h = clock_h + (4.0 * (longitude_deg - 15.0 * utc_offset_h) + eot_min) / 60.0
+    hour_angle = np.radians(15.0 * (solar_h - 12.0))
+    declination = np.radians(23.45) * np.sin(np.radians(360.0 / 365.0 * (doy + 284.0)))
+
+    phi = np.radians(latitude_deg)
+    beta = np.radians(tilt_deg)
+    gamma = np.radians(surface_azimuth_deg - 180.0)  # D&B convention: 0 = equator-facing
+    cos_zen = np.sin(declination) * np.sin(phi) + np.cos(declination) * np.cos(phi) * np.cos(hour_angle)
+    cos_zen_eff = np.maximum(cos_zen, _MIN_COS_ZENITH)
+
+    # --- Erbs diffuse fraction from the clearness index ---
+    e0 = _SOLAR_CONSTANT_W_M2 * (1.0 + 0.033 * np.cos(np.radians(360.0 * doy / 365.0)))
+    kt = np.clip(np.divide(ghi, e0 * cos_zen_eff, out=np.zeros_like(ghi), where=e0 * cos_zen_eff > 0.0), 0.0, 1.0)
+    diffuse_frac = np.where(
+        kt <= 0.22,
+        1.0 - 0.09 * kt,
+        np.where(
+            kt <= 0.80,
+            0.9511 - 0.1604 * kt + 4.388 * kt**2 - 16.638 * kt**3 + 12.336 * kt**4,
+            0.165,
+        ),
+    )
+    dhi = np.clip(diffuse_frac, 0.0, 1.0) * ghi
+    dni = np.maximum(0.0, (ghi - dhi) / cos_zen_eff)
+
+    # --- Liu & Jordan isotropic transposition (D&B Eq. 1.6.2 for cos(AOI)) ---
+    cos_aoi = (
+        np.sin(declination) * np.sin(phi) * np.cos(beta)
+        - np.sin(declination) * np.cos(phi) * np.sin(beta) * np.cos(gamma)
+        + np.cos(declination) * np.cos(phi) * np.cos(beta) * np.cos(hour_angle)
+        + np.cos(declination) * np.sin(phi) * np.sin(beta) * np.cos(gamma) * np.cos(hour_angle)
+        + np.cos(declination) * np.sin(beta) * np.sin(gamma) * np.sin(hour_angle)
+    )
+    poa = (
+        dni * np.maximum(0.0, cos_aoi)
+        + dhi * (1.0 + np.cos(beta)) / 2.0
+        + ghi * albedo * (1.0 - np.cos(beta)) / 2.0
+    )
+    # Night (and the clamped near-horizon band) collect nothing.
+    return np.where(cos_zen > 0.0, np.maximum(0.0, poa), 0.0)
+
 
 @dataclass(frozen=True, slots=True)
 class PhaseProfile:
@@ -494,12 +597,42 @@ class DailyWeatherProfile:
 FIXED_H_AMB_W_M2_K = BASELINE_H_AMB_W_M2_K
 
 
-def profile_from_day_df(day_df: pd.DataFrame) -> DailyWeatherProfile:
+def profile_from_day_df(
+    day_df: pd.DataFrame,
+    *,
+    poa_tilt_deg: float | None = None,
+    poa_surface_azimuth_deg: float | None = None,
+    poa_albedo: float = POA_DEFAULT_ALBEDO,
+) -> DailyWeatherProfile:
     """Split one calendar day into absorption (night) + desorption (day), each running its
-    true real-time duration at PHASE_DT_S resolution rather than a fixed 12 h/12 h split."""
+    true real-time duration at PHASE_DT_S resolution rather than a fixed 12 h/12 h split.
+
+    ``poa_tilt_deg`` is opt-in (see the POA block above): when set, the profile's solar
+    series becomes plane-of-array irradiance on an aperture at that tilt instead of raw
+    GHI, so ``tilt_deg`` drives solar gain as well as gap natural convection. Requires the
+    ``latitude``/``longitude`` columns Open-Meteo responses already carry. The day/night
+    split itself stays keyed on GHI, so which samples land in which phase is unchanged.
+    """
     deltas = day_df.index.to_series().diff().dropna().dt.total_seconds()
     native_dt_s = float(deltas.median()) if len(deltas) else PHASE_DT_S
     solar = day_df.get("shortwave_radiation", pd.Series(0.0, index=day_df.index)).astype(float)
+    if poa_tilt_deg is not None:
+        if "latitude" not in day_df or "longitude" not in day_df:
+            raise ValueError(
+                "POA transposition needs 'latitude'/'longitude' columns on the weather "
+                "frame (Open-Meteo responses carry them; synthetic frames may not)."
+            )
+        day_df = day_df.assign(
+            poa_w_m2=plane_of_array_w_m2(
+                solar.to_numpy(),
+                day_df.index,
+                latitude_deg=float(day_df["latitude"].iloc[0]),
+                longitude_deg=float(day_df["longitude"].iloc[0]),
+                tilt_deg=float(poa_tilt_deg),
+                surface_azimuth_deg=poa_surface_azimuth_deg,
+                albedo=poa_albedo,
+            )
+        )
     night = day_df[solar < SOLAR_NIGHT_THRESHOLD_W_M2]
     day = day_df[solar >= SOLAR_NIGHT_THRESHOLD_W_M2]
     if len(night) < 4:
@@ -532,11 +665,14 @@ def _steps_for(n_rows: int, native_dt_s: float) -> int:
 def _resample_phase(df: pd.DataFrame, n: int = STEPS_PER_PHASE) -> PhaseProfile:
     if len(df) == 0:
         raise ValueError("Empty weather slice for phase profile.")
+    # "poa_w_m2" is present only when profile_from_day_df ran with POA enabled; it
+    # already carries the tilt/site geometry, so it supersedes raw GHI here.
+    solar_col = "poa_w_m2" if "poa_w_m2" in df else "shortwave_radiation"
     if len(df) >= n:
         idx = np.linspace(0, len(df) - 1, n).astype(int)
         rh = df["relative_humidity_2m"].astype(float).values[idx] / 100.0
         temp = df["temperature_2m"].astype(float).values[idx]
-        solar_src = df.get("shortwave_radiation", pd.Series(0.0, index=df.index))
+        solar_src = df.get(solar_col, pd.Series(0.0, index=df.index))
         solar = solar_src.astype(float).values[idx]
     else:
         # The day/night split can wrap midnight, so rows aren't contiguous in calendar
@@ -545,7 +681,7 @@ def _resample_phase(df: pd.DataFrame, n: int = STEPS_PER_PHASE) -> PhaseProfile:
         x_tgt = np.linspace(0, len(df) - 1, n)
         rh = np.interp(x_tgt, x_src, df["relative_humidity_2m"].astype(float).values) / 100.0
         temp = np.interp(x_tgt, x_src, df["temperature_2m"].astype(float).values)
-        solar_src = df.get("shortwave_radiation", pd.Series(0.0, index=df.index))
+        solar_src = df.get(solar_col, pd.Series(0.0, index=df.index))
         solar = np.interp(x_tgt, x_src, solar_src.astype(float).values)
     solar = np.maximum(0.0, solar)
     h_amb = (FIXED_H_AMB_W_M2_K,) * n  # ambient convection coefficient -- fixed, not wind-derived

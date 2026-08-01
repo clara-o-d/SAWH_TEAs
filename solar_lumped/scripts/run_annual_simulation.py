@@ -13,7 +13,6 @@ _SRC = _REPO / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
-from solar_lumped.physics import DEFAULT_MOF_NAME
 from solar_lumped.physics import TILT_DEG
 from solar_lumped.physics import get_salt
 from solar_lumped.simulation import (
@@ -27,8 +26,6 @@ from solar_lumped.weather import real_weather_days_from_df
 
 def build_device_config(
     *,
-    sorbent: str = "hydrogel",
-    mof: str = DEFAULT_MOF_NAME,
     salt: str = "LiCl",
     salt_loading: float = 4.0,
     hydrogel_thickness_mm: float = 4.0,
@@ -39,8 +36,6 @@ def build_device_config(
 ) -> DeviceConfig:
     get_salt(salt)
     return DeviceConfig(
-        sorbent=sorbent,  # type: ignore[arg-type]
-        mof_name=mof,
         salt_name=salt,
         salt_to_polymer_ratio=salt_loading,
         hydrogel_thickness_m=hydrogel_thickness_mm * 1e-3,
@@ -75,8 +70,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Write per-day diagnostics and water-inventory CSVs",
     )
     p.add_argument("--output", type=Path, default=None)
-    p.add_argument("--sorbent", choices=("hydrogel", "mof"), default="hydrogel")
-    p.add_argument("--mof", default=DEFAULT_MOF_NAME)
     p.add_argument("--salt", type=str, default="LiCl")
     p.add_argument("--salt-loading", type=float, default=4.0)
     p.add_argument("--hydrogel-thickness-mm", type=float, default=4.0)
@@ -93,8 +86,6 @@ def main(argv: list[str] | None = None) -> int:
     timeseries_dir = output.parent / output.stem / "timeseries"
 
     config = build_device_config(
-        sorbent=args.sorbent,
-        mof=args.mof,
         salt=args.salt,
         salt_loading=args.salt_loading,
         hydrogel_thickness_mm=args.hydrogel_thickness_mm,

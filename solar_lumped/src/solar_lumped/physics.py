@@ -1,5 +1,5 @@
 """Device physics: geometry/material constants, brine/salt thermodynamics, heat-transfer
-correlations, thermal balances, mass transfer, and sorbent (hydrogel/MOF) models."""
+correlations, thermal balances, mass transfer, and the PAM-salt hydrogel sorbent model."""
 
 from __future__ import annotations
 
@@ -311,7 +311,6 @@ def hollands_vapor_gap_h_conv_w_m2_k(
         f3 = max(0.0, (ra_cos / 5830.0) ** (1.0 / 3.0) - 1.0)
         nu = 1.0 + 1.44 * f1 * f2 + f3
     return nu * K_AIR_W_M_K / gap_m
-
 
 
 def wind_to_h_amb_w_m2_k(wind_speed_m_s: float, *, base: float = H_AMB_W_M2_K) -> float:
@@ -1341,207 +1340,11 @@ def m_des_kg_s_m2_from_dc_w(
     return -dc_w_dt_val * WATER_MOLAR_MASS_KG_MOL * h0_ref_m
 
 
-# --- MOF adsorbent isotherm and mass-transfer rates (tabulated MIL-100(Fe) @ 303 K) ---
-
-DEFAULT_MOF_NAME: str = "MIL-100_Fe"
-Q_MIN_KG_KG: float = 0.0
-Q_REGEN_KG_KG: float = 0.08
-
-
-@dataclass(frozen=True, slots=True)
-class MofProperties:
-    name: str
-    isotherm_file: str
-    q_max_kg_kg: float
-    h_ads_j_per_kg: float
-    h_des_j_per_kg: float
-    m_ads_kg_m2: float
-    g_conv_m_s: float
-    price_usd_per_kg: float
-
-
 def _materials_dir() -> Path:
     return Path(__file__).resolve().parent / "data" / "materials"
 
 
-@lru_cache(maxsize=8)
-def _load_isotherm(filename: str) -> tuple[np.ndarray, np.ndarray]:
-    """Load tabulated isotherm (RH fraction, q in kg water/kg MOF) from source columns
-    relative pressure (%) and H2O uptake (mol/kg), taking p/p0 as RH at 303 K."""
-    rh_pct, mol_per_kg = load_two_column_csv(_materials_dir() / filename)
-    return rh_pct / 100.0, mol_per_kg * WATER_MOLAR_MASS_KG_MOL
-
-
-@lru_cache(maxsize=1)
-def _load_mof_catalog() -> dict[str, MofProperties]:
-    df = pd.read_csv(_materials_dir() / "mof_catalog.csv")
-    out: dict[str, MofProperties] = {}
-    for _, row in df.iterrows():
-        name = str(row["mof"]).strip()
-        iso_file = str(row["isotherm_file"]).strip()
-        _, q_tab = _load_isotherm(iso_file)
-        out[name] = MofProperties(
-            name=name,
-            isotherm_file=iso_file,
-            q_max_kg_kg=float(np.max(q_tab)),
-            h_ads_j_per_kg=float(row["h_ads_j_per_kg"]),
-            h_des_j_per_kg=float(row["h_des_j_per_kg"]),
-            m_ads_kg_m2=float(row["m_ads_kg_m2"]),
-            g_conv_m_s=float(row["g_conv_m_s"]),
-            price_usd_per_kg=float(row["price_usd_per_kg"]),
-        )
-    return out
-
-
-def get_mof(name: str) -> MofProperties:
-    catalog = _load_mof_catalog()
-    if name not in catalog:
-        raise KeyError(f"Unknown MOF {name!r}; available: {sorted(catalog)}")
-    return catalog[name]
-
-
-def loading_at_rh(
-    rh_fraction: float,
-    *,
-    props: MofProperties,
-) -> float:
-    """Forward isotherm q(RH) from tabulated MIL-100(Fe) data at 303 K."""
-    rh_tab, q_tab = _load_isotherm(props.isotherm_file)
-    rh = max(0.0, min(1.0, float(rh_fraction)))
-    return float(np.interp(rh, rh_tab, q_tab))
-
-
-def water_activity_from_loading(
-    q_kg_kg: float,
-    *,
-    temperature_c: float,
-    props: MofProperties,
-) -> float:
-    """Invert tabulated q(RH): water activity (≈ RH) at equilibrium loading."""
-    del temperature_c  # isotherm measured at 303 K
-    q = max(0.0, min(props.q_max_kg_kg, float(q_kg_kg)))
-    if q <= 1e-12:
-        return 0.0
-    rh_tab, q_tab = _load_isotherm(props.isotherm_file)
-    if q >= float(q_tab[-1]) - 1e-12:
-        return float(rh_tab[-1])
-    if q <= float(q_tab[0]):
-        return float(rh_tab[0])
-    return float(np.interp(q, q_tab, rh_tab))
-
-
-def equilibrium_loading_at_rh(
-    rh: float,
-    *,
-    temperature_c: float,
-    props: MofProperties,
-) -> float:
-    del temperature_c  # isotherm measured at 303 K
-    return loading_at_rh(rh, props=props)
-
-
-def dq_dt(
-    q_kg_kg: float,
-    *,
-    t_gel_c: float,
-    driving: float,
-    props: MofProperties,
-    g_m_s: float,
-    phase: MassTransferPhase,
-) -> float:
-    """dq/dt (kg/kg/s) — Wilson Eq. 5 analog for a fixed MOF coating inventory."""
-    q = max(Q_MIN_KG_KG, min(props.q_max_kg_kg, float(q_kg_kg)))
-    aw = water_activity_from_loading(q, temperature_c=t_gel_c, props=props)
-    delta = driving - aw
-    if phase == "absorption":
-        if delta <= 0.0:
-            return 0.0
-    elif delta <= 0.0:
-        return 0.0
-
-    t_k = max(clamp_temperature_c(t_gel_c) + 273.15, 200.0)
-    p_sat = saturation_vapor_pressure_pa(t_gel_c)
-    rate_mol_m3_s = g_m_s * (p_sat / (GAS_CONSTANT_J_MOL_K * t_k)) * abs(delta)
-    dq = rate_mol_m3_s * WATER_MOLAR_MASS_KG_MOL / props.m_ads_kg_m2
-    if phase == "desorption":
-        dq = -dq
-        if q + dq < Q_MIN_KG_KG:
-            return max(dq, -q)
-        return dq
-
-    q_cap = props.q_max_kg_kg - q
-    if dq > q_cap:
-        return max(0.0, q_cap)
-    return dq if q < props.q_max_kg_kg else 0.0
-
-
-def m_flux_kg_s_m2_from_dq(dq_dt_val: float, *, m_ads_kg_m2: float) -> float:
-    """Mass flux (kg/m²/s) from loading rate on a fixed MOF inventory."""
-    if dq_dt_val >= 0.0:
-        return max(0.0, dq_dt_val * m_ads_kg_m2)
-    return max(0.0, -dq_dt_val * m_ads_kg_m2)
-
-
-def mof_mass_transfer_g_m_s(
-    *,
-    phase: MassTransferPhase,
-    props: MofProperties,
-    h_m: float,
-    t_gel_c: float,
-    t_cond_c: float | None = None,
-    vapor_gap_m: float,
-    tilt_deg: float,
-) -> float:
-    """Open-bed g_conv (absorption) or heat–mass analogy g (desorption)."""
-    if phase == "absorption":
-        return props.g_conv_m_s
-    if t_cond_c is None:
-        raise ValueError("t_cond_c required for MOF desorption mass transfer")
-    return mass_transfer_g_m_s(
-        phase="desorption",
-        params=_MofMassBridge(
-            g_conv_m_s=props.g_conv_m_s,
-            h0_ref_m=h_m,
-            vapor_gap_m=vapor_gap_m,
-            tilt_deg=tilt_deg,
-        ),
-        h_m=h_m,
-        t_gel_c=t_gel_c,
-        t_cond_c=t_cond_c,
-    )
-
-
-@dataclass(frozen=True, slots=True)
-class _MofMassBridge:
-    """Minimal MassTransferParams stand-in for vapor-gap g during MOF desorption."""
-
-    g_conv_m_s: float
-    h0_ref_m: float
-    vapor_gap_m: float
-    tilt_deg: float
-    c_s_mol_m3: float = 0.0
-    ions_per_formula: int = 1
-    rho_solution_kg_m3: float = 1000.0
-    salt_name: str = "MOF"
-    formula_weight_g_mol: float = 1.0
-    salt_to_polymer_ratio: float = 1.0
-
-
-SorbentKind = Literal["hydrogel", "mof"]
-
-
-# --- Unified sorbent interface: PAM-salt hydrogel (default) or MOF coating ---
-
-# PhaseResult.c_w stores mol/m³ for hydrogel or kg/kg loading for MOF.
-LOADING_MIN = Q_MIN_KG_KG
-
-
-def is_hydrogel(config: DeviceConfig) -> bool:
-    return config.sorbent == "hydrogel"
-
-
-def is_mof(config: DeviceConfig) -> bool:
-    return config.sorbent == "mof"
+# --- Sorbent interface: PAM-salt hydrogel; PhaseResult.c_w stores mol/m³. ---
 
 
 def evaluate_mass_rates(
@@ -1557,39 +1360,15 @@ def evaluate_mass_rates(
     vapor_gap_m: float,
 ) -> tuple[float, float, float]:
     """Return (dloading/dt, dH/dt, m_des_kg_s_m2)."""
-    if is_hydrogel(config):
-        if phase == "absorption":
-            c_r = concentration_ratio_absorption(rh)
-            dc = dc_w_dt(
-                loading,
-                t_gel_c=t_gel_c,
-                c_r=c_r,
-                params=mass,
-                h_m=h_m,
-                phase="absorption",
-            )
-            dh = dH_dt(
-                loading,
-                t_gel_c=t_gel_c,
-                c_r=c_r,
-                params=mass,
-                h_m=h_m,
-                phase="absorption",
-            )
-            if h_m <= mass.h0_ref_m + 1e-12:
-                dh = max(0.0, dh)
-            return dc, dh, 0.0
-
-        assert t_cond_c is not None
-        c_r = concentration_ratio_desorption(t_gel_c, t_cond_c)
+    if phase == "absorption":
+        c_r = concentration_ratio_absorption(rh)
         dc = dc_w_dt(
             loading,
             t_gel_c=t_gel_c,
             c_r=c_r,
             params=mass,
             h_m=h_m,
-            phase="desorption",
-            t_cond_c=t_cond_c,
+            phase="absorption",
         )
         dh = dH_dt(
             loading,
@@ -1597,86 +1376,61 @@ def evaluate_mass_rates(
             c_r=c_r,
             params=mass,
             h_m=h_m,
-            phase="desorption",
-            t_cond_c=t_cond_c,
+            phase="absorption",
         )
         if h_m <= mass.h0_ref_m + 1e-12:
-            dh = 0.0
-        if dc > 0.0:
-            dc = 0.0
-        if dh > 0.0:
-            dh = 0.0
-        m_des = m_des_kg_s_m2_from_dc_w(dc, h0_ref_m=mass.h0_ref_m)
-        return dc, dh, m_des
-
-    props: MofProperties = config.mof()
-    thermal = config.thermal_params()
-    if phase == "absorption":
-        g = mof_mass_transfer_g_m_s(
-            phase="absorption",
-            props=props,
-            h_m=h_m,
-            t_gel_c=t_gel_c,
-            vapor_gap_m=vapor_gap_m,
-            tilt_deg=thermal.tilt_deg,
-        )
-        dq = dq_dt(
-            loading,
-            t_gel_c=t_gel_c,
-            driving=rh,
-            props=props,
-            g_m_s=g,
-            phase="absorption",
-        )
-        return dq, 0.0, m_flux_kg_s_m2_from_dq(dq, m_ads_kg_m2=props.m_ads_kg_m2)
+            dh = max(0.0, dh)
+        return dc, dh, 0.0
 
     assert t_cond_c is not None
-    g = mof_mass_transfer_g_m_s(
-        phase="desorption",
-        props=props,
-        h_m=h_m,
-        t_gel_c=t_gel_c,
-        t_cond_c=t_cond_c,
-        vapor_gap_m=vapor_gap_m,
-        tilt_deg=thermal.tilt_deg,
-    )
     c_r = concentration_ratio_desorption(t_gel_c, t_cond_c)
-    dq = dq_dt(
+    dc = dc_w_dt(
         loading,
         t_gel_c=t_gel_c,
-        driving=c_r,
-        props=props,
-        g_m_s=g,
+        c_r=c_r,
+        params=mass,
+        h_m=h_m,
         phase="desorption",
+        t_cond_c=t_cond_c,
     )
-    if dq > 0.0:
-        dq = 0.0
-    m_des = m_flux_kg_s_m2_from_dq(dq, m_ads_kg_m2=props.m_ads_kg_m2)
-    return dq, 0.0, m_des
+    dh = dH_dt(
+        loading,
+        t_gel_c=t_gel_c,
+        c_r=c_r,
+        params=mass,
+        h_m=h_m,
+        phase="desorption",
+        t_cond_c=t_cond_c,
+    )
+    if h_m <= mass.h0_ref_m + 1e-12:
+        dh = 0.0
+    if dc > 0.0:
+        dc = 0.0
+    if dh > 0.0:
+        dh = 0.0
+    m_des = m_des_kg_s_m2_from_dc_w(dc, h0_ref_m=mass.h0_ref_m)
+    return dc, dh, m_des
 
 
 def inventory_label(config: DeviceConfig) -> str:
-    return "gel" if is_hydrogel(config) else "mof"
+    return "gel"
 
 
 def inventory_ylabel(config: DeviceConfig) -> str:
-    return "Water in gel (L/m²)" if is_hydrogel(config) else "Water in MOF (L/m²)"
+    return "Water in gel (L/m²)"
 
 
 def inventory_prefix(config: DeviceConfig) -> str:
-    return "water_in_gel" if is_hydrogel(config) else "water_in_mof"
+    return "water_in_gel"
 
 
 def initial_loading(config: DeviceConfig) -> float:
-    if is_hydrogel(config):
-        return fabrication_c_w_initial(
-            salt_name=config.salt_name,
-            salt_to_polymer_ratio=config.salt_to_polymer_ratio,
-            hydrogel_thickness_m=config.hydrogel_thickness_m,
-            hydrogel_density_kg_m3=config.hydrogel_density_kg_m3,
-        )
-    # Initial MOF loading after fabrication at ~20% RH ambient.
-    return equilibrium_loading_at_rh(FABRICATION_EQUILIBRIUM_RH, temperature_c=25.0, props=config.mof())
+    return fabrication_c_w_initial(
+        salt_name=config.salt_name,
+        salt_to_polymer_ratio=config.salt_to_polymer_ratio,
+        hydrogel_thickness_m=config.hydrogel_thickness_m,
+        hydrogel_density_kg_m3=config.hydrogel_density_kg_m3,
+    )
 
 
 def water_in_gel_l_m2(
@@ -1700,20 +1454,10 @@ def c_w_from_water_in_gel_l_m2(water_l_m2: float, h_m: float) -> float:
     return max(0.0, water_l_m2) / (h_m * WATER_MOLAR_MASS_KG_MOL)
 
 
-def water_in_sorbent_l_m2(
-    loading: float,
-    h_m: float,
-    *,
-    config: DeviceConfig,
-) -> float:
-    if is_hydrogel(config):
-        return water_in_gel_l_m2(loading, h_m, h0_ref_m=config.hydrogel_thickness_m)
-    return loading * config.mof().m_ads_kg_m2
+def water_in_sorbent_l_m2(loading: float, h_m: float, *, config: DeviceConfig) -> float:
+    return water_in_gel_l_m2(loading, h_m, h0_ref_m=config.hydrogel_thickness_m)
 
 
 def clip_loading(loading: float, *, config: DeviceConfig) -> float:
-    if is_hydrogel(config):
-        return max(C_W_MIN_MOL_M3, min(C_W_MAX_MOL_M3, loading))
-    props = config.mof()
-    return max(Q_MIN_KG_KG, min(props.q_max_kg_kg, loading))
+    return max(C_W_MIN_MOL_M3, min(C_W_MAX_MOL_M3, loading))
 

@@ -1,6 +1,6 @@
 """Device physics for the two-bed waste-heat SAWH with direct waste-heat coupling (no HTF
-loop): heat-transfer correlations, device defaults, brine/salt thermodynamics, MOF
-isotherms, contactor/condenser energy balances, mass transfer, and the sorbent interface."""
+loop): heat-transfer correlations, device defaults, brine/salt thermodynamics,
+contactor/condenser energy balances, mass transfer, and the hydrogel sorbent model."""
 
 from __future__ import annotations
 
@@ -127,8 +127,6 @@ RH_AMB: float = 0.45
 H_AMB_W_M2_K: float = 10.0
 
 # Sorbent defaults
-DEFAULT_SORBENT: str = "hydrogel"
-DEFAULT_MOF_NAME: str = "MIL-100_Fe"
 DEFAULT_SALT_NAME: str = "LiCl"
 SALT_TO_POLYMER_RATIO: float = 4.0
 H0_M: float = 0.004
@@ -139,10 +137,7 @@ TILT_DEG: float = 30.0
 HYDROGEL_MAX_DEPLETION_S: float = 600.0
 C_W_MIN_HYDROGEL: float = 100.0
 
-# MOF placeholder
-Q_MIN_KG_KG: float = 0.0
 Q_MAX_KG_KG: float = 0.53  # MIL-100(Fe) tabulated maximum @ ~99 % RH
-Q_REGEN_KG_KG: float = 0.08
 WATER_MOLAR_MASS_KG_MOL: float = 0.018015
 GAS_CONSTANT_J_MOL_K: float = 8.314462618
 C_W_MAX_MOL_M3: float = 400000.0
@@ -438,123 +433,10 @@ def equilibrium_c_w_from_dvs_at_rh(
     h = max(h_m, h0_ref_m * 0.25)
     c_w = mass_water_kg_m2 / (h * WATER_MOLAR_MASS_KG_MOL)
     return max(C_W_MIN_MOL_M3, min(C_W_MAX_MOL_M3, c_w))
-@dataclass(frozen=True, slots=True)
-class MofProperties:
-    name: str
-    isotherm_file: str
-    q_max_kg_kg: float
-    h_ads_j_per_kg: float
-    h_des_j_per_kg: float
-    m_ads_kg_m2: float
-    g_conv_m_s: float
-    price_usd_per_kg: float
 
 
 def _materials_dir() -> Path:
     return Path(__file__).resolve().parent / "data" / "materials"
-
-
-@lru_cache(maxsize=8)
-def _load_isotherm(filename: str) -> tuple[np.ndarray, np.ndarray]:
-    """Load tabulated isotherm (RH fraction, q in kg water/kg MOF) from source columns
-    relative pressure (%) and H2O uptake (mol/kg), taking p/p0 as RH at 303 K."""
-    path = _materials_dir() / filename
-    rh_pct: list[float] = []
-    mol_per_kg: list[float] = []
-    with path.open() as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            parts = [p.strip() for p in line.split(",")]
-            rh_pct.append(float(parts[0]))
-            mol_per_kg.append(float(parts[1]))
-    if not rh_pct:
-        raise ValueError(f"No isotherm data in {path}")
-    order = np.argsort(rh_pct)
-    rh_frac = np.array(rh_pct, dtype=float)[order] / 100.0
-    q_kg_kg = np.array(mol_per_kg, dtype=float)[order] * WATER_MOLAR_MASS_KG_MOL
-    return rh_frac, q_kg_kg
-
-
-@lru_cache(maxsize=1)
-def _load_mof_catalog() -> dict[str, MofProperties]:
-    df = pd.read_csv(_materials_dir() / "mof_catalog.csv")
-    out: dict[str, MofProperties] = {}
-    for _, row in df.iterrows():
-        name = str(row["mof"]).strip()
-        iso_file = str(row["isotherm_file"]).strip()
-        _, q_tab = _load_isotherm(iso_file)
-        out[name] = MofProperties(
-            name=name,
-            isotherm_file=iso_file,
-            q_max_kg_kg=float(np.max(q_tab)),
-            h_ads_j_per_kg=float(row["h_ads_j_per_kg"]),
-            h_des_j_per_kg=float(row["h_des_j_per_kg"]),
-            m_ads_kg_m2=float(row["m_ads_kg_m2"]),
-            g_conv_m_s=float(row["g_conv_m_s"]),
-            price_usd_per_kg=float(row["price_usd_per_kg"]),
-        )
-    return out
-
-
-def get_mof(name: str) -> MofProperties:
-    catalog = _load_mof_catalog()
-    if name not in catalog:
-        raise KeyError(f"Unknown MOF {name!r}; available: {sorted(catalog)}")
-    return catalog[name]
-
-
-def water_activity_from_loading(
-    q_kg_kg: float,
-    *,
-    temperature_c: float,
-    props: MofProperties,
-) -> float:
-    """Invert tabulated q(RH): water activity (≈ RH) at equilibrium loading."""
-    del temperature_c  # isotherm measured at 303 K
-    q = max(0.0, min(props.q_max_kg_kg, float(q_kg_kg)))
-    if q <= 1e-12:
-        return 0.0
-    rh_tab, q_tab = _load_isotherm(props.isotherm_file)
-    if q >= float(q_tab[-1]) - 1e-12:
-        return float(rh_tab[-1])
-    if q <= float(q_tab[0]):
-        return float(rh_tab[0])
-    return float(np.interp(q, q_tab, rh_tab))
-
-
-def equilibrium_loading_at_rh(
-    rh: float,
-    *,
-    temperature_c: float,
-    props: MofProperties,
-) -> float:
-    """Forward isotherm q(RH) from tabulated MIL-100(Fe) data at 303 K."""
-    del temperature_c  # isotherm measured at 303 K
-    rh_tab, q_tab = _load_isotherm(props.isotherm_file)
-    rh_clamped = max(0.0, min(1.0, float(rh)))
-    return float(np.interp(rh_clamped, rh_tab, q_tab))
-
-
-def m_ads_kg_s_m2(
-    q_kg_kg: float,
-    *,
-    temperature_c: float,
-    rh_amb: float,
-    props: MofProperties,
-) -> float:
-    """Adsorption mass flux (kg/m²/s) — Wilson Eq. 5 analog (open bed)."""
-    t_c = clamp_temperature_c(temperature_c)
-    t_k = max(t_c + 273.15, 200.0)
-    p_sat = saturation_vapor_pressure_pa(t_c)
-    aw_eq = water_activity_from_loading(q_kg_kg, temperature_c=t_c, props=props)
-    driving = rh_amb - aw_eq
-    if driving <= 0.0:
-        return 0.0
-    rate_mol_m3_s = props.g_conv_m_s * (p_sat / (GAS_CONSTANT_J_MOL_K * t_k)) * driving
-    dq_dt = rate_mol_m3_s * WATER_MOLAR_MASS_KG_MOL / props.m_ads_kg_m2
-    return max(0.0, dq_dt * props.m_ads_kg_m2)
 
 
 def m_des_kg_s_m2(
@@ -578,26 +460,6 @@ def m_des_kg_s_m2(
     return raw
 
 
-def dq_dt_adsorption(
-    q_kg_kg: float,
-    *,
-    temperature_c: float,
-    rh_amb: float,
-    props: MofProperties,
-) -> float:
-    """d q / dt (kg/kg/s) on adsorbing contactor."""
-    m_ads = m_ads_kg_s_m2(q_kg_kg, temperature_c=temperature_c, rh_amb=rh_amb, props=props)
-    if props.m_ads_kg_m2 <= 0.0:
-        return 0.0
-    dq = m_ads / props.m_ads_kg_m2
-    q_cap = props.q_max_kg_kg - q_kg_kg
-    if dq > 0.0 and dq * 1.0 > q_cap:
-        return max(0.0, q_cap)
-    return dq if q_kg_kg < props.q_max_kg_kg else 0.0
-
-
-def water_kg_m2(q_kg_kg: float, *, props: MofProperties) -> float:
-    return q_kg_kg * props.m_ads_kg_m2
 @dataclass(frozen=True, slots=True)
 class ThermalEnvironment:
     t_amb_c: float
@@ -918,9 +780,7 @@ def m_des_kg_s_m2_from_state(
     flux = -WATER_MOLAR_MASS_KG_MOL * (dc_w_dt_val * h_m + c_w * dH_dt_val)
     return max(0.0, flux)
 
-# --- Unified sorbent interface: LiCl hydrogel (default) or MOF placeholder ---
-
-SorbentKind = Literal["hydrogel", "mof"]
+# --- Sorbent interface: LiCl hydrogel ---
 
 
 @dataclass(frozen=True, slots=True)
@@ -939,36 +799,28 @@ class SorbentMassRates:
     m_des_kg_s_m2: float
 
 
-def is_hydrogel(config: DeviceConfig) -> bool:
-    return config.sorbent == "hydrogel"
-
-
 def mass_state_size(config: DeviceConfig) -> int:
-    return 4 if is_hydrogel(config) else 2
+    return 4
 
 
 def inventory_label(config: DeviceConfig) -> str:
-    return "gel" if is_hydrogel(config) else "mof"
+    return "gel"
 
 
 def inventory_column(config: DeviceConfig) -> str:
-    return "water_in_gel_l_m2" if is_hydrogel(config) else "water_in_mof_l_m2"
+    return "water_in_gel_l_m2"
 
 
 def inventory_ylabel(config: DeviceConfig) -> str:
-    return "Water in gel (L/m²)" if is_hydrogel(config) else "Water in MOF (L/m²)"
+    return "Water in gel (L/m²)"
 
 
 def h_ads_j_per_kg(config: DeviceConfig) -> float:
-    if is_hydrogel(config):
-        return get_salt(config.salt_name).h_des_j_per_kg
-    return config.mof().h_ads_j_per_kg
+    return get_salt(config.salt_name).h_des_j_per_kg
 
 
 def h_des_j_per_kg(config: DeviceConfig) -> float:
-    if is_hydrogel(config):
-        return get_salt(config.salt_name).h_des_j_per_kg
-    return config.mof().h_des_j_per_kg
+    return get_salt(config.salt_name).h_des_j_per_kg
 
 
 def mass_transfer_params(config: DeviceConfig) -> MassTransferParams:
@@ -992,10 +844,8 @@ def mass_transfer_params(config: DeviceConfig) -> MassTransferParams:
 
 
 def water_kg_m2_bed(loading: float, *, config: DeviceConfig, h_m: float | None = None) -> float:
-    if is_hydrogel(config):
-        h = h_m if h_m is not None else config.hydrogel_thickness_m
-        return WATER_MOLAR_MASS_KG_MOL * loading * h
-    return water_kg_m2(loading, props=config.mof())
+    h = h_m if h_m is not None else config.hydrogel_thickness_m
+    return WATER_MOLAR_MASS_KG_MOL * loading * h
 
 
 def water_in_gel_l_m2(
@@ -1010,22 +860,10 @@ def water_in_gel_l_m2(
 
 
 def initial_bed_states(config: DeviceConfig) -> tuple[BedState, BedState]:
-    if is_hydrogel(config):
-        h0 = config.hydrogel_thickness_m
-        c_ads = equilibrium_c_w_from_dvs_at_rh(
-            RH_AMB * 0.65,
-            h_m=h0,
-            h0_ref_m=h0,
-        )
-        c_regen = equilibrium_c_w_from_dvs_at_rh(
-            FABRICATION_EQUILIBRIUM_RH,
-            h_m=h0,
-            h0_ref_m=h0,
-        )
-        return BedState(c_ads, h0), BedState(c_regen, h0)
-    props = config.mof()
-    q_ads = equilibrium_loading_at_rh(RH_AMB * 0.65, temperature_c=T_AMB_C, props=props)
-    return BedState(q_ads), BedState(Q_REGEN_KG_KG)
+    h0 = config.hydrogel_thickness_m
+    c_ads = equilibrium_c_w_from_dvs_at_rh(RH_AMB * 0.65, h_m=h0, h0_ref_m=h0)
+    c_regen = equilibrium_c_w_from_dvs_at_rh(FABRICATION_EQUILIBRIUM_RH, h_m=h0, h0_ref_m=h0)
+    return BedState(c_ads, h0), BedState(c_regen, h0)
 
 
 def _hydrogel_adsorption_rates(
@@ -1104,33 +942,6 @@ def _hydrogel_desorption_rates(
     return dc_w, dh, m_vac
 
 
-def _mof_mass_rates(
-    q_a: float,
-    q_d: float,
-    *,
-    t_a: float,
-    t_d: float,
-    t_cond_c: float,
-    rh: float,
-    c_vac: float,
-    props: MofProperties,
-) -> tuple[float, float, float, float]:
-    m_ads = m_ads_kg_s_m2(q_a, temperature_c=t_a, rh_amb=rh, props=props)
-    dq_a = dq_dt_adsorption(q_a, temperature_c=t_a, rh_amb=rh, props=props)
-    m_des = m_des_kg_s_m2(
-        temperature_c=t_d,
-        t_cond_c=t_cond_c,
-        c_vac_kg_s_pa_m2=c_vac,
-        q_kg_kg=q_d,
-        m_ads_kg_m2=props.m_ads_kg_m2,
-    )
-    # d q / dt (kg/kg/s) on desorbing contactor (negative when desorbing).
-    dq_d = 0.0 if props.m_ads_kg_m2 <= 0.0 else -m_des / props.m_ads_kg_m2
-    if q_d + dq_d < Q_MIN_KG_KG:
-        dq_d = max(dq_d, -q_d)
-    return dq_a, dq_d, m_ads, m_des
-
-
 def mass_rates(
     *,
     loading_a: float,
@@ -1145,34 +956,20 @@ def mass_rates(
     config: DeviceConfig,
     equalize: bool = True,
 ) -> SorbentMassRates:
-    if is_hydrogel(config):
-        params = mass_transfer_params(config)
-        h_min = config.hydrogel_thickness_m
-        dc_a, dh_a, m_ads = _hydrogel_adsorption_rates(
-            loading_a, max(h_a, h_min), t_c=t_a_c, rh=rh_amb, params=params, h_min=h_min
-        )
-        dc_d, dh_d, m_des = _hydrogel_desorption_rates(
-            loading_d,
-            max(h_d, h_min),
-            t_c=t_d_c,
-            t_cond_c=t_cond_c,
-            c_vac=c_vac_kg_s_pa_m2,
-            params=params,
-        )
-        rates = SorbentMassRates(dc_a, dc_d, dh_a, dh_d, m_ads, m_des)
-    else:
-        props = config.mof()
-        dq_a, dq_d, m_ads, m_des = _mof_mass_rates(
-            loading_a,
-            loading_d,
-            t_a=t_a_c,
-            t_d=t_d_c,
-            t_cond_c=t_cond_c,
-            rh=rh_amb,
-            c_vac=c_vac_kg_s_pa_m2,
-            props=props,
-        )
-        rates = SorbentMassRates(dq_a, dq_d, 0.0, 0.0, m_ads, m_des)
+    params = mass_transfer_params(config)
+    h_min = config.hydrogel_thickness_m
+    dc_a, dh_a, m_ads = _hydrogel_adsorption_rates(
+        loading_a, max(h_a, h_min), t_c=t_a_c, rh=rh_amb, params=params, h_min=h_min
+    )
+    dc_d, dh_d, m_des = _hydrogel_desorption_rates(
+        loading_d,
+        max(h_d, h_min),
+        t_c=t_d_c,
+        t_cond_c=t_cond_c,
+        c_vac=c_vac_kg_s_pa_m2,
+        params=params,
+    )
+    rates = SorbentMassRates(dc_a, dc_d, dh_a, dh_d, m_ads, m_des)
 
     if not equalize:
         return rates
@@ -1183,20 +980,11 @@ def mass_rates(
         return SorbentMassRates(0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
     s_ads = m_eq / rates.m_ads_kg_s_m2 if rates.m_ads_kg_s_m2 > 1e-14 else 0.0
     s_des = m_eq / rates.m_des_kg_s_m2 if rates.m_des_kg_s_m2 > 1e-14 else 0.0
-    if is_hydrogel(config):
-        return SorbentMassRates(
-            rates.d_loading_a * s_ads,
-            rates.d_loading_d * s_des,
-            rates.d_h_a * s_ads,
-            rates.d_h_d * s_des,
-            m_eq,
-            m_eq,
-        )
     return SorbentMassRates(
         rates.d_loading_a * s_ads,
         rates.d_loading_d * s_des,
-        0.0,
-        0.0,
+        rates.d_h_a * s_ads,
+        rates.d_h_d * s_des,
         m_eq,
         m_eq,
     )

@@ -9,11 +9,7 @@ import numpy as np
 import pytest
 
 from waste_heat.physics import (
-    dq_dt_adsorption,
-    equilibrium_loading_at_rh,
-    get_mof,
     m_des_kg_s_m2,
-    water_activity_from_loading,
 )
 from waste_heat.physics import hx_effectiveness_q
 from waste_heat.physics import dc_w_dt, concentration_ratio_absorption, rh_outside_desorber
@@ -26,7 +22,7 @@ from waste_heat.simulation import (
     write_detailed_csv,
 )
 from waste_heat.simulation import DeviceConfig
-from waste_heat.simulation import HalfCycleResult, run_cycle, run_daily_operation, swap_roles
+from waste_heat.simulation import run_cycle, run_daily_operation
 from waste_heat.simulation import water_inventory_series
 from waste_heat.weather import datacenter_baseline_profile
 
@@ -37,17 +33,8 @@ def config_hydrogel() -> DeviceConfig:
 
 
 @pytest.fixture
-def config_mof() -> DeviceConfig:
-    return DeviceConfig.mof_baseline()
-
-
-@pytest.fixture
 def profile(config_hydrogel: DeviceConfig):
     return datacenter_baseline_profile(tau_half_s=config_hydrogel.tau_half_s)
-
-
-def test_default_sorbent_is_hydrogel():
-    assert DeviceConfig().sorbent == "hydrogel"
 
 
 def test_half_cycle_ends_at_rh_threshold(config_hydrogel: DeviceConfig, profile):
@@ -136,19 +123,6 @@ def test_hydrogel_isotherm_inverts(config_hydrogel: DeviceConfig):
     assert aw <= rh + 0.05
 
 
-def test_mof_isotherm_monotone(config_mof: DeviceConfig):
-    props = config_mof.mof()
-    aw_lo = water_activity_from_loading(0.05, temperature_c=30.0, props=props)
-    aw_hi = water_activity_from_loading(0.25, temperature_c=30.0, props=props)
-    assert aw_hi > aw_lo
-
-
-def test_mof_adsorption_increases_q(config_mof: DeviceConfig):
-    props = config_mof.mof()
-    dq = dq_dt_adsorption(0.05, temperature_c=T_AMB_C, rh_amb=RH_AMB, props=props)
-    assert dq > 0.0
-
-
 def test_vacuum_desorption_flux():
     m1 = m_des_kg_s_m2(temperature_c=50.0, t_cond_c=30.0, c_vac_kg_s_pa_m2=1e-8)
     m2 = m_des_kg_s_m2(temperature_c=50.0, t_cond_c=30.0, c_vac_kg_s_pa_m2=2e-8)
@@ -166,47 +140,6 @@ def test_hx_effectiveness_limits():
     assert abs(q_low - 1.0 * dt) < 0.01 * abs(1.0 * dt)
     q_high = hx_effectiveness_q(1e6, ua, dt)
     assert abs(q_high - ua * dt) / (ua * dt) < 1e-3
-
-
-def test_mof_cycle_runs(config_mof: DeviceConfig, profile):
-    cyc = run_cycle(profile, config_mof)
-    assert cyc.water_collected_kg_m2 >= 0.0
-
-
-def test_mof_mass_balance_half_cycle(config_mof: DeviceConfig, profile):
-    cyc = run_cycle(profile, config_mof)
-    ha = cyc.half_a
-    imb = abs(ha.integral_ads_kg_m2 - ha.integral_des_kg_m2)
-    mean_m = 0.5 * (ha.integral_ads_kg_m2 + ha.integral_des_kg_m2)
-    assert mean_m > 1e-8
-    assert imb / mean_m < 0.25
-
-
-def test_role_swap_conserves_state_mof(config_mof: DeviceConfig):
-    res = HalfCycleResult(
-        time_s=np.array([0.0, 1.0]),
-        q_a=np.array([0.2, 0.25]),
-        q_d=np.array([0.1, 0.05]),
-        t_a_c=np.array([30.0, 31.0]),
-        t_d_c=np.array([35.0, 36.0]),
-        t_cond_c=np.array([28.0, 29.0]),
-        m_ads_kg_s_m2=np.array([1e-5, 1e-5]),
-        m_des_kg_s_m2=np.array([1e-5, 1e-5]),
-        water_collected_kg_m2=0.0,
-        integral_ads_kg_m2=0.0,
-        integral_des_kg_m2=0.0,
-    )
-    la, ld, ha, hd, ta, td, tc = swap_roles(res, config_mof)
-    assert la == pytest.approx(0.05)
-    assert ld == pytest.approx(0.25)
-    assert ha is None
-    assert hd is None
-
-
-def test_equilibrium_loading_at_rh(config_mof: DeviceConfig):
-    props = get_mof(config_mof.mof_name)
-    q = equilibrium_loading_at_rh(0.5, temperature_c=30.0, props=props)
-    assert 0.0 < q < props.q_max_kg_kg
 
 
 def test_detailed_series_single_cycle(config_hydrogel: DeviceConfig, profile, tmp_path: Path):
