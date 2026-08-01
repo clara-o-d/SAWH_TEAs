@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""Elasticity tornado table + PNG from a cycle-model parameter-sweep CSV.
+"""Elasticity tornado table + PNG from the waste-heat parameter-sweep CSV.
 
-Usage: python tornado_plot_cycle.py --model {cycle_lumped,cycle_lumped_no_loop}
+Usage: python tornado_plot_waste_heat.py
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 from matplotlib.patches import Patch
 
-_WASTE_HEAT = Path(__file__).resolve().parent.parent.parent / "waste-heat"
+_REPO = Path(__file__).resolve().parent.parent.parent / "waste-heat"
 
 _EXCLUDED_PARAMS = frozenset({"humidity_high", "relative_humidity"})
 _FAIL_LCO_THRESHOLD = 1e20
@@ -36,16 +36,14 @@ _METRICS_WITH_OUTLIER_CAP = frozenset({"lcow_usd_per_m3"})
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", choices=["cycle_lumped", "cycle_lumped_no_loop"], default="cycle_lumped")
     ap.add_argument("--input", type=Path, default=None)
     ap.add_argument("--output", type=Path, default=None)
     ap.add_argument("--table-csv", type=Path, default=None)
     ap.add_argument("--metric", default="lcow_usd_per_m3")
     args = ap.parse_args()
 
-    repo = _WASTE_HEAT / args.model
-    inp = args.input or repo / "parameter_sweeps" / "parameter_sweep.csv"
-    out_png = args.output or repo / "tornado_plots" / "tornado_plot.png"
+    inp = args.input or _REPO / "parameter_sweeps" / "parameter_sweep.csv"
+    out_png = args.output or _REPO / "tornado_plots" / "tornado_plot.png"
     if not inp.exists():
         sys.exit(f"Missing {inp}; run parameter_sweep.py first.")
 

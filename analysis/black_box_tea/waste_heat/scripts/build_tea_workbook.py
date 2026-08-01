@@ -11,7 +11,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 _REPO = Path(__file__).resolve().parent.parent
 _TEA_ROOT = _REPO.parent
-_LUMPED_SRC = _TEA_ROOT.parent.parent / "waste-heat" / "cycle_lumped" / "src"
+_LUMPED_SRC = _TEA_ROOT.parent.parent / "waste-heat" / "src"
 if str(_TEA_ROOT) not in sys.path:
     sys.path.insert(0, str(_TEA_ROOT))
 if str(_LUMPED_SRC) not in sys.path:
@@ -19,14 +19,14 @@ if str(_LUMPED_SRC) not in sys.path:
 
 from tea_workbook_lib import compute_tea_metrics  # noqa: E402
 
-from waste_heat_cycle_lumped.economics import PATENT_BOM_USD_PER_M2 as BOM  # noqa: E402
-from waste_heat_cycle_lumped.economics import default_electrical_loads  # noqa: E402
-from waste_heat_cycle_lumped.economics import _load_economic_data  # noqa: E402
-from waste_heat_cycle_lumped.physics import DRY_COMPOSITE_DENSITY_KG_M3  # noqa: E402
-from waste_heat_cycle_lumped.physics import get_salt_price_usd_per_kg  # noqa: E402
-from waste_heat_cycle_lumped.simulation import DeviceConfig  # noqa: E402
-from waste_heat_cycle_lumped.simulation import run_daily_operation  # noqa: E402
-from waste_heat_cycle_lumped.weather import datacenter_baseline_profile  # noqa: E402
+from waste_heat.economics import PATENT_BOM_USD_PER_M2 as BOM  # noqa: E402
+from waste_heat.economics import default_electrical_loads  # noqa: E402
+from waste_heat.economics import _load_economic_data  # noqa: E402
+from waste_heat.physics import DRY_COMPOSITE_DENSITY_KG_M3  # noqa: E402
+from waste_heat.physics import get_salt_price_usd_per_kg  # noqa: E402
+from waste_heat.simulation import DeviceConfig  # noqa: E402
+from waste_heat.simulation import run_daily_operation  # noqa: E402
+from waste_heat.weather import datacenter_baseline_profile  # noqa: E402
 
 OUT = _REPO / "waste_heat_sawh_tea.xlsx"
 DEFAULT_SALT = "LiCl"
@@ -66,7 +66,7 @@ def _defaults() -> dict[str, float | str]:
         "hydrogel_thickness_m": float(scalars["hydrogel_thickness_m"]),
         "salt_price_usd_per_kg": get_salt_price_usd_per_kg(DEFAULT_SALT),
         # DVS dry-basis density, not the raw (wet, 20% RH) CSV value -- see
-        # waste_heat_cycle_lumped/physics.py::DRY_COMPOSITE_DENSITY_KG_M3.
+        # waste_heat/physics.py::DRY_COMPOSITE_DENSITY_KG_M3.
         "hydrogel_density_kg_m3": float(DRY_COMPOSITE_DENSITY_KG_M3),
         "hydrogel_lifetime_years": float(scalars["hydrogel_lifetime_years"]),
         "c_acrylamide_usd_per_kg": float(scalars["c_acrylamide_usd_per_kg"]),

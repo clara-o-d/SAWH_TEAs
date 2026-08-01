@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""One-at-a-time tornado sensitivity plot from a parameter-sweep CSV.
+"""One-at-a-time tornado sensitivity plot from solar_lumped's parameter-sweep CSV.
 
-Usage: python tornado_plot_oat.py --model {solar,waste_heat_lumped} [--metric ...]
+Usage: python tornado_plot_oat.py [--metric ...]
 """
 
 from __future__ import annotations
 
 import argparse
 import sys
-from dataclasses import dataclass, field
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -44,71 +43,35 @@ _METRIC_LABELS: dict[str, str] = {
 }
 
 
-@dataclass(frozen=True)
-class Model:
-    repo: Path
-    param_labels: dict[str, str]
-    excluded: frozenset[str] = frozenset()
-    # figsize=None scales height with bar count; font sizes are the >12-bar-shrink baseline.
-    figsize: tuple[float, float] | None = None
-    fonts: dict[str, float] = field(default_factory=lambda: {"label": 14, "title": 18, "xlabel": 13, "tick": 12})
+_EXCLUDED_PARAMS = frozenset({"humidity_high", "relative_humidity", "swept_param"})
 
-
-MODELS: dict[str, Model] = {
-    "solar": Model(
-        repo=_ROOT / "solar_lumped",
-        excluded=frozenset({"humidity_high", "relative_humidity", "swept_param"}),
-        param_labels={
-            "h_des_j_per_kg": "h_des\n(J/kg)",
-            "salt_weight_factor": "Salt weight\nfactor",
-            "hydrogel_lifetime_years": "Hydrogel lifetime\n(yr)",
-            "hydrogel_thickness_mm": "Hydrogel thickness\n(mm)",
-            "vapor_gap_mm": "Vapor gap\n(mm)",
-            "humidity_high": "Uptake RH",
-            "solar_irradiance_w_per_m2": "Solar GHI\n(W/m²)",
-            "h_amb_w_m2_k": "h_amb\n(W/m²K)",
-            "discount_rate": "Discount rate",
-            "device_lifetime_years": "Device lifetime\n(yr)",
-            "utilization_factor": "Utilization\nfactor",
-            "water_price_usd_per_m3": "Water price\n(USD/m³)",
-            "salt_to_polymer_ratio": "Salt:polymer\nratio (S/L)",
-            "c_acrylamide_usd_per_kg": "Acrylamide price\n(USD/kg)",
-            "c_additives_usd_per_kg_composite": "Additives price\n(USD/kg composite)",
-            "insulation_gap_mm": "Insulation gap\n(mm)",
-            "fin_area_ratio": "Condenser fin\narea ratio",
-            "tilt_deg": "Tilt angle\n(deg)",
-            "temperature_c": "Ambient temperature\n(°C)",
-            "total_investment_factor": "Total investment\nfactor",
-            "maintenance_cost_fraction": "Maintenance cost\n(frac CAPEX/yr)",
-        },
-    ),
-    "waste_heat_lumped": Model(
-        repo=_ROOT / "waste-heat" / "lumped",
-        figsize=(6.0, 6.0),
-        fonts={"label": 16, "title": 20, "xlabel": 18, "tick": 16},
-        param_labels={
-            "hydrogel_thickness_mm": "Hydrogel thickness\n(mm)",
-            "salt_weight_factor": "Salt weight\nfactor",
-            "hydrogel_lifetime_years": "Hydrogel lifetime\n(yr)",
-            "t_f_c": "Loop fluid setpoint\n(°C)",
-            "m_dot_f_kg_s_m2": "Loop flow\n(kg/s/m²)",
-            "ua_gel_w_k": "Loop→gel UA\n(W/K/m²)",
-            "vapor_gap_mm": "Vapor gap\n(mm)",
-            "t_amb_c": "Ambient temperature\n(°C)",
-            "relative_humidity": "Ambient RH",
-            "h_amb_w_m2_k": "h_amb\n(W/m²K)",
-            "discount_rate": "Discount rate",
-            "device_lifetime_years": "Device lifetime\n(yr)",
-            "utilization_factor": "Utilization\nfactor",
-            "water_price_usd_per_m3": "Water price\n(USD/m³)",
-        },
-    ),
+_PARAM_LABELS: dict[str, str] = {
+    "h_des_j_per_kg": "h_des\n(J/kg)",
+    "salt_weight_factor": "Salt weight\nfactor",
+    "hydrogel_lifetime_years": "Hydrogel lifetime\n(yr)",
+    "hydrogel_thickness_mm": "Hydrogel thickness\n(mm)",
+    "vapor_gap_mm": "Vapor gap\n(mm)",
+    "humidity_high": "Uptake RH",
+    "solar_irradiance_w_per_m2": "Solar GHI\n(W/m²)",
+    "h_amb_w_m2_k": "h_amb\n(W/m²K)",
+    "discount_rate": "Discount rate",
+    "device_lifetime_years": "Device lifetime\n(yr)",
+    "utilization_factor": "Utilization\nfactor",
+    "water_price_usd_per_m3": "Water price\n(USD/m³)",
+    "salt_to_polymer_ratio": "Salt:polymer\nratio (S/L)",
+    "c_acrylamide_usd_per_kg": "Acrylamide price\n(USD/kg)",
+    "c_additives_usd_per_kg_composite": "Additives price\n(USD/kg composite)",
+    "insulation_gap_mm": "Insulation gap\n(mm)",
+    "fin_area_ratio": "Condenser fin\narea ratio",
+    "tilt_deg": "Tilt angle\n(deg)",
+    "temperature_c": "Ambient temperature\n(°C)",
+    "total_investment_factor": "Total investment\nfactor",
+    "maintenance_cost_fraction": "Maintenance cost\n(frac CAPEX/yr)",
 }
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--model", choices=sorted(MODELS), default="solar")
     ap.add_argument("--input", type=Path, default=None)
     ap.add_argument("--output", type=Path, default=None)
     ap.add_argument("--table-csv", type=Path, default=None)
@@ -116,9 +79,9 @@ def main() -> None:
     ap.add_argument("--show", action="store_true", help="Display plot interactively")
     args = ap.parse_args()
 
-    model = MODELS[args.model]
-    inp = args.input or model.repo / "outputs" / "parameter_sweeps" / "parameter_sweep.csv"
-    out_png = args.output or model.repo / "outputs" / "tornado_plot" / "tornado_plot.png"
+    repo = _ROOT / "solar_lumped"
+    inp = args.input or repo / "outputs" / "parameter_sweeps" / "parameter_sweep.csv"
+    out_png = args.output or repo / "outputs" / "tornado_plot" / "tornado_plot.png"
     if not inp.exists():
         sys.exit(f"Missing {inp}; run parameter_sweep.py first.")
 
@@ -132,7 +95,7 @@ def main() -> None:
     if len(df) < 3:
         sys.exit("Very few valid data points; cannot proceed with sensitivity analysis.")
 
-    input_params = [c for c in df.columns if c not in _METRIC_COLUMNS and c not in model.excluded]
+    input_params = [c for c in df.columns if c not in _METRIC_COLUMNS and c not in _EXCLUDED_PARAMS]
     sensitivity_df = oat_sensitivity(df, args.metric, input_params)
     if sensitivity_df.empty:
         sys.exit("No valid sensitivity data calculated.")
@@ -144,9 +107,7 @@ def main() -> None:
     fig, _ = create_tornado_plot(
         sensitivity_df,
         args.metric,
-        param_name_mapping=model.param_labels,
-        figsize=model.figsize,
-        fonts=model.fonts,
+        param_name_mapping=_PARAM_LABELS,
     )
     if fig is not None:
         fig.savefig(out_png, dpi=300, bbox_inches="tight")
@@ -230,15 +191,12 @@ def create_tornado_plot(
     title: str = "Parameter sensitivity",
     param_name_mapping: dict[str, str] | None = None,
     metric_label: str | None = None,
-    figsize: tuple[float, float] | None = None,
-    fonts: dict[str, float] | None = None,
 ) -> tuple[plt.Figure | None, plt.Axes | None]:
     """Horizontal +/- sensitivity bars, one row per parameter, sorted by effect size."""
     if sensitivity_df.empty:
         print("No valid sensitivity data to plot")
         return None, None
     metric_label = metric_label or _METRIC_LABELS.get(target_col, target_col)
-    fonts = fonts or {"label": 14, "title": 18, "xlabel": 13, "tick": 12}
 
     plot_df = sensitivity_df.copy()
     plot_df["variable"] = plot_df["variable"].astype(str).str.lstrip("# ").str.strip()
@@ -249,8 +207,8 @@ def create_tornado_plot(
 
     # Shrink labels once there are enough bars that they would collide.
     n_bars = len(plot_df)
-    label_fs = fonts["label"] if n_bars <= 12 else max(8.0, fonts["label"] - 0.3 * (n_bars - 12))
-    fig, ax = plt.subplots(figsize=figsize or (8, max(5.0, 0.5 * n_bars + 1.5)))
+    label_fs = 14 if n_bars <= 12 else max(8.0, 14 - 0.3 * (n_bars - 12))
+    fig, ax = plt.subplots(figsize=(8, max(5.0, 0.5 * n_bars + 1.5)))
     ax.set_frame_on(False)
 
     y_pos = np.arange(n_bars)
@@ -260,20 +218,19 @@ def create_tornado_plot(
 
     ax.set_yticks(y_pos)
     ax.set_yticklabels(names, fontsize=label_fs)
-    if figsize is None:
-        ax.set_ylim(-0.6, n_bars - 0.4)
-    ax.set_title(title, fontsize=fonts["title"], fontweight="bold", pad=14)
-    ax.set_xlabel(f"% change in {metric_label}\nper % change in parameter", fontsize=fonts["xlabel"])
+    ax.set_ylim(-0.6, n_bars - 0.4)
+    ax.set_title(title, fontsize=18, fontweight="bold", pad=14)
+    ax.set_xlabel(f"% change in {metric_label}\nper % change in parameter", fontsize=13)
     ax.axvline(x=0, color="black", linestyle="-", linewidth=0.8)
     ax.grid(True, alpha=0.3, axis="x")
-    ax.tick_params(axis="x", labelsize=fonts["tick"])
+    ax.tick_params(axis="x", labelsize=12)
     ax.legend(
         handles=[
             Patch(facecolor=_BAR_COLOR, alpha=0.7, label="Positive"),
             Patch(facecolor=_BAR_COLOR, alpha=0.7, hatch="///", label="Negative"),
         ],
         loc="lower right",
-        fontsize=fonts["tick"],
+        fontsize=12,
     )
     plt.tight_layout()
     return fig, ax

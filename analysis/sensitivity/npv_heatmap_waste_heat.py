@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""2D NPV / payback heatmaps over pairs of swept cycle-model parameters.
+"""2D NPV / payback heatmaps over pairs of swept waste-heat parameters.
 
 For each ``paramX:paramY`` pair, sweeps a ``grid_n x grid_n`` grid (every other
 parameter at baseline) via ``parameter_sweep._apply_overrides`` and writes a CSV,
 an NPV heatmap (zero-NPV contour) and a payback heatmap (infeasible cells hatched).
 
-Usage: python npv_heatmap_cycle.py --model {cycle_lumped,cycle_lumped_no_loop}
+Usage: python npv_heatmap_waste_heat.py
 
 ``--grid-n`` defaults to 15 (vs 25 for the single-cycle packages): every point is a
 full multi-cycle Radau solve, so 225 points per pair keeps a default run tractable.
@@ -26,26 +26,16 @@ import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 from matplotlib.patches import Rectangle  # noqa: E402
 
-_WASTE_HEAT = Path(__file__).resolve().parent.parent.parent / "waste-heat"
+_REPO = Path(__file__).resolve().parent.parent.parent / "waste-heat"
 
-_DEFAULT_PAIRS: dict[str, tuple[str, ...]] = {
-    "cycle_lumped": (
-        "water_price_usd_per_m3:discount_rate",
-        "water_price_usd_per_m3:device_lifetime_years",
-        "water_price_usd_per_m3:hydrogel_lifetime_years",
-        "water_price_usd_per_m3:t_wh_in_c",
-        "hydrogel_thickness_mm:wh_hx_ua_w_k",
-        "discount_rate:device_lifetime_years",
-    ),
-    "cycle_lumped_no_loop": (
-        "water_price_usd_per_m3:discount_rate",
-        "water_price_usd_per_m3:device_lifetime_years",
-        "water_price_usd_per_m3:hydrogel_lifetime_years",
-        "water_price_usd_per_m3:t_wh_in_c",
-        "hydrogel_thickness_mm:ua_wh_desorber_w_k",
-        "discount_rate:device_lifetime_years",
-    ),
-}
+_DEFAULT_PAIRS: tuple[str, ...] = (
+    "water_price_usd_per_m3:discount_rate",
+    "water_price_usd_per_m3:device_lifetime_years",
+    "water_price_usd_per_m3:hydrogel_lifetime_years",
+    "water_price_usd_per_m3:t_wh_in_c",
+    "hydrogel_thickness_mm:ua_wh_desorber_w_k",
+    "discount_rate:device_lifetime_years",
+)
 
 _ROW_METRIC_KEYS: tuple[str, ...] = (
     "daily_yield_kg_m2",
@@ -60,21 +50,19 @@ _ROW_METRIC_KEYS: tuple[str, ...] = (
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    ap.add_argument("--model", choices=sorted(_DEFAULT_PAIRS), default="cycle_lumped")
     ap.add_argument("--pairs", action="append", default=None, help="paramX:paramY (repeatable)")
     ap.add_argument("--grid-n", type=int, default=15)
     ap.add_argument("--output-dir", type=Path, default=None)
     args = ap.parse_args()
 
-    repo = _WASTE_HEAT / args.model
-    sys.path[:0] = [str(repo / "scripts"), str(repo / "src")]
-    import parameter_sweep as ps  # noqa: E402  (path depends on --model)
+    sys.path[:0] = [str(_REPO / "scripts"), str(_REPO / "src")]
+    import parameter_sweep as ps  # noqa: E402  (needs _REPO on sys.path first)
 
-    output_dir = args.output_dir or repo / "npv_heatmaps"
+    output_dir = args.output_dir or _REPO / "npv_heatmaps"
     params_by_key = {p.key: p for p in ps.make_sweep_params()}
 
     parsed_pairs = []
-    for spec in args.pairs or _DEFAULT_PAIRS[args.model]:
+    for spec in args.pairs or _DEFAULT_PAIRS:
         keys = spec.split(":")
         if len(keys) != 2:
             raise SystemExit(f"--pairs entry must be 'paramX:paramY', got {spec!r}")
