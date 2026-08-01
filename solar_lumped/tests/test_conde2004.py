@@ -66,7 +66,7 @@ def test_fig5_relative_uptake_via_chamber_model():
     root = Path(__file__).resolve().parents[1]
     sys.path.insert(0, str(root / "src"))
     sys.path.insert(0, str(root / "scripts"))
-    import run_solar_sim as rss
+    from solar_lumped import device as rss
 
     params = rss.build_hydrogel_chamber_params(
         salt="LiCl", salt_loading=4.0, h0_mm=2.34, g_conv_m_s=0.0095

@@ -5,16 +5,12 @@ from __future__ import annotations
 
 import argparse
 import csv
-import sys
 from dataclasses import dataclass, replace
 from pathlib import Path
 
-import numpy as np
+_REPO = Path(__file__).resolve().parents[2]
 
-_REPO = Path(__file__).resolve().parent.parent
-_SRC = _REPO / "src"
-if str(_SRC) not in sys.path:
-    sys.path.insert(0, str(_SRC))
+import numpy as np
 
 from solar_lumped.economics import (
     LcowCostBreakdown,

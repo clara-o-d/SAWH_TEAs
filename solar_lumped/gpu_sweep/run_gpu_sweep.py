@@ -38,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import numpy as np  # noqa: E402
 
-import grid_param_sweep as gps  # noqa: E402
+from solar_lumped import site_sweep as gps  # noqa: E402
 from solar_lumped.physics import initial_loading  # noqa: E402
 from solar_lumped.weather import WeatherClient  # noqa: E402
 from solar_lumped.weather import grid_land_points  # noqa: E402

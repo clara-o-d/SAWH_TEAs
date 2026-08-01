@@ -4,15 +4,11 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
-import numpy as np
+_REPO = Path(__file__).resolve().parents[2]
 
-_REPO = Path(__file__).resolve().parent.parent
-_SRC = _REPO / "src"
-if str(_SRC) not in sys.path:
-    sys.path.insert(0, str(_SRC))
+import numpy as np
 
 from waste_heat.physics import rh_outside_desorber
 from waste_heat.physics import (

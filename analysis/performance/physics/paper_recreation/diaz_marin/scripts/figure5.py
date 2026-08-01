@@ -2,7 +2,7 @@
 """
 Recreation of Díaz-Marín et al. (2024) Nature Communications Figure 5 (panels C, D, E, I).
 
-Kinetics are simulated via ``run_solar_sim.simulate_isothermal_chamber_rh_cycle`` using
+Kinetics are simulated via ``solar_lumped.device.simulate_isothermal_chamber_rh_cycle`` using
 the Díaz-Marín hydrogel-only model: Eq. 5 brine thermodynamics (Conde 2004) + Eq. 8 chamber
 convection (no Wilson SAWH device, vapor gap, or condenser).
 
@@ -36,17 +36,16 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 
-# --- Path bootstrap — import run_solar_sim.py from scripts/ ---
+# --- Path bootstrap ---
 _SCRIPT = Path(__file__).resolve()
 _DIAZ_DIR = _SCRIPT.parent.parent
 _SOLAR_ROOT = _DIAZ_DIR.parent.parent.parent / "solar_lumped"
 _SRC = _SOLAR_ROOT / "src"
-_SCRIPTS = _SOLAR_ROOT / "scripts"
-for _p in (_SRC, _SCRIPTS, _SOLAR_ROOT):
+for _p in (_SRC, _SOLAR_ROOT):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-import run_solar_sim  # noqa: E402
+from solar_lumped import device as run_solar_sim  # noqa: E402
 from chamber_rh_schedule import (  # noqa: E402
     format_schedule_table,
     load_chamber_rh_schedules,
@@ -134,7 +133,7 @@ def simulate_rh_cycle(
     schedules: dict[tuple[str, int], object],
     dt_s: float = _CHAMBER_DT_S,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Delegate to ``run_solar_sim`` with ESM-inferred RH switch times."""
+    """Delegate to ``solar_lumped.device`` with ESM-inferred RH switch times."""
     params = _chamber_params(case)
     rh_pct = int(round(rh_high * 100.0))
     sched = schedules[(case.key, rh_pct)]
@@ -242,7 +241,7 @@ def plot_figure5(
 
     fig.suptitle(
         "Díaz-Marín et al. (2024) Figure 5 — absorption–desorption kinetics\n"
-        r"(black = hydrogel Eq. 5 + 8 via run_solar_sim, $g_{chamber}=0.0095$ m/s; "
+        r"(black = hydrogel Eq. 5 + 8 via solar_lumped.device, $g_{chamber}=0.0095$ m/s; "
         "circles = digitized model curves)",
         fontsize=scaled_fontsize("axes.labelsize", 0.75),
         y=1.01,
@@ -291,7 +290,7 @@ def main() -> Path:
         if args.schedule_source == "reference"
         else "MOESM3 source-data workbook"
     )
-    print("Díaz-Marín Figure 5 — hydrogel Eq. 5 + 8 (run_solar_sim)")
+    print("Díaz-Marín Figure 5 — hydrogel Eq. 5 + 8 (solar_lumped.device)")
     print("=" * 56)
     print(f"  Module: {run_solar_sim.__file__}")
     print(f"  g_chamber = {_G_CONV_M_S} m/s  |  T_amb = {_TEMPERATURE_C} °C")

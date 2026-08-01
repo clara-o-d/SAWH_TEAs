@@ -21,10 +21,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
-_SRC = _REPO / "src"
-if str(_SRC) not in sys.path:
-    sys.path.insert(0, str(_SRC))
+_REPO = Path(__file__).resolve().parents[2]
 
 from solar_lumped.physics import DeviceThermalParams, TILT_DEG  # noqa: E402
 from solar_lumped.simulation import DeviceConfig  # noqa: E402

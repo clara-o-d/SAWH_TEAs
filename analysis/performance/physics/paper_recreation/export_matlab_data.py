@@ -21,9 +21,8 @@ _PAPER_RECREATION = Path(__file__).resolve().parent
 _SOLAR_ROOT = _PAPER_RECREATION.parent.parent / "solar_lumped"
 _WILSON_DIR = _PAPER_RECREATION / "wilson"
 _DIAZ_DIR = _PAPER_RECREATION / "diaz_marin"
-# The figure modules below import solar_lumped/run_solar_sim without bootstrapping it
-# themselves, so this path setup has to happen before they are loaded.
-for _p in (_SOLAR_ROOT / "src", _SOLAR_ROOT / "scripts", _SOLAR_ROOT,
+# The figure modules below rely on solar_lumped being importable before they load.
+for _p in (_SOLAR_ROOT / "src", _SOLAR_ROOT,
            _DIAZ_DIR / "scripts", _WILSON_DIR / "scripts"):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))

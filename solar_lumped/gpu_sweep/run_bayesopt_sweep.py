@@ -33,7 +33,7 @@ for p in (_SRC, _SCRIPTS, _BAYESOPT_SRC, _BAYESOPT_DIAG):
         sys.path.insert(0, str(p))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import grid_param_sweep as gps  # noqa: E402
+from solar_lumped import site_sweep as gps  # noqa: E402
 
 from run_gpu_sweep import _site_list  # noqa: E402
 
