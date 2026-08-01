@@ -22,7 +22,7 @@ def _fake_evaluate_batch(
     site_profiles=None,
     econ=None,
     combine_rule="mean",
-    resolution="monthly",
+    resolution="annual",
     case="case1",
 ):
     results = []
@@ -41,7 +41,7 @@ def _fake_evaluate_batch(
 
 
 def _patch(monkeypatch):
-    monkeypatch.setattr("sawh_bayesopt.bayesopt.fetch_monthly_profiles", lambda site, cache_dir: [])
+    monkeypatch.setattr("sawh_bayesopt.bayesopt.fetch_daily_profiles", lambda site, cache_dir: [])
     monkeypatch.setattr("sawh_bayesopt.bayesopt.evaluate_batch", _fake_evaluate_batch)
 
 
@@ -93,7 +93,7 @@ def _fake_evaluate_batch_with_infeasible_region(
     site_profiles=None,
     econ=None,
     combine_rule="mean",
-    resolution="monthly",
+    resolution="annual",
     case="case1",
 ):
     """Same quadratic-bowl objective, but the whole region where the first
@@ -122,7 +122,7 @@ def _fake_evaluate_batch_with_infeasible_region(
 
 
 def test_run_bayesopt_handles_an_infeasible_region_without_crashing(tmp_path, monkeypatch):
-    monkeypatch.setattr("sawh_bayesopt.bayesopt.fetch_monthly_profiles", lambda site, cache_dir: [])
+    monkeypatch.setattr("sawh_bayesopt.bayesopt.fetch_daily_profiles", lambda site, cache_dir: [])
     monkeypatch.setattr(
         "sawh_bayesopt.bayesopt.evaluate_batch", _fake_evaluate_batch_with_infeasible_region
     )

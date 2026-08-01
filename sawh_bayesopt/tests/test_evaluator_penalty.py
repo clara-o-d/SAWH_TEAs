@@ -8,7 +8,7 @@ from sawh_bayesopt.design_space import DesignBounds, latin_hypercube_design
 from sawh_bayesopt.evaluator import EvalCache
 from sawh_bayesopt.sites import SiteSpec
 
-_DUMMY_PROFILES = [(1, object(), 30)]
+_DUMMY_PROFILES = [(1, object())]
 
 
 class _FakeJaxDailyCycle:
@@ -21,22 +21,22 @@ class _FakeJaxDailyCycle:
         self._eta = eta
         self._raises = raises
 
-    def build_batch_arrays(self, profiles, configs):
+    def year_padding(self, profiles_by_instance):
         if self._raises is not None:
             raise self._raises
-        return {}, 0.0, 1, 1
+        return 0.0, 1, 1
 
-    def make_batched_daily_cycle_fn(self, batch, dt, n_abs_max, n_des_max):
-        n = len(self._water)
-        water, eta = self._water, self._eta
+    def build_device_arrays(self, configs):
+        return {}
 
-        def fn(cw, h):
-            return np.asarray(water), np.asarray(eta), np.asarray(cw[:n]), np.asarray(h[:n])
+    def build_day_weather(self, profiles, n_abs_max, n_des_max):
+        return ()
 
-        return fn
+    def make_year_step_fn(self, device, dt, n_abs_max, n_des_max):
+        return lambda cw, h, weather: (self._water, self._eta, cw, h)
 
-    def find_cyclic_state_batched(self, daily_cycle_fn, *, c_w_initial, h_initial, max_rounds):
-        return np.asarray(c_w_initial), np.asarray(h_initial)
+    def run_year_batched(self, step_fn, day_weathers, *, c_w_initial, h_initial, aitken_max_rounds):
+        return np.asarray(self._water), np.asarray(self._eta)
 
 
 @pytest.fixture

@@ -19,7 +19,7 @@ from typing import Literal
 import numpy as np
 
 from sawh_bayesopt import design_space
-from sawh_bayesopt.sites import MonthlyProfiles, SiteSpec
+from sawh_bayesopt.sites import DailyProfiles, SiteSpec
 
 CombineRule = Literal["mean", "worst_case"]
 
@@ -80,7 +80,7 @@ def design_vector_hash(
     x: np.ndarray,
     *,
     sites: tuple[str, ...],
-    resolution: str = "monthly",
+    resolution: str = "annual",
     case: str = "case2",
 ) -> str:
     """Stable cache key: sig-fig-rounded design vector + sites + resolution (+ case when
@@ -169,45 +169,47 @@ class EvalCache:
         return list(self._by_key.values())
 
 
-def _run_jax_batch(
-    flat_profiles: list,
-    flat_configs: list,
-    flat_weights: list[int],
+def _run_jax_year(
+    instance_profiles: list,
+    instance_configs: list,
     owner: list[tuple[int, int]],
     *,
     initial_loading,
 ) -> tuple[dict[tuple[int, int], float], dict[tuple[int, int], float], str | None]:
-    """One jax.vmap-batched daily-cycle call over every (design, site, month) instance,
-    reduced to day-weighted mean yield/eta per (design, site). Returns (yield, eta, error);
-    on a raised jax/diffrax call, error is set and both dicts are empty."""
-    if not flat_profiles:
+    """Run a full 365-day year for every (design, site) instance and reduce to mean daily
+    yield/eta per pair. Returns (yield, eta, error); on a raised jax/diffrax call, error is
+    set and both dicts are empty.
+
+    The batch axis is (design, site): every instance advances through the year in lockstep,
+    one vmapped step per calendar day, so days stay sequential (each warm-starts from the
+    previous day's end state) while designs and sites run in parallel."""
+    if not instance_profiles:
         return {}, {}, None
 
     try:
         jdc = _load_jax_daily_cycle()
-        batch, dt, n_abs_max, n_des_max = jdc.build_batch_arrays(flat_profiles, flat_configs)
-        batched_fn = jdc.make_batched_daily_cycle_fn(batch, dt, n_abs_max, n_des_max)
-        cw0 = np.array([initial_loading(c) for c in flat_configs])
-        h0 = np.array([c.hydrogel_thickness_m for c in flat_configs])
-        cw_conv, h_conv = jdc.find_cyclic_state_batched(
-            batched_fn, c_w_initial=cw0, h_initial=h0, max_rounds=JAX_AITKEN_MAX_ROUNDS,
+        dt, n_abs_max, n_des_max = jdc.year_padding(instance_profiles)
+        device = jdc.build_device_arrays(instance_configs)
+        step_fn = jdc.make_year_step_fn(device, dt, n_abs_max, n_des_max)
+
+        # Instances can disagree on year length (leap years, gaps in the weather record);
+        # truncate to the shortest so every day is a full batch.
+        n_days = min(len(p) for p in instance_profiles)
+        day_weathers = [
+            jdc.build_day_weather([p[d] for p in instance_profiles], n_abs_max, n_des_max)
+            for d in range(n_days)
+        ]
+        water, eta = jdc.run_year_batched(
+            step_fn, day_weathers,
+            c_w_initial=np.array([initial_loading(c) for c in instance_configs]),
+            h_initial=np.array([c.hydrogel_thickness_m for c in instance_configs]),
+            aitken_max_rounds=JAX_AITKEN_MAX_ROUNDS,
         )
-        water, eta, _, _ = batched_fn(cw_conv, h_conv)
-        water = np.asarray(water)
-        eta = np.asarray(eta)
     except Exception as exc:  # noqa: BLE001 -- the batched jax/diffrax call can raise
         return {}, {}, str(exc).split("\n", 1)[0][:240]
 
-    yield_sums: dict[tuple[int, int], float] = {}
-    eta_sums: dict[tuple[int, int], float] = {}
-    weight_sums: dict[tuple[int, int], float] = {}
-    for pair, w, y, e in zip(owner, flat_weights, water, eta):
-        yield_sums[pair] = yield_sums.get(pair, 0.0) + float(y) * w
-        eta_sums[pair] = eta_sums.get(pair, 0.0) + float(e) * w
-        weight_sums[pair] = weight_sums.get(pair, 0.0) + w
-
-    yield_by_pair = {pair: yield_sums[pair] / w for pair, w in weight_sums.items()}
-    eta_by_pair = {pair: eta_sums[pair] / w for pair, w in weight_sums.items()}
+    yield_by_pair = {pair: float(y) for pair, y in zip(owner, water)}
+    eta_by_pair = {pair: float(e) for pair, e in zip(owner, eta)}
     return yield_by_pair, eta_by_pair, None
 
 
@@ -216,16 +218,15 @@ def evaluate_batch(
     *,
     cache: EvalCache,
     sites: tuple[SiteSpec, ...],
-    site_profiles: dict[str, MonthlyProfiles],
+    site_profiles: dict[str, DailyProfiles],
     econ,
     combine_rule: CombineRule = "mean",
-    resolution: str = "monthly",
+    resolution: str = "annual",
     case: str = "case2",
 ) -> list[DesignEvalResult]:
-    """Evaluate every x in *xs* not already in *cache*, stacking all uncached designs'
-    (site, month) instances into one jax.vmap-batched call -- that cross-design batching is
-    the actual speedup. ``case`` picks the IR emissivity variant (design_space.CASE_EPS_IR);
-    "case2" matches solar_lumped base-case physics, "case1" Wilson's original."""
+    """Evaluate every x in *xs* not already in *cache*. Each (design, site) instance runs
+    all 365 real days, batched across designs and sites. ``case`` picks the IR emissivity
+    variant (design_space.CASE_EPS_IR); "case2" matches solar_lumped base-case physics."""
     from solar_lumped.economics import FAIL_LCO, lcow_from_daily_yield
     from solar_lumped.physics import initial_loading
     from solar_lumped.simulation import DeviceConfig
@@ -246,11 +247,9 @@ def evaluate_batch(
 
     configs = {i: DeviceConfig(**design_space.to_device_config_kwargs(xs[i], case=case)) for i in to_run}
 
-    # Flatten every (design, site, month) instance with weather data into one batch;
-    # pairs with no profiles are handled below without jax.
-    flat_profiles = []
-    flat_configs = []
-    flat_weights: list[int] = []
+    # One instance per (design, site); each carries that site's full list of day profiles.
+    instance_profiles: list[list] = []
+    instance_configs = []
     owner: list[tuple[int, int]] = []  # (design index into xs, site index)
     no_weather: set[tuple[int, int]] = set()
     for i in to_run:
@@ -259,15 +258,13 @@ def evaluate_batch(
             if not profiles:
                 no_weather.add((i, si))
                 continue
-            for _month, profile, n_days in profiles:
-                flat_profiles.append(profile)
-                flat_configs.append(configs[i])
-                flat_weights.append(n_days)
-                owner.append((i, si))
+            instance_profiles.append([prof for _doy, prof in profiles])
+            instance_configs.append(configs[i])
+            owner.append((i, si))
 
     t0 = time.perf_counter()
-    yield_by_pair, eta_by_pair, batch_error = _run_jax_batch(
-        flat_profiles, flat_configs, flat_weights, owner, initial_loading=initial_loading,
+    yield_by_pair, eta_by_pair, batch_error = _run_jax_year(
+        instance_profiles, instance_configs, owner, initial_loading=initial_loading,
     )
     wall = time.perf_counter() - t0
 

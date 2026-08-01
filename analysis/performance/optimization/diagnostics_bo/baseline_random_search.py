@@ -35,7 +35,7 @@ import numpy as np  # noqa: E402
 
 from sawh_bayesopt.design_space import DesignBounds  # noqa: E402
 from sawh_bayesopt.evaluator import EvalCache, evaluate_batch  # noqa: E402
-from sawh_bayesopt.sites import ATACAMA, CAMBRIDGE, DEFAULT_SITES, fetch_monthly_profiles  # noqa: E402
+from sawh_bayesopt.sites import ATACAMA, CAMBRIDGE, DEFAULT_SITES, fetch_daily_profiles  # noqa: E402
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -71,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "config.json").write_text(json.dumps({**bo_config, "seed": args.seed, "search": "random_uniform"}, indent=2))
 
-    site_profiles = {s.name: fetch_monthly_profiles(s, cache_dir=args.weather_cache_dir) for s in sites}
+    site_profiles = {s.name: fetch_daily_profiles(s, cache_dir=args.weather_cache_dir) for s in sites}
     cache = EvalCache(run_dir / "cache.jsonl")
 
     from solar_lumped.economics import LCOEconomicParams

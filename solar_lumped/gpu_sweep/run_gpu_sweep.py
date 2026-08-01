@@ -3,12 +3,10 @@
 scripts/grid_param_sweep.py (see docs/sherlock_param_sweep.tex for the CPU
 version this mirrors). One invocation = one or more sites; each site's full
 125-combo grid (hydrogel thickness x fin area ratio x vapor gap, 5 values
-each; eps_abs/tau_glass are fixed constants per case, not swept) x 12 monthly
-profiles = up to 1,500 instances is batched into a single compiled call on
-the GPU (see FINDINGS.md Results 5/7/8/9 -- batching combos and batching
-different-length months are each separately validated; this is their cross
-product, not yet validated on real hardware at this combined size -- that's
-what this script's first runs are for).
+each; eps_abs/tau_glass are fixed constants per case, not swept) is batched
+across combos and walked through all 365 real days in lockstep -- one
+compiled vmapped step per day, each warm-starting from the previous day's
+end state, after Aitken-converging day 1 to its steady periodic state.
 
 Deliberately mirrors grid_param_sweep.py's CLI, weather fetch, combo grid, and
 CSV schema exactly (imported directly, not reimplemented) so output is
@@ -43,7 +41,13 @@ from solar_lumped.physics import initial_loading  # noqa: E402
 from solar_lumped.weather import WeatherClient  # noqa: E402
 from solar_lumped.weather import grid_land_points  # noqa: E402
 
-from jax_daily_cycle import build_batch_arrays, find_cyclic_state_batched, make_batched_daily_cycle_fn  # noqa: E402
+from jax_daily_cycle import (  # noqa: E402
+    build_day_weather,
+    build_device_arrays,
+    make_year_step_fn,
+    run_year_batched,
+    year_padding,
+)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -121,8 +125,13 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, client: WeatherCl
     except Exception:
         df = client.get_historical(lat, lon, start, end)
 
-    months = gps.monthly_mean_profiles(df)
-    mean_rh, mean_t_amb, mean_solar = gps.mean_weather_stats(months)
+    from solar_lumped.weather import real_weather_days_from_df
+
+    days = [prof for _d, prof, _g in real_weather_days_from_df(df)]
+    if not days:
+        print(f"  ({lat:+.4f}, {lon:+.4f}): no usable weather days, skipping.", flush=True)
+        return 0
+    mean_rh, mean_t_amb, mean_solar = gps.mean_weather_stats([(0, p, 1) for p in days])
 
     all_combos = gps.combo_grid(
         hydrogel_thickness_mm=args.hydrogel_thickness_mm,
@@ -153,34 +162,21 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, client: WeatherCl
         for c in combos
     ]
 
-    # Cross product: every combo x every month, all batched into one compiled call.
-    profiles_list, configs_list = [], []
-    combo_of, month_of = [], []
-    for ci, cfg in enumerate(configs):
-        for mi, (_month, profile, _n_days) in enumerate(months):
-            profiles_list.append(profile)
-            configs_list.append(cfg)
-            combo_of.append(ci)
-            month_of.append(mi)
-
+    # Batch axis is the combo list; every combo walks the same year in lockstep, one
+    # vmapped step per day, so days stay sequential and combos run in parallel.
     t0 = time.perf_counter()
-    batch, dt, n_abs_max, n_des_max = build_batch_arrays(profiles_list, configs_list)
-    batched_fn = make_batched_daily_cycle_fn(batch, dt, n_abs_max, n_des_max)
+    dt, n_abs_max, n_des_max = year_padding([days])
+    device = build_device_arrays(configs)
+    step_fn = make_year_step_fn(device, dt, n_abs_max, n_des_max)
+    day_weathers = [build_day_weather([d] * len(configs), n_abs_max, n_des_max) for d in days]
 
-    cw0_arr = np.array([initial_loading(cfg) for cfg in configs_list])
-    h0_arr = np.array([cfg.hydrogel_thickness_m for cfg in configs_list])
-    cw_conv, h_conv = find_cyclic_state_batched(batched_fn, c_w_initial=cw0_arr, h_initial=h0_arr, max_rounds=args.max_rounds)
-    water, eta, _, _ = batched_fn(cw_conv, h_conv)
-    water = np.asarray(water)
-    eta = np.asarray(eta)
+    mean_yield, mean_eta = run_year_batched(
+        step_fn, day_weathers,
+        c_w_initial=np.array([initial_loading(cfg) for cfg in configs]),
+        h_initial=np.array([cfg.hydrogel_thickness_m for cfg in configs]),
+        aitken_max_rounds=args.max_rounds,
+    )
     elapsed = time.perf_counter() - t0
-
-    weights = np.array([n_days for _, _, n_days in months], dtype=float)
-    n_combos, n_months = len(combos), len(months)
-    water_grid = water.reshape(n_combos, n_months)
-    eta_grid = eta.reshape(n_combos, n_months)
-    mean_yield = (water_grid * weights).sum(axis=1) / weights.sum()
-    mean_eta = (eta_grid * weights).sum(axis=1) / weights.sum()
 
     for ci, combo in enumerate(combos):
         gps._append_row(
@@ -195,14 +191,14 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, client: WeatherCl
                 "eps_glass_ir": args.eps_glass_ir if args.eps_glass_ir is not None else "",
                 "fin_area_ratio": combo.fin_area_ratio,
                 "vapor_gap_mm": combo.vapor_gap_mm,
-                "warmup_method": "aitken-gpu-fixed-round", "resolution": "monthly",
+                "warmup_method": "aitken-gpu-fixed-round", "resolution": "annual",
                 "mean_yield_kg_m2": f"{mean_yield[ci]:.6f}", "mean_eta_thermal": f"{mean_eta[ci]:.6f}",
-                "n_periods": len(months),
+                "n_periods": len(days),
             },
         )
     print(
-        f"  ({lat:+.4f}, {lon:+.4f}): {len(combos)} combo(s) x {n_months} month(s) = {len(combos) * n_months} "
-        f"instances in {elapsed:.1f}s", flush=True,
+        f"  ({lat:+.4f}, {lon:+.4f}): {len(combos)} combo(s) x {len(days)} day(s) "
+        f"in {elapsed:.1f}s", flush=True,
     )
     return len(combos)
 

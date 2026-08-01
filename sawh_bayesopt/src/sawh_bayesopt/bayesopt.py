@@ -14,7 +14,7 @@ import numpy as np
 from sawh_bayesopt.acquisition import propose_batch
 from sawh_bayesopt.design_space import DesignBounds, latin_hypercube_design
 from sawh_bayesopt.evaluator import DesignEvalResult, EvalCache, evaluate_batch
-from sawh_bayesopt.sites import DEFAULT_SITES, SiteSpec, fetch_monthly_profiles
+from sawh_bayesopt.sites import DEFAULT_SITES, SiteSpec, fetch_daily_profiles
 from sawh_bayesopt.surrogate import (
     SurrogateState,
     append_observations,
@@ -45,7 +45,7 @@ class BayesOptConfig:
     ei_xi: float = 0.01
     stall_rel_tol: float = 0.005
     stall_rounds: int = 3
-    resolution: str = "monthly"
+    resolution: str = "annual"
     weather_cache_dir: str = ".weather_cache"
     # IR emissivity variant (design_space.CASE_EPS_IR): "case2" matches solar_lumped's
     # base case, "case1" Wilson's original blackbody/cavity approximation.
@@ -94,7 +94,7 @@ def run_bayesopt(cfg: BayesOptConfig, run_dir: str | Path) -> BayesOptResult:
     econ = LCOEconomicParams()
 
     site_profiles = {
-        s.name: fetch_monthly_profiles(s, cache_dir=cfg.weather_cache_dir) for s in cfg.sites
+        s.name: fetch_daily_profiles(s, cache_dir=cfg.weather_cache_dir) for s in cfg.sites
     }
     cache = EvalCache(run_dir / "cache.jsonl")
 

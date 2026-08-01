@@ -1,8 +1,10 @@
-"""The two experimentally field-validated SAWH sites: Cambridge, MA and the
-Atacama Desert, Chile (Wilson et al. 2025). Weather is fetched once per site
-per optimization run and reused across every design-point evaluation -- only
-the device design changes per point, not the weather (same pattern as
-scripts/grid_param_sweep.py).
+"""The two experimentally field-validated SAWH sites: Cambridge, MA and the Atacama
+Desert, Chile (Wilson et al. 2025). Weather is fetched once per site per optimization run
+and reused across every design-point evaluation -- only the design changes per point.
+
+Every evaluation runs all 365 real days, so there is no mean-day approximation error: the
+year starts from a steady periodic state found by Aitken extrapolation on Jan 1, then each
+subsequent day warm-starts from the previous day's end state.
 """
 
 from __future__ import annotations
@@ -10,10 +12,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from solar_lumped.weather import WeatherClient
+from solar_lumped.weather import WeatherClient, fetch_year_weather
 
-# Monthly-mean-day profiles: (month, DailyWeatherProfile, n_days_in_month).
-MonthlyProfiles = list[tuple[int, object, int]]
+# One entry per real calendar day: (day_of_year, DailyWeatherProfile).
+DailyProfiles = list[tuple[int, object]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -32,42 +34,27 @@ ATACAMA = SiteSpec("atacama", -23.65, -70.40)
 DEFAULT_SITES: tuple[SiteSpec, ...] = (CAMBRIDGE, ATACAMA)
 
 
-def monthly_mean_profiles(df) -> MonthlyProfiles:
-    """One representative mean-day profile per calendar month present in *df*.
+def daily_profiles(df) -> DailyProfiles:
+    """Every calendar day in *df* as its own profile, in chronological order."""
+    from solar_lumped.weather import real_weather_days_from_df
 
-    Verbatim logic from scripts/grid_param_sweep.py::monthly_mean_profiles --
-    kept as a local copy (rather than importing the script) since scripts/ in
-    solar_lumped isn't part of its installed package surface.
-    """
-    import pandas as pd
-
-    from solar_lumped.weather import representative_mean_day_df
-    from solar_lumped.weather import profile_from_day_df
-
-    out: MonthlyProfiles = []
-    for m in sorted(set(df.index.month)):
-        month_df = df[df.index.month == m]
-        if month_df.empty:
-            continue
-        ref_day = month_df.index[len(month_df) // 2].date()
-        mean_day_df = representative_mean_day_df(month_df, reference_day=ref_day)
-        profile = profile_from_day_df(mean_day_df)
-        n_days = len(pd.unique(month_df.index.date))
-        out.append((m, profile, n_days))
-    return out
+    days = real_weather_days_from_df(df)
+    return [(d.timetuple().tm_yday, prof) for d, prof, _group in days]
 
 
-def fetch_monthly_profiles(site: SiteSpec, *, cache_dir: str | Path) -> MonthlyProfiles:
-    """Fetch *site*'s full-year weather and derive its monthly mean-day profiles.
+def fetch_daily_profiles(site: SiteSpec, *, cache_dir: str | Path) -> DailyProfiles:
+    """Fetch *site*'s full year of weather and split it into per-day profiles."""
+    df = fetch_year_weather(site.lat, site.lon, site.year, cache_dir=str(cache_dir))
+    return daily_profiles(df)
 
-    Falls back from the historical-forecast endpoint to the plain historical
-    one on failure, matching scripts/grid_param_sweep.py's try/except.
-    """
-    client = WeatherClient(cache_dir=str(cache_dir))
-    start = f"{site.year}-01-01"
-    end = f"{site.year}-12-31"
-    try:
-        _, df = client.get_historical_forecast_site_weather(site.lat, site.lon, start, end)
-    except Exception:
-        df = client.get_historical(site.lat, site.lon, start, end)
-    return monthly_mean_profiles(df)
+
+__all__ = [
+    "ATACAMA",
+    "CAMBRIDGE",
+    "DEFAULT_SITES",
+    "DailyProfiles",
+    "SiteSpec",
+    "WeatherClient",
+    "daily_profiles",
+    "fetch_daily_profiles",
+]

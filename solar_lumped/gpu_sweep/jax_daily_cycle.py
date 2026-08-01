@@ -222,9 +222,16 @@ def build_batch_arrays(profiles, configs):
     return cfg, dt, n_abs_max, n_des_max
 
 
-def make_batched_daily_cycle_fn(batch, dt, n_abs_max, n_des_max):
-    """Build a jax.jit(jax.vmap(...)) function (c_w_initial, h_initial) -> (yield, eta,
-    c_w_end, h_end), all shape (batch,), compiled once regardless of batch size."""
+# The first 8 per-instance arrays are weather (they change day to day); the rest describe
+# the device and are constant across a year.
+WEATHER_KEYS: tuple[str, ...] = (
+    "t_amb_abs", "rh_abs", "h_amb_abs", "n_abs_real",
+    "t_amb_des", "solar_des", "h_amb_des", "n_des_real",
+)
+
+
+def _make_single(dt, n_abs_max, n_des_max):
+    """The per-instance daily cycle, taking weather and device parameters as arguments."""
 
     def single(
         c_w_initial, h_initial,
@@ -311,13 +318,109 @@ def make_batched_daily_cycle_fn(batch, dt, n_abs_max, n_des_max):
         h_end = jnp.maximum(sol_des.ys[0, 1], h0_ref_m)
         return water, eta, c_w_end, h_end
 
-    in_axes = (0, 0) + (0,) * len(batch)  # c_w_initial, h_initial, then every batch dict value
-    batched = jax.vmap(single, in_axes=in_axes)
+    return single
+
+
+def year_padding(profiles_by_instance):
+    """Shared (dt, n_abs_max, n_des_max) across every day of every instance, so each day's
+    weather pads to one shape and the compiled step is reused all year."""
+    flat = [p for profiles in profiles_by_instance for p in profiles]
+    return (
+        flat[0].absorption.dt_s,
+        max(len(p.absorption.temperature_c) for p in flat),
+        max(len(p.desorption.temperature_c) for p in flat),
+    )
+
+
+def build_device_arrays(configs):
+    """Per-instance device parameters -- constant across the year."""
+    mass_ps = [c.mass_params() for c in configs]
+    thermal_ps = [c.thermal_params() for c in configs]
+    return dict(
+        c_s_mol_m3=jnp.array([m.c_s_mol_m3 for m in mass_ps]),
+        formula_weight_g_mol=jnp.array([m.formula_weight_g_mol for m in mass_ps]),
+        g_conv_m_s=jnp.array([m.g_conv_m_s for m in mass_ps]),
+        eps_abs=jnp.array([t.eps_abs for t in thermal_ps]),
+        tau_glass=jnp.array([t.tau_glass for t in thermal_ps]),
+        eps_abs_ir=jnp.array([t.eps_abs_ir if t.eps_abs_ir is not None else 1.0 for t in thermal_ps]),
+        eps_glass_ir=jnp.array([t.eps_glass_ir if t.eps_glass_ir is not None else 1.0 for t in thermal_ps]),
+        h0_ref_m=jnp.array([c.hydrogel_thickness_m for c in configs]),
+        vapor_gap_m=jnp.array([c.vapor_gap_m for c in configs]),
+        insulation_gap_m=jnp.array([t.insulation_gap_m for t in thermal_ps]),
+        tilt_deg=jnp.array([c.tilt_deg for c in configs]),
+        fin_area_ratio=jnp.array([c.fin_area_ratio for c in configs]),
+        salt_to_polymer_ratio=jnp.array([c.salt_to_polymer_ratio for c in configs]),
+        h_fg_j_per_kg=jnp.array([c.h_fg_j_per_kg for c in configs]),
+    )
+
+
+def build_day_weather(profiles, n_abs_max, n_des_max):
+    """One day's weather for every instance, padded to the year-wide shape."""
+    return (
+        jnp.array(np.stack([_pad_to(p.absorption.temperature_c, n_abs_max) for p in profiles])),
+        jnp.array(np.stack([_pad_to(p.absorption.relative_humidity, n_abs_max) for p in profiles])),
+        jnp.array(np.stack([_pad_to(p.absorption.h_amb_w_m2_k, n_abs_max) for p in profiles])),
+        jnp.array(np.array([len(p.absorption.temperature_c) for p in profiles], dtype=np.int32)),
+        jnp.array(np.stack([_pad_to(p.desorption.temperature_c, n_des_max) for p in profiles])),
+        jnp.array(np.stack([_pad_to(p.desorption.solar_w_m2, n_des_max) for p in profiles])),
+        jnp.array(np.stack([_pad_to(p.desorption.h_amb_w_m2_k, n_des_max) for p in profiles])),
+        jnp.array(np.array([len(p.desorption.temperature_c) for p in profiles], dtype=np.int32)),
+    )
+
+
+def make_batched_daily_cycle_fn(batch, dt, n_abs_max, n_des_max):
+    """jax.jit(jax.vmap(...)) of (c_w_initial, h_initial) -> (yield, eta, c_w_end, h_end),
+    all shape (batch,), over one fixed set of weather profiles."""
+    single = _make_single(dt, n_abs_max, n_des_max)
+    batched = jax.vmap(single, in_axes=(0, 0) + (0,) * len(batch))
 
     def fn(c_w_initial, h_initial):
         return batched(c_w_initial, h_initial, *batch.values())
 
     return jax.jit(fn)
+
+
+def make_year_step_fn(device, dt, n_abs_max, n_des_max):
+    """One compiled step reused for every day of the year: (c_w, h, weather) -> (water,
+    eta, c_w_end, h_end). Weather is an argument, not a closure constant, so all 365 days
+    share a single compilation as long as they are padded to the same shape."""
+    single = _make_single(dt, n_abs_max, n_des_max)
+    n_weather = len(WEATHER_KEYS)
+    batched = jax.vmap(single, in_axes=(0, 0) + (0,) * (n_weather + len(device)))
+    device_vals = tuple(device.values())
+
+    @jax.jit
+    def step(c_w, h, weather):
+        return batched(c_w, h, *weather, *device_vals)
+
+    return step
+
+
+def run_year_batched(step_fn, day_weathers, *, c_w_initial, h_initial, aitken_max_rounds=8):
+    """Simulate a full year per instance and return (mean daily yield, mean eta).
+
+    Day 1 is Aitken-extrapolated to its steady periodic state so the year does not start
+    from an arbitrary loading; every later day warm-starts from the previous day's end
+    state, so the sorbent carries real seasonal history and no mean-day approximation is
+    made. Days are inherently sequential -- the batch axis (design x site) is where the
+    parallelism lives."""
+    c_w = np.asarray(c_w_initial, dtype=float)
+    h = np.asarray(h_initial, dtype=float)
+    c_w, h = find_cyclic_state_batched(
+        lambda cw, hh: step_fn(cw, hh, day_weathers[0]),
+        c_w_initial=c_w, h_initial=h, max_rounds=aitken_max_rounds,
+    )
+
+    water_sum = np.zeros_like(c_w)
+    eta_sum = np.zeros_like(c_w)
+    for weather in day_weathers:
+        water, eta, c_w, h = step_fn(jnp.asarray(c_w), jnp.asarray(h), weather)
+        water_sum += np.asarray(water, dtype=float)
+        eta_sum += np.asarray(eta, dtype=float)
+        c_w = np.asarray(c_w, dtype=float)
+        h = np.asarray(h, dtype=float)
+    n_days = len(day_weathers)
+    return water_sum / n_days, eta_sum / n_days
 
 
 def find_cyclic_state_batched(

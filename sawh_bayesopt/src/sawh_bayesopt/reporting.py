@@ -15,7 +15,7 @@ import numpy as np
 from sawh_bayesopt.bayesopt import BayesOptConfig, BayesOptResult
 from sawh_bayesopt.design_space import VAR_ORDER
 from sawh_bayesopt.evaluator import DesignEvalResult, EvalCache, evaluate_batch
-from sawh_bayesopt.sites import fetch_monthly_profiles
+from sawh_bayesopt.sites import fetch_daily_profiles
 from sawh_bayesopt.verification import VerificationReport
 
 # .../SAWH_TEAs/sawh_bayesopt/src/sawh_bayesopt/reporting.py -> .../SAWH_TEAs
@@ -123,7 +123,7 @@ def evaluate_baseline(cfg: BayesOptConfig, run_dir: str | Path) -> DesignEvalRes
     run_dir = Path(run_dir)
     econ = LCOEconomicParams()
     site_profiles = {
-        s.name: fetch_monthly_profiles(s, cache_dir=cfg.weather_cache_dir) for s in cfg.sites
+        s.name: fetch_daily_profiles(s, cache_dir=cfg.weather_cache_dir) for s in cfg.sites
     }
     cache = EvalCache(run_dir / "cache.jsonl")
     baseline_cfg = DeviceConfig.baseline()
