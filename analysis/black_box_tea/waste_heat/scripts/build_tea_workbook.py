@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build waste-heat SAWH black-box Excel TEA (mirrors waste-heat/cycle_lumped LCOW costing)."""
+"""Build waste-heat SAWH black-box Excel TEA (mirrors the waste-heat package's LCOW costing)."""
 
 from __future__ import annotations
 
@@ -87,7 +87,7 @@ def _defaults() -> dict[str, float | str]:
 
 
 INPUT_ROWS: tuple[tuple[str, str, str, str], ...] = (
-    ("daily_yield_kg_per_m2", "Daily water yield", "kg/m²/d", "From waste-heat/cycle_lumped run_waste_heat_cycle_sim.py --profile datacenter-baseline --daily"),
+    ("daily_yield_kg_per_m2", "Daily water yield", "kg/m²/d", "From waste-heat run_waste_heat_cycle_sim.py --profile datacenter-baseline --daily"),
     ("cycles_per_day", "Cycles per day", "1/d", "Set >1 only if daily yield is per cycle, not per day"),
     ("salt_name", "Salt", "—", "Catalog label (price entered below)"),
     ("salt_to_polymer_ratio", "Salt-to-polymer ratio", "—", "Mass ratio salt : polymer"),
@@ -162,7 +162,7 @@ def build() -> Path:
     ws_in["A2"] = (
         "Edit yellow cells, then re-run scripts/build_tea_workbook.py to refresh outputs. "
         "Hardware BOM from patent cost estimates; hydrogel OPEX and LCOW factors mirror "
-        "electrolyte_optimization / waste-heat/cycle_lumped/economics/lcow.py"
+        "electrolyte_optimization / waste-heat economics.py"
     )
     ws_in.merge_cells("A2:D2")
 

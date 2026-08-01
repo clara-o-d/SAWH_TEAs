@@ -23,7 +23,7 @@ for _p in (_REPO / "scripts", _REPO / "src", _TEA_ROOT):
     if str(_p) not in sys.path:
         sys.path.insert(0, str(_p))
 
-from parameter_sweep import BASELINE_ECON, _apply_overrides, make_sweep_params  # noqa: E402
+from parameter_sweep import _apply_overrides, make_sweep_params  # noqa: E402
 from tea_workbook_plots import LcowBreakdown, plot_lcow_breakdown_stacked  # noqa: E402
 from waste_heat.economics import KG_WATER_PER_M3  # noqa: E402
 from waste_heat.economics import lcow_cost_breakdown_from_daily_yield  # noqa: E402

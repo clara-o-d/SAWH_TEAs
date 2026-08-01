@@ -24,7 +24,7 @@ _DEFAULT_OUT_CSV = _REPO_ROOT / "comparison" / "outputs" / "capex" / "capex_brea
 _DEFAULT_OUT_PNG = _REPO_ROOT / "comparison" / "outputs" / "capex" / "capex_breakdown_bars.png"
 _DEFAULT_OUT_RATIO_CSV = _REPO_ROOT / "comparison" / "outputs" / "capex" / "capex_ratios.csv"
 
-_ACTIVE_CONFIGS = ("single_loop", "multi_loop", "multi_noloop")
+_ACTIVE_CONFIGS = ("waste_heat",)
 
 
 def parse_args() -> argparse.Namespace:

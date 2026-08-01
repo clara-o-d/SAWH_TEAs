@@ -1,14 +1,11 @@
 """Uniform ``ConfigAdapter`` interface over the four SAWH device packages, so comparison
 scripts never branch per config:
 
-* ``passive``      -> ``solar_lumped``                    (via scripts/run_solar_sim)
-* ``single_loop``  -> ``waste_heat_lumped``               (via scripts/run_waste_heat_sim)
-* ``multi_loop``   -> ``waste_heat_cycle_lumped``         (direct DeviceConfig + ode_system)
-* ``multi_noloop`` -> ``waste_heat_cycle_lumped_no_loop`` (same, HTF-loop removal is internal)
+* ``passive``    -> ``solar_lumped``  (via scripts/run_solar_sim)
+* ``waste_heat`` -> ``waste_heat``     (direct DeviceConfig + run_daily_operation)
 
-The first two go through their scripts because that is where CLI-arg -> DeviceConfig and the
-LCOW/NPV wiring live; the cycle packages call DeviceConfig + run_daily_operation directly to
-avoid importing script internals across packages with colliding filenames."""
+``passive`` goes through its script because that is where CLI-arg -> DeviceConfig and the
+LCOW/NPV wiring live; ``waste_heat`` calls DeviceConfig + run_daily_operation directly."""
 
 from __future__ import annotations
 
@@ -204,146 +201,44 @@ class PassiveAdapter:
         )
 
 
-class SingleLoopAdapter:
-    """``waste_heat_lumped`` -- single fixed 12h/12h cycle/day, HTF loop, no vacuum pump."""
+class WasteHeatAdapter:
+    """``waste_heat`` -- two-bed, multi-cycle/day, direct waste-heat coupling + vacuum pump."""
 
-    config_id = "single_loop"
-    display_name = "Single-loop (waste heat)"
-    color = "#E69F00"
-
-    def __init__(self) -> None:
-        bootstrap.ensure_scripts_on_path("waste-heat/lumped")
-        self._mod = importlib.import_module("run_waste_heat_sim")
+    config_id = "waste_heat"
+    display_name = "Waste heat (two-bed)"
+    color = "#CC79A7"
 
     def econ_defaults(self) -> Any:
-        from waste_heat_lumped.economics import LCOEconomicParams
+        from waste_heat.economics import LCOEconomicParams
 
         return _scenario_econ(LCOEconomicParams)
 
     def bom_line_items(self) -> tuple[tuple[str, float], ...]:
-        from waste_heat_lumped.economics import DEVICE_BOM_USD_PER_M2
+        from waste_heat.economics import DEVICE_BOM_USD_PER_M2
 
         return tuple(DEVICE_BOM_USD_PER_M2)
 
-    def _build_args(self, mapping: HeatInputMapping) -> argparse.Namespace:
-        parser = argparse.ArgumentParser()
-        self._mod.register_waste_heat_sim_arguments(parser)
-        self._mod.register_cyclic_warmup_arguments(parser)
-        args = parser.parse_args([])
-        args.salt = _SCENARIO.salt_name
-        args.salt_loading = _SCENARIO.salt_to_polymer_ratio
-        args.hydrogel_thickness_mm = _SCENARIO.hydrogel_thickness_m * 1e3
-        args.t_amb_c = _SCENARIO.t_amb_c
-        args.rh = _SCENARIO.rh_amb
-        args.h_amb = _SCENARIO.h_amb_w_m2_k
-        args.t_f_c = mapping.physical_value
-        return args
-
     def simulate(self, *, econ: Any, heat_input_frac: float, **econ_overrides: Any) -> SimOutput:
         econ = _replace_econ(econ, **econ_overrides)
         mapping = map_heat_input_frac(self.config_id, heat_input_frac)
-        args = self._build_args(mapping)
-        result = self._mod.run_waste_heat_simulation(args, econ=econ)
-        return SimOutput(
-            config_id=self.config_id,
-            daily_yield_kg_per_m2=float(result.daily_yield_kg_per_m2),
-            thermal_efficiency=float(result.thermal_efficiency),
-            cycles_per_day=1.0,
-            heat_input_frac=float(heat_input_frac),
-            heat_input_physical_value=mapping.physical_value,
-            heat_input_unit=mapping.unit,
-            heat_input_param_name=mapping.param_name,
-            econ=econ,
-            material_kwargs={
-                "salt_name": _SCENARIO.salt_name,
-                "salt_to_polymer_ratio": _SCENARIO.salt_to_polymer_ratio,
-                "hydrogel_thickness_m": _SCENARIO.hydrogel_thickness_m,
-                "sorbent": "hydrogel",
-            },
-            raw=result,
-        )
+        from waste_heat.physics import M_WH_KG_S_M2
+        from waste_heat.simulation import DeviceConfig, run_daily_operation
+        from waste_heat.weather import datacenter_baseline_profile
 
-    def npv(
-        self,
-        daily_yield_kg_per_m2: float,
-        water_price_usd_per_m3: float,
-        *,
-        econ: Any,
-        cycles_per_day: float,
-        **material_kwargs: Any,
-    ) -> Any:
-        from waste_heat_lumped.economics import npv_from_daily_yield
-
-        return npv_from_daily_yield(
-            daily_yield_kg_per_m2,
-            water_price_usd_per_m3,
-            econ=econ,
-            cycles_per_day=cycles_per_day,
-            **material_kwargs,
-        )
-
-    def lcow(
-        self,
-        daily_yield_kg_per_m2: float,
-        *,
-        econ: Any,
-        cycles_per_day: float,
-        **material_kwargs: Any,
-    ) -> float:
-        from waste_heat_lumped.economics import lcow_from_daily_yield
-
-        return lcow_from_daily_yield(
-            daily_yield_kg_per_m2,
-            econ=econ,
-            cycles_per_day=cycles_per_day,
-            **material_kwargs,
-        )
-
-
-class _CycleAdapterBase:
-    """Shared implementation for ``multi_loop`` and ``multi_noloop``: both expose the same
-    DeviceConfig / datacenter_baseline_profile / run_daily_operation shape, and the
-    HTF-loop-vs-direct-coupling difference is internal to each package's physics."""
-
-    config_id: str
-    display_name: str
-    color: str
-    _package_name: str
-
-    def __init__(self) -> None:
-        self._device_config_mod = importlib.import_module(f"{self._package_name}.simulation")
-        self._profiles_mod = importlib.import_module(f"{self._package_name}.weather")
-        self._ode_mod = importlib.import_module(f"{self._package_name}.simulation")
-        self._dd_mod = importlib.import_module(f"{self._package_name}.physics")
-        self._params_mod = importlib.import_module(f"{self._package_name}.economics")
-        self._npv_mod = importlib.import_module(f"{self._package_name}.economics")
-        self._lcow_mod = importlib.import_module(f"{self._package_name}.economics")
-
-    def econ_defaults(self) -> Any:
-        return _scenario_econ(self._params_mod.LCOEconomicParams)
-
-    def bom_line_items(self) -> tuple[tuple[str, float], ...]:
-        return tuple(self._params_mod.DEVICE_BOM_USD_PER_M2)
-
-    def simulate(self, *, econ: Any, heat_input_frac: float, **econ_overrides: Any) -> SimOutput:
-        econ = _replace_econ(econ, **econ_overrides)
-        mapping = map_heat_input_frac(self.config_id, heat_input_frac)
-        config = self._device_config_mod.DeviceConfig(
+        config = DeviceConfig(
             salt_name=_SCENARIO.salt_name,
             salt_to_polymer_ratio=_SCENARIO.salt_to_polymer_ratio,
             hydrogel_thickness_m=_SCENARIO.hydrogel_thickness_m,
         )
-        profile = self._profiles_mod.datacenter_baseline_profile(
+        profile = datacenter_baseline_profile(
             tau_half_s=config.tau_half_s,
             t_amb_c=_SCENARIO.t_amb_c,
             rh=_SCENARIO.rh_amb,
             h_amb=_SCENARIO.h_amb_w_m2_k,
             t_wh_in_c=mapping.physical_value,
-            m_dot_wh_kg_s_m2=self._dd_mod.M_WH_KG_S_M2,
+            m_dot_wh_kg_s_m2=M_WH_KG_S_M2,
         )
-        yield_kg, eta, results = self._ode_mod.run_daily_operation(
-            profile, config, n_cycles=None
-        )
+        yield_kg, eta, results = run_daily_operation(profile, config, n_cycles=None)
         cycles_per_day = float(len(results))
         return SimOutput(
             config_id=self.config_id,
@@ -372,7 +267,9 @@ class _CycleAdapterBase:
         cycles_per_day: float,
         **material_kwargs: Any,
     ) -> Any:
-        return self._npv_mod.npv_from_daily_yield(
+        from waste_heat.economics import npv_from_daily_yield
+
+        return npv_from_daily_yield(
             daily_yield_kg_per_m2,
             water_price_usd_per_m3,
             econ=econ,
@@ -388,7 +285,9 @@ class _CycleAdapterBase:
         cycles_per_day: float,
         **material_kwargs: Any,
     ) -> float:
-        return self._lcow_mod.lcow_from_daily_yield(
+        from waste_heat.economics import lcow_from_daily_yield
+
+        return lcow_from_daily_yield(
             daily_yield_kg_per_m2,
             econ=econ,
             cycles_per_day=cycles_per_day,
@@ -396,31 +295,11 @@ class _CycleAdapterBase:
         )
 
 
-class MultiLoopAdapter(_CycleAdapterBase):
-    """``waste_heat_cycle_lumped`` -- multi-cycle/day, HTF loop AND vacuum pump."""
-
-    config_id = "multi_loop"
-    display_name = "Multi-loop (waste heat)"
-    color = "#009E73"
-    _package_name = "waste_heat_cycle_lumped"
-
-
-class MultiNoLoopAdapter(_CycleAdapterBase):
-    """``waste_heat_cycle_lumped_no_loop`` -- multi-cycle/day, direct waste-heat coupling."""
-
-    config_id = "multi_noloop"
-    display_name = "Multi, no loop (waste heat)"
-    color = "#CC79A7"
-    _package_name = "waste_heat_cycle_lumped_no_loop"
-
-
-ALL_CONFIG_IDS: tuple[str, ...] = ("passive", "single_loop", "multi_loop", "multi_noloop")
+ALL_CONFIG_IDS: tuple[str, ...] = ("passive", "waste_heat")
 
 _ADAPTER_CLASSES: dict[str, type] = {
     "passive": PassiveAdapter,
-    "single_loop": SingleLoopAdapter,
-    "multi_loop": MultiLoopAdapter,
-    "multi_noloop": MultiNoLoopAdapter,
+    "waste_heat": WasteHeatAdapter,
 }
 
 _INSTANCES: dict[str, ConfigAdapter] = {}
@@ -438,6 +317,6 @@ def get_adapter(config_id: str) -> ConfigAdapter:
 
 
 def get_adapters(config_ids: tuple[str, ...] | list[str] | None = None) -> dict[str, ConfigAdapter]:
-    """Return ``{config_id: adapter}`` for ``config_ids`` (default: all four), in order."""
+    """Return ``{config_id: adapter}`` for ``config_ids`` (default: all), in order."""
     ids = tuple(config_ids) if config_ids else ALL_CONFIG_IDS
     return {cid: get_adapter(cid) for cid in ids}
