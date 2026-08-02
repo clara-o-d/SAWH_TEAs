@@ -29,8 +29,6 @@ H0_M: float = _pv("Hydrogel reference thickness (H0)", mm_to_m=True)  # hydrogel
 L_G_M: float = _pv("Vapor gap (L_g)", mm_to_m=True)  # vapor gap L_g (m)
 L_INS_M: float = _pv("Insulation gap (L_ins)", mm_to_m=True)  # insulation gap L_ins (m)
 L_C_M: float = _pv("Condenser aluminum plate thickness (L_c)", mm_to_m=True)  # condenser aluminum plate thickness L_c (m)
-L_AL_STACK_M: float = L_C_M  # aluminum in gel–absorber stack
-L_SILICONE_M: float = _pv("Silicone bonding-layer thickness (L_silicone)", mm_to_m=True)  # silicone coating (m)
 
 # Wilson §2.2 / Note S1: thermobuoyancy and mass transport inhibited below ~7 mm gap
 VAPOR_GAP_TRANSPORT_MIN_M: float = _pv("Vapor-gap transport floor", mm_to_m=True)
@@ -48,9 +46,8 @@ RHO_COMPOSITE_KG_M3: float = RHO_GEL_KG_M3  # alias -- composite density at fabr
 H_DES_J_PER_KG: float = _pv("Desorption enthalpy, LiCl (h_des)")  # h_des (J/kg)
 H_FG_J_PER_KG: float = _pv("Condensation enthalpy (h_fg)")  # h_fg condensation (J/kg)
 K_AIR_W_M_K: float = _pv("Air thermal conductivity (k_air)")  # k_air (W/m·K)
-K_AL_W_M_K: float = _pv("Aluminum thermal conductivity (k_Al)")  # k_al (W/m·K) — Table S3
-K_SILICONE_W_M_K: float = _pv("Silicone bonding-layer conductivity (k_silicone)")  # k_silicone (W/m·K)
 K_GEL_W_M_K: float = _pv("Hydrogel thermal conductivity (k_gel)")  # k_w hydrogel (W/m·K) — Table S3
+RABS_M2_K_W: float = _pv("Absorber-to-gel constant resistance (Rabs)")  # R_aluminum + R_silicone, lumped and rounded
 RHO_AL_KG_M3: float = _pv("Aluminum density (rho_Al)")
 CP_AL_J_KG_K: float = _pv("Aluminum specific heat (cp_Al)")
 
@@ -71,13 +68,10 @@ FIN_AREA_RATIO: float = _pv("Condenser fin area ratio (A_r)")  # A_r
 
 def u_gel_w_m2_k(h_m: float) -> float:
     """Note S1 gel–absorber conductance in series:
-    1/U_gel = L_al/k_al + L_silicone/k_silicone + H(t)/k_hydrogel."""
+    1/U_gel = Rabs + H(t)/k_hydrogel, where Rabs lumps the (fixed) aluminum
+    and silicone resistances into one rounded constant."""
     h = max(float(h_m), H0_M * 0.25)
-    resistance = (
-        L_AL_STACK_M / K_AL_W_M_K
-        + L_SILICONE_M / K_SILICONE_W_M_K
-        + h / K_GEL_W_M_K
-    )
+    resistance = RABS_M2_K_W + h / K_GEL_W_M_K
     return 1.0 / resistance
 
 

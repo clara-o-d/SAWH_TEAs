@@ -20,8 +20,6 @@ H0_M = _pv("Hydrogel reference thickness (H0)", mm_to_m=True)
 L_G_M = _pv("Vapor gap (L_g)", mm_to_m=True)
 L_INS_M = _pv("Insulation gap (L_ins)", mm_to_m=True)
 L_C_M = _pv("Condenser aluminum plate thickness (L_c)", mm_to_m=True)
-L_AL_STACK_M = L_C_M
-L_SILICONE_M = _pv("Silicone bonding-layer thickness (L_silicone)", mm_to_m=True)
 VAPOR_GAP_TRANSPORT_MIN_M = _pv("Vapor-gap transport floor", mm_to_m=True)
 
 RHO_GEL_KG_M3 = _pv("Composite (hydrogel) density at 20% RH (rho_gel)")
@@ -29,9 +27,8 @@ RHO_COMPOSITE_KG_M3 = RHO_GEL_KG_M3
 H_DES_J_PER_KG = _pv("Desorption enthalpy, LiCl (h_des)")
 H_FG_J_PER_KG = _pv("Condensation enthalpy (h_fg)")
 K_AIR_W_M_K = _pv("Air thermal conductivity (k_air)")
-K_AL_W_M_K = _pv("Aluminum thermal conductivity (k_Al)")
-K_SILICONE_W_M_K = _pv("Silicone bonding-layer conductivity (k_silicone)")
 K_GEL_W_M_K = _pv("Hydrogel thermal conductivity (k_gel)")
+RABS_M2_K_W = _pv("Absorber-to-gel constant resistance (Rabs)")
 RHO_AL_KG_M3 = _pv("Aluminum density (rho_Al)")
 CP_AL_J_KG_K = _pv("Aluminum specific heat (cp_Al)")
 
@@ -162,7 +159,7 @@ def mass_transfer_g_from_h_conv_m_s(h_conv):
 
 def u_gel_w_m2_k(h_m):
     h = jnp.clip(h_m, H0_M * 0.25, None)
-    resistance = L_AL_STACK_M / K_AL_W_M_K + L_SILICONE_M / K_SILICONE_W_M_K + h / K_GEL_W_M_K
+    resistance = RABS_M2_K_W + h / K_GEL_W_M_K
     return 1.0 / resistance
 
 
