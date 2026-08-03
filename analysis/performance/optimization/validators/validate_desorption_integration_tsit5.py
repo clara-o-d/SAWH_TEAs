@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import sys
 import time
+from datetime import date
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
@@ -22,31 +23,24 @@ import jax  # noqa: E402
 import jax.numpy as jnp  # noqa: E402
 import numpy as np  # noqa: E402
 
-from solar_lumped.physics import DeviceThermalParams  # noqa: E402
+from solar_lumped.physics import SystemThermalParams  # noqa: E402
 from solar_lumped.physics import initial_loading  # noqa: E402
-from solar_lumped.simulation import DeviceConfig  # noqa: E402
+from solar_lumped.simulation import SystemConfig  # noqa: E402
 from solar_lumped.simulation import _integrate_absorption, _integrate_desorption  # noqa: E402
-from solar_lumped.weather import WeatherClient  # noqa: E402
-from solar_lumped.weather import representative_mean_day_df  # noqa: E402
-from solar_lumped.weather import profile_from_day_df  # noqa: E402
+from solar_lumped.weather import real_day_profile  # noqa: E402
 
 import jax_physics as jp  # noqa: E402
 
-
-def _atacama_annual_mean_profile():
-    client = WeatherClient(cache_dir=str(_REPO / ".weather_cache"))
-    lat, lon = -23.6, -70.4
-    start, end = "2024-01-01", "2024-12-31"
-    try:
-        _, df = client.get_historical_forecast_site_weather(lat, lon, start, end)
-    except Exception:
-        df = client.get_historical(lat, lon, start, end)
-    ref_day = df.index[len(df) // 2].date()
-    mean_day_df = representative_mean_day_df(df, reference_day=ref_day)
-    return profile_from_day_df(mean_day_df)
+# Mid-year real day used by every single-day validator here.
+VALIDATION_DAY = date(2024, 6, 15)
 
 
-def integrate_desorption_jax(c_w0, h0, profile, config: DeviceConfig):
+def _atacama_day_profile():
+    """One real day at the Atacama site -- no averaging (see VALIDATION_DAY)."""
+    return real_day_profile(-23.6, -70.4, VALIDATION_DAY, cache_dir=str(_REPO / ".weather_cache"))
+
+
+def integrate_desorption_jax(c_w0, h0, profile, config: SystemConfig):
     mass_p = config.mass_params()
     thermal_p = config.thermal_params()
     mass = jp.MassParams(
@@ -172,13 +166,13 @@ def integrate_desorption_jax(c_w0, h0, profile, config: DeviceConfig):
 
 def main() -> int:
     print("Fetching Atacama annual-mean weather profile (cached)...", flush=True)
-    profile = _atacama_annual_mean_profile()
+    profile = _atacama_day_profile()
 
     for eps_abs, ref_yield in ((0.90, 1.707476), (0.95, 1.800478)):
-        config = DeviceConfig(
+        config = SystemConfig(
             tilt_deg=35.0,
             fin_area_ratio=7.1,
-            thermal=DeviceThermalParams(
+            thermal=SystemThermalParams(
                 insulation_gap_m=0.005,
                 vapor_gap_m=0.04,
                 eps_abs=eps_abs,
@@ -198,7 +192,7 @@ def main() -> int:
             c_w_start, h_start, profile.desorption, config
         )
 
-        print(f"\n=== eps_abs={eps_abs} (single mean-day, not the 12-month reference) ===")
+        print(f"\n=== eps_abs={eps_abs} (single real day {VALIDATION_DAY.isoformat()}) ===")
         print(f"  CPU (Radau)   yield: {cpu_yield:.6f} kg/m^2")
         print(f"  JAX (Tsit5) yield: {jax_yield:.6f} kg/m^2   ({elapsed}, stats={stats})")
         print(f"  Wilson 12-month reference (not directly comparable, see note): {ref_yield:.6f} kg/m^2")

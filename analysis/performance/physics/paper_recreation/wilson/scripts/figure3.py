@@ -34,6 +34,7 @@ for _p in (_SRC, _SOLAR_ROOT):
         sys.path.insert(0, str(_p))
 
 from solar_lumped.physics import FIN_AREA_RATIO
+from solar_lumped.physics import SystemThermalParams
 from solar_lumped.plotting import (
     figure_size_inches,
     panel_size_inches,
@@ -44,7 +45,7 @@ from solar_lumped.plotting import (
     style_axes,
 )
 from solar_lumped.simulation import evaluate_coupled_rates
-from solar_lumped.simulation import DeviceConfig
+from solar_lumped.simulation import SystemConfig
 from solar_lumped.simulation import run_daily_cycle
 from solar_lumped.simulation import cumulative_desorption_yield_l_m2
 from solar_lumped.weather import (
@@ -60,22 +61,26 @@ _OUT_DIR = _WILSON_DIR / "outputs" / "figure3"
 _OUT_DIR.mkdir(parents=True, exist_ok=True)
 
 _REF_DIR = _WILSON_DIR / "reference" / "figure3"
-_WEATHER_DIR = _SRC / "solar_lumped" / "data" / "weather"
+_WEATHER_DIR = _WILSON_DIR / "reference" / "weather"
 _REF_LABEL = "Wilson et al. (digitized)"
+
+# Note S2 / Table S3 — the paper's chamber-calibrated absorption g, used for every
+# Wilson figure. The package default (0.015, parameters.xlsx) stands for our own work.
+_G_CONV_M_S: float = 0.0085
 
 _REF_ABSORBER_CSV = "Cambridge_absorber.csv"
 _REF_GLASS_CSV = "Cambridge_glass.csv"
 _REF_CONDENSER_CSV = "Cambridge_condenser.csv"
 
 # Solar absorber footprint area (Wilson Table S3). The digitized Fig. 3C water
-# output is reported as device-total mL (paper: "~130 mL total", Δm_gel = 131 g);
+# output is reported as system-total mL (paper: "~130 mL total", Δm_gel = 131 g);
 # dividing by A_c converts it to the mL/m² basis used for the model curve.
 _A_C_M2 = 0.078
 
 # --- Cambridge test conditions (Wilson paper Methods / Fig. 3) ---
 _T_ABS_C = 25.0       # absorption temperature (room adjacent to roof, ~25 °C)
 _RH_ABS = 0.5         # ~50% RH absorption (paper Methods)
-_RH_DES = 0.5         # RH value during desorption (sealed device; only affects CR via T_cond)
+_RH_DES = 0.5         # RH value during desorption (sealed system; only affects CR via T_cond)
 _H_AMB_MID = 10.0
 _H_AMB_LO = 7.5
 _H_AMB_HI = 12.5
@@ -167,18 +172,22 @@ def _make_profile(
     )
 
 
-# --- 3. Device configuration (optimised Cambridge device, Wilson Methods) ---
+# --- 3. System configuration (optimised Cambridge system, Wilson Methods) ---
 
-def _make_config(*, wilson_initial_temps: bool = False) -> DeviceConfig:
+def _make_config(*, wilson_initial_temps: bool = False) -> SystemConfig:
     kwargs: dict[str, object] = {
         "hydrogel_thickness_m": 0.004,   # H0 = 4 mm
         "vapor_gap_m": 0.040,            # L_g = 40 mm
         "fin_area_ratio": FIN_AREA_RATIO,  # A_r = 7.1 (Wilson Table S3)
         "tilt_deg": 35.0,                # Cambridge rooftop tilt (~35°, Methods)
+        "g_conv_m_s": _G_CONV_M_S,
+        # Case 1: original Wilson Eqs. 3/4 blackbody/cavity radiative exchange --
+        # this reproduces the paper, not the package's Case 2 default.
+        "thermal": SystemThermalParams(eps_abs_ir=1.0, eps_glass_ir=1.0),
     }
     if wilson_initial_temps:
         kwargs["coupled_initial_temps_c"] = _cambridge_initial_temps_c()
-    return DeviceConfig(**kwargs)  # type: ignore[arg-type]
+    return SystemConfig(**kwargs)  # type: ignore[arg-type]
 
 
 # --- 4 & 5. Run ODE + reconstruct absorber and glass temperatures ---
@@ -186,7 +195,7 @@ def _make_config(*, wilson_initial_temps: bool = False) -> DeviceConfig:
 def _reconstruct_all_temps(
     des_res,
     des_profile: PhaseProfile,
-    config: DeviceConfig,
+    config: SystemConfig,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Return (t_abs_arr, t_glass_arr) at every ODE output time point by
@@ -411,7 +420,7 @@ def plot_figure3b(
         t, res_mid["cum_water_ml_m2"], color="#1a6b5a",
         label="water output (model)",
     )
-    # Digitized data is device-total mL; convert to mL/m² (÷ A_c) to match model.
+    # Digitized data is system-total mL; convert to mL/m² (÷ A_c) to match model.
     if not _overlay_ref(
         ax_C, "Cambridge_water_output_ml.csv", color="#1a6b5a", label=_REF_LABEL,
         y_scale=1.0 / _A_C_M2,

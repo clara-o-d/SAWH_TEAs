@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""GPU-driven device-parameter sweep -- the JAX/diffrax counterpart to
+"""GPU-driven system-parameter sweep -- the JAX/diffrax counterpart to
 scripts/grid_param_sweep.py (see docs/sherlock_param_sweep.tex for the CPU
 version this mirrors). One invocation = one or more sites; each site's full
 125-combo grid (hydrogel thickness x fin area ratio x vapor gap, 5 values
@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import dataclasses
 import time
 from pathlib import Path
 
@@ -37,13 +38,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import numpy as np  # noqa: E402
 
 from solar_lumped import site_sweep as gps  # noqa: E402
-from solar_lumped.physics import initial_loading  # noqa: E402
+from solar_lumped.physics import EPS_ABS_IR_CASE2, EPS_GLASS_IR_CASE2, initial_loading  # noqa: E402
 from solar_lumped.weather import WeatherClient  # noqa: E402
 from solar_lumped.weather import grid_land_points  # noqa: E402
 
 from jax_daily_cycle import (  # noqa: E402
     build_day_weather,
-    build_device_arrays,
+    build_system_arrays,
     make_year_step_fn,
     run_year_batched,
     year_padding,
@@ -62,6 +63,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                        "multiple concurrent GPU jobs (see sbatch_gpu_sweep_array.sh).")
     p.add_argument("--step", type=float, default=3.0, help="Grid spacing in degrees, used with --num-sites/--site-indices")
     p.add_argument("--year", type=int, default=2024)
+    p.add_argument(
+        "--complex", action="store_true",
+        help="Sweep the complex-fidelity model (A1/B1/B2/B3/B4/B8) instead of Wilson's. "
+        "The swept grid stays the same; the complex options below fix the rest of the "
+        "design, since a grid sweep varies geometry, not chemistry.",
+    )
+    p.add_argument("--eps-abs-ir-complex", type=float, default=None,
+                   help="B1 absorber IR emissivity under --complex (default: Case 2, 0.05).")
+    p.add_argument("--glazing-panes", type=int, default=1, choices=(0, 1, 2),
+                   help="B2 pane count under --complex.")
+    p.add_argument("--evacuated-gap", action="store_true", help="B2 evacuated glazing gap.")
+    p.add_argument("--condenser-air-speed", type=float, default=0.0,
+                   help="B4 forced condenser air speed (m/s); 0 is passive.")
+    p.add_argument("--blend-weights", type=float, nargs=3, default=None,
+                   metavar=("LICL", "CACL2", "MGCL2"),
+                   help="B8 ZSR molality weights, renormalized (default: pure LiCl).")
     p.add_argument("--cache-dir", type=str, default=str(_REPO / ".weather_cache"))
     p.add_argument("--salt", type=str, default="LiCl")
     p.add_argument("--salt-loading", type=float, default=4.0)
@@ -81,15 +98,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "Case 3: 1.0.",
     )
     p.add_argument(
-        "--eps-abs-ir", type=float, default=None,
+        "--eps-abs-ir", type=float, default=EPS_ABS_IR_CASE2,
         help="Absorber IR emissivity for the modified Eqs. 3/4 radiative exchange (fixed constant, "
-        "not swept). Default None reproduces the original blackbody/cavity approximation exactly "
-        "(Case 1) -- set together with --eps-glass-ir for Case 2 (0.05) or Case 3 (0.0).",
+        "not swept). Default is Case 2 (selective surface, 0.05) -- pass 1.0 together with "
+        "--eps-glass-ir 1.0 to reproduce Case 1's original Wilson blackbody/cavity approximation "
+        "exactly, or 0.0/0.0 for Case 3.",
     )
     p.add_argument(
-        "--eps-glass-ir", type=float, default=None,
+        "--eps-glass-ir", type=float, default=EPS_GLASS_IR_CASE2,
         help="Glass IR emissivity for the modified Eqs. 3/4 radiative exchange. See --eps-abs-ir. "
-        "(Case 2: 0.95; Case 3: 0.0.)",
+        "(Case 2 default: 0.95; Case 1: 1.0; Case 3: 0.0.)",
     )
     p.add_argument("--max-rounds", type=int, default=8, help="Fixed Aitken round count (see FINDINGS.md Result 7)")
     p.add_argument("--output-csv", type=Path, required=True)
@@ -131,7 +149,7 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, client: WeatherCl
     if not days:
         print(f"  ({lat:+.4f}, {lon:+.4f}): no usable weather days, skipping.", flush=True)
         return 0
-    mean_rh, mean_t_amb, mean_solar = gps.mean_weather_stats([(0, p, 1) for p in days])
+    mean_rh, mean_t_amb, mean_solar = gps.mean_weather_stats(days)
 
     all_combos = gps.combo_grid(
         hydrogel_thickness_mm=args.hydrogel_thickness_mm,
@@ -154,20 +172,22 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, client: WeatherCl
         return 0
 
     configs = [
-        gps.build_device_config(
+        gps.build_system_config(
             c, salt=args.salt, salt_loading=args.salt_loading, insulation_gap_mm=args.insulation_gap_mm,
             tilt_deg=args.tilt_deg, eps_abs=args.eps_abs, tau_glass=args.tau_glass,
             eps_abs_ir=args.eps_abs_ir, eps_glass_ir=args.eps_glass_ir,
         )
         for c in combos
     ]
+    if args.complex:
+        configs = [dataclasses.replace(cfg, complex=_complex_options(args)) for cfg in configs]
 
     # Batch axis is the combo list; every combo walks the same year in lockstep, one
     # vmapped step per day, so days stay sequential and combos run in parallel.
     t0 = time.perf_counter()
     dt, n_abs_max, n_des_max = year_padding([days])
-    device = build_device_arrays(configs)
-    step_fn = make_year_step_fn(device, dt, n_abs_max, n_des_max)
+    system = build_system_arrays(configs, complex_mode=args.complex)
+    step_fn = make_year_step_fn(system, dt, n_abs_max, n_des_max, complex_mode=args.complex)
     day_weathers = [build_day_weather([d] * len(configs), n_abs_max, n_des_max) for d in days]
 
     mean_yield, mean_eta = run_year_batched(
@@ -194,6 +214,10 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, client: WeatherCl
                 "warmup_method": "aitken-gpu-fixed-round", "resolution": "annual",
                 "mean_yield_kg_m2": f"{mean_yield[ci]:.6f}", "mean_eta_thermal": f"{mean_eta[ci]:.6f}",
                 "n_periods": len(days),
+                # Complex settings are recorded per row, not just in the invocation:
+                # a sweep whose fidelity and chemistry are not in its own output cannot
+                # be reproduced or safely concatenated with another sweep's rows.
+                **_complex_row_fields(args),
             },
         )
     print(
@@ -201,6 +225,52 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, client: WeatherCl
         f"in {elapsed:.1f}s", flush=True,
     )
     return len(combos)
+
+
+def _complex_row_fields(args) -> dict:
+    """Complex-mode settings as CSV columns; all empty when running the simple model."""
+    if not args.complex:
+        return {
+            "fidelity": "simple", "cx_eps_abs_ir": "", "cx_glazing_panes": "",
+            "cx_evacuated_gap": "", "cx_condenser_air_speed_m_s": "", "cx_blend_weights": "",
+        }
+    cx = _complex_options(args)
+    return {
+        "fidelity": "complex",
+        "cx_eps_abs_ir": f"{cx.eps_abs_ir:.4f}",
+        "cx_glazing_panes": cx.n_glazing_panes,
+        "cx_evacuated_gap": int(cx.evacuated_gap),
+        "cx_condenser_air_speed_m_s": f"{cx.condenser_air_speed_m_s:.3f}",
+        "cx_blend_weights": ";".join(
+            f"{n}={w:.4f}" for n, w in zip(_ZSR_SALT_NAMES(), cx.blend_weights)
+        ),
+    }
+
+
+def _ZSR_SALT_NAMES():
+    from solar_lumped.complex_model import ZSR_SALTS
+
+    return ZSR_SALTS
+
+
+def _complex_options(args):
+    """ComplexOptions from the --complex flags. The grid sweep varies geometry, so
+    everything chemistry- or glazing-side is fixed per run rather than swept."""
+    from solar_lumped.complex_model import ComplexOptions
+
+    kwargs = dict(
+        n_glazing_panes=args.glazing_panes,
+        evacuated_gap=args.evacuated_gap,
+        condenser_air_speed_m_s=args.condenser_air_speed,
+    )
+    if args.eps_abs_ir_complex is not None:
+        kwargs["eps_abs_ir"] = args.eps_abs_ir_complex
+    if args.blend_weights is not None:
+        total = sum(args.blend_weights)
+        if total <= 0.0:
+            raise SystemExit("--blend-weights must not sum to zero")
+        kwargs["blend_weights"] = tuple(w / total for w in args.blend_weights)
+    return ComplexOptions(**kwargs)
 
 
 def main() -> int:

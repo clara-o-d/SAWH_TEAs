@@ -1,7 +1,7 @@
 """Full daily-cycle JAX integrator plus the Aitken steady-periodic-state search, matching
 run_daily_cycle / find_cyclic_state for the quasi_steady solver.
 
-Both phases use diffrax.Tsit5 (non-stiff at monthly-mean-day resolution, see FINDINGS.md).
+Both phases use diffrax.Tsit5 (non-stiff at daily-cycle resolution, see FINDINGS.md).
 The Aitken loop stays a thin Python loop -- only ~3-6 rounds, not worth fusing into JIT."""
 
 from __future__ import annotations
@@ -180,7 +180,7 @@ def _pad_to(arr, n_max):
 
 
 def build_batch_arrays(profiles, configs):
-    """Stack (DailyWeatherProfile, DeviceConfig) pairs into padded JAX arrays. All profiles
+    """Stack (DailyWeatherProfile, SystemConfig) pairs into padded JAX arrays. All profiles
     share PHASE_DT_S (always 100s here); only the step count varies by day length."""
     n_abs_max = max(len(p.absorption.temperature_c) for p in profiles)
     n_des_max = max(len(p.desorption.temperature_c) for p in profiles)
@@ -219,19 +219,54 @@ def build_batch_arrays(profiles, configs):
         salt_to_polymer_ratio=jnp.array([c.salt_to_polymer_ratio for c in configs]),
         h_fg_j_per_kg=jnp.array([c.h_fg_j_per_kg for c in configs]),
     )
+    if not complex_mode:
+        return arrays
+
+    from solar_lumped.complex_model import zsr_inverse_table
+
+    cxs = [c.complex for c in configs]
+    if any(cx is None for cx in cxs):
+        raise ValueError("complex_mode=True requires every SystemConfig to carry .complex")
+    tables = [zsr_inverse_table(tuple(cx.blend_weights)) for cx in cxs]
+    arrays.update(
+        n_glazing_panes=jnp.array([float(cx.n_glazing_panes) for cx in cxs]),
+        evacuated_gap=jnp.array([1.0 if cx.evacuated_gap else 0.0 for cx in cxs]),
+        fin_thickness_m=jnp.array([cx.fin_thickness_m for cx in cxs]),
+        fin_height_m=jnp.array([cx.fin_height_m for cx in cxs]),
+        # Forced condenser air is design-constant, so it is a scalar per instance
+        # rather than a weather channel: the fans hold their speed regardless of day.
+        h_amb_cond=jnp.array([_h_amb_cond_for(cx) for cx in cxs]),
+        aw_t_grid=jnp.array(np.stack([t for t, _f, _v in tables])),
+        aw_fb_grid=jnp.array(np.stack([f for _t, f, _v in tables])),
+        aw_values=jnp.array(np.stack([v for _t, _f, v in tables])),
+    )
+    return arrays
     return cfg, dt, n_abs_max, n_des_max
 
 
 # The first 8 per-instance arrays are weather (they change day to day); the rest describe
-# the device and are constant across a year.
+# the system and are constant across a year.
 WEATHER_KEYS: tuple[str, ...] = (
     "t_amb_abs", "rh_abs", "h_amb_abs", "n_abs_real",
     "t_amb_des", "solar_des", "h_amb_des", "n_des_real",
 )
 
 
-def _make_single(dt, n_abs_max, n_des_max):
-    """The per-instance daily cycle, taking weather and device parameters as arguments."""
+# Both fidelities use the same tolerance. Complex mode was briefly run at 1e-7/1e-9
+# on the theory that its hotter operating points needed it; measured against the CPU
+# path that changed the answer by <1e-6 and cost ~36x the wall clock on real weather
+# (the constant-profile synthetic day hides this -- its ODE is trivially smooth).
+# Parity is carried by matching physics, not by oversolving.
+_RTOL, _ATOL = 1e-4, 1e-7
+
+
+def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False):
+    """The per-instance daily cycle, taking weather and system parameters as arguments.
+
+    ``complex_mode`` is static (it fixes how many unknowns the thermal Newton solve
+    carries), so simple mode keeps its exact 3-unknown cost and code path. The
+    per-instance complex parameters arrive as trailing positional arguments, in the
+    order ``build_system_arrays`` appends them."""
 
     def single(
         c_w_initial, h_initial,
@@ -241,15 +276,30 @@ def _make_single(dt, n_abs_max, n_des_max):
         eps_abs_ir, eps_glass_ir,
         h0_ref_m, vapor_gap_m, insulation_gap_m, tilt_deg, fin_area_ratio,
         salt_to_polymer_ratio, h_fg_j_per_kg,
+        *complex_extras,
     ):
+        if complex_mode:
+            (
+                n_glazing_panes, evacuated_gap, fin_thickness_m, fin_height_m,
+                h_amb_cond, aw_t_grid, aw_fb_grid, aw_values,
+            ) = complex_extras
+            aw_table = (aw_t_grid, aw_fb_grid, aw_values)
+            fin_geom = dict(fin_thickness_m=fin_thickness_m, fin_height_m=fin_height_m)
+        else:
+            aw_table, h_amb_cond, fin_geom = None, None, {}
+            n_glazing_panes, evacuated_gap = 1.0, 0.0
+
         mass = jp.MassParams(
             h0_ref_m=h0_ref_m, vapor_gap_m=vapor_gap_m, tilt_deg=tilt_deg,
             c_s_mol_m3=c_s_mol_m3, formula_weight_g_mol=formula_weight_g_mol, g_conv_m_s=g_conv_m_s,
+            aw_table=aw_table,
         )
         thermal = jp.ThermalParams(
             insulation_gap_m=insulation_gap_m, vapor_gap_m=vapor_gap_m,
             eps_abs=eps_abs, tau_glass=tau_glass, tilt_deg=tilt_deg,
             eps_abs_ir=eps_abs_ir, eps_glass_ir=eps_glass_ir,
+            n_glazing_panes=n_glazing_panes, evacuated_gap=evacuated_gap,
+            complex_mode=complex_mode,
         )
         h_max_m = jnp.maximum(vapor_gap_m - jp.VAPOR_GAP_TRANSPORT_MIN_M, h0_ref_m + 1e-6)
 
@@ -276,16 +326,22 @@ def _make_single(dt, n_abs_max, n_des_max):
             q_solar = solar_des[i]
             h_amb = h_amb_des[i]
             t_cond_c = jnp.clip(y[2], -40.0, 120.0)
-            x0_guess = jnp.array(
-                [
-                    jnp.maximum(t_amb_c + 5.0, t_cond_c + 5.0),
-                    jnp.maximum(t_amb_c + 5.0, t_cond_c + 5.0) + jnp.clip(q_solar / 40.0, 5.0, 30.0),
-                    t_amb_c + 2.0,
-                ]
-            )
+            t_gel0 = jnp.maximum(t_amb_c + 5.0, t_cond_c + 5.0)
+            guess = [t_gel0, t_gel0 + jnp.clip(q_solar / 40.0, 5.0, 30.0), t_amb_c + 2.0]
+            if complex_mode:
+                # Outer pane starts between the inner pane and ambient, which is the
+                # physically correct ordering for a 2-pane stack.
+                guess.append(t_amb_c + 1.0)
+            x0_guess = jnp.array(guess)
             dy, aux = jp.desorption_rhs(
-                y[:3], t_amb_c=t_amb_c, q_solar_w_m2=q_solar, h_amb=h_amb, thermal=thermal, mass=mass,
-                h0_ref_m=h0_ref_m, h_fg_j_per_kg=h_fg_j_per_kg, fin_area_ratio=fin_area_ratio, x0_guess=x0_guess,
+                y[:3], t_amb_c=t_amb_c, q_solar_w_m2=q_solar,
+                h_amb=h_amb, thermal=thermal, mass=mass,
+                h0_ref_m=h0_ref_m, h_fg_j_per_kg=h_fg_j_per_kg, fin_area_ratio=fin_area_ratio,
+                x0_guess=x0_guess,
+                # B4: forced condenser air is a separate channel from the absorber's
+                # h_amb, so a fan-cooled condenser is not tied to ambient wind.
+                h_amb_cond=h_amb_cond,
+                **fin_geom,
             )
             m_des = aux[3]
             dy4 = jnp.concatenate([dy, jnp.array([m_des])])
@@ -295,7 +351,7 @@ def _make_single(dt, n_abs_max, n_des_max):
         sol_abs = diffrax.diffeqsolve(
             diffrax.ODETerm(abs_vf), diffrax.Tsit5(), t0=0.0, t1=dt * n_abs_max, dt0=dt, y0=y0_abs, args=None,
             saveat=diffrax.SaveAt(t1=True),
-            stepsize_controller=diffrax.PIDController(rtol=1e-4, atol=1e-7, dtmax=dt),
+            stepsize_controller=diffrax.PIDController(rtol=_RTOL, atol=_ATOL, dtmax=dt),
             max_steps=16384, adjoint=diffrax.DirectAdjoint(), throw=False,
         )
         c_w_mid = jnp.clip(sol_abs.ys[0, 0], jp.C_W_MIN_MOL_M3, jp.C_W_MAX_MOL_M3)
@@ -306,7 +362,7 @@ def _make_single(dt, n_abs_max, n_des_max):
         sol_des = diffrax.diffeqsolve(
             diffrax.ODETerm(des_vf), diffrax.Tsit5(), t0=0.0, t1=dt * n_des_max, dt0=dt, y0=y0_des, args=None,
             saveat=diffrax.SaveAt(t1=True),
-            stepsize_controller=diffrax.PIDController(rtol=1e-4, atol=1e-7, dtmax=dt),
+            stepsize_controller=diffrax.PIDController(rtol=_RTOL, atol=_ATOL, dtmax=dt),
             max_steps=16384, adjoint=diffrax.DirectAdjoint(), throw=False,
         )
         water = jnp.maximum(0.0, sol_des.ys[0, 3])
@@ -332,11 +388,31 @@ def year_padding(profiles_by_instance):
     )
 
 
-def build_device_arrays(configs):
-    """Per-instance device parameters -- constant across the year."""
+def _h_amb_cond_for(cx) -> float:
+    """B4 condenser-side convection coefficient, from ComplexOptions itself.
+
+    Deliberately not a second implementation: both backends call the same method,
+    so forced cooling cannot drift between them. ``None`` (passive) becomes the
+    baseline h_amb here, which is what sharing the absorber's coefficient means.
+    """
+    from solar_lumped.physics import H_AMB_W_M2_K
+
+    h = cx.condenser_h_amb_w_m2_k()
+    return float(H_AMB_W_M2_K) if h is None else float(h)
+
+
+def build_system_arrays(configs, *, complex_mode=False):
+    """Per-instance system parameters -- constant across the year.
+
+    In complex mode the dict gains B2/B3/B8's per-instance parameters, appended in
+    the order ``_make_single`` unpacks them from ``*complex_extras``. The ZSR
+    inverse table is built on the *host* (blend weights are constant per instance),
+    which is what lets B8 run inside a jitted right-hand side at all -- the CPU
+    path root-solves the same inversion, from the same builder.
+    """
     mass_ps = [c.mass_params() for c in configs]
     thermal_ps = [c.thermal_params() for c in configs]
-    return dict(
+    arrays = dict(
         c_s_mol_m3=jnp.array([m.c_s_mol_m3 for m in mass_ps]),
         formula_weight_g_mol=jnp.array([m.formula_weight_g_mol for m in mass_ps]),
         g_conv_m_s=jnp.array([m.g_conv_m_s for m in mass_ps]),
@@ -352,6 +428,28 @@ def build_device_arrays(configs):
         salt_to_polymer_ratio=jnp.array([c.salt_to_polymer_ratio for c in configs]),
         h_fg_j_per_kg=jnp.array([c.h_fg_j_per_kg for c in configs]),
     )
+    if not complex_mode:
+        return arrays
+
+    from solar_lumped.complex_model import zsr_inverse_table
+
+    cxs = [c.complex for c in configs]
+    if any(cx is None for cx in cxs):
+        raise ValueError("complex_mode=True requires every SystemConfig to carry .complex")
+    tables = [zsr_inverse_table(tuple(cx.blend_weights)) for cx in cxs]
+    arrays.update(
+        n_glazing_panes=jnp.array([float(cx.n_glazing_panes) for cx in cxs]),
+        evacuated_gap=jnp.array([1.0 if cx.evacuated_gap else 0.0 for cx in cxs]),
+        fin_thickness_m=jnp.array([cx.fin_thickness_m for cx in cxs]),
+        fin_height_m=jnp.array([cx.fin_height_m for cx in cxs]),
+        # Forced condenser air is design-constant, so it is a scalar per instance
+        # rather than a weather channel: the fans hold their speed regardless of day.
+        h_amb_cond=jnp.array([_h_amb_cond_for(cx) for cx in cxs]),
+        aw_t_grid=jnp.array(np.stack([t for t, _f, _v in tables])),
+        aw_fb_grid=jnp.array(np.stack([f for _t, f, _v in tables])),
+        aw_values=jnp.array(np.stack([v for _t, _f, v in tables])),
+    )
+    return arrays
 
 
 def build_day_weather(profiles, n_abs_max, n_des_max):
@@ -371,7 +469,7 @@ def build_day_weather(profiles, n_abs_max, n_des_max):
 def make_batched_daily_cycle_fn(batch, dt, n_abs_max, n_des_max):
     """jax.jit(jax.vmap(...)) of (c_w_initial, h_initial) -> (yield, eta, c_w_end, h_end),
     all shape (batch,), over one fixed set of weather profiles."""
-    single = _make_single(dt, n_abs_max, n_des_max)
+    single = _make_single(dt, n_abs_max, n_des_max, complex_mode=complex_mode)
     batched = jax.vmap(single, in_axes=(0, 0) + (0,) * len(batch))
 
     def fn(c_w_initial, h_initial):
@@ -380,18 +478,18 @@ def make_batched_daily_cycle_fn(batch, dt, n_abs_max, n_des_max):
     return jax.jit(fn)
 
 
-def make_year_step_fn(device, dt, n_abs_max, n_des_max):
+def make_year_step_fn(system, dt, n_abs_max, n_des_max, *, complex_mode=False):
     """One compiled step reused for every day of the year: (c_w, h, weather) -> (water,
     eta, c_w_end, h_end). Weather is an argument, not a closure constant, so all 365 days
     share a single compilation as long as they are padded to the same shape."""
-    single = _make_single(dt, n_abs_max, n_des_max)
+    single = _make_single(dt, n_abs_max, n_des_max, complex_mode=complex_mode)
     n_weather = len(WEATHER_KEYS)
-    batched = jax.vmap(single, in_axes=(0, 0) + (0,) * (n_weather + len(device)))
-    device_vals = tuple(device.values())
+    batched = jax.vmap(single, in_axes=(0, 0) + (0,) * (n_weather + len(system)))
+    system_vals = tuple(system.values())
 
     @jax.jit
     def step(c_w, h, weather):
-        return batched(c_w, h, *weather, *device_vals)
+        return batched(c_w, h, *weather, *system_vals)
 
     return step
 

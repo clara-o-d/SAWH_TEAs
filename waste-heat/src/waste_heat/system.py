@@ -26,7 +26,7 @@ from waste_heat.physics import (
     T_WH_IN_C,
 )
 from waste_heat.physics import inventory_label
-from waste_heat.simulation import ControllerParams, DeviceConfig
+from waste_heat.simulation import ControllerParams, SystemConfig
 from waste_heat.simulation import (
     detailed_daily_series,
     detailed_series,
@@ -46,7 +46,7 @@ from waste_heat.weather import (
 )
 
 
-def _build_config(args: argparse.Namespace) -> DeviceConfig:
+def _build_config(args: argparse.Namespace) -> SystemConfig:
     controller = None
     if args.c_vac_max is not None:
         base = ControllerParams()
@@ -57,7 +57,7 @@ def _build_config(args: argparse.Namespace) -> DeviceConfig:
             k_m_per_kg_m2=base.k_m_per_kg_m2,
             k_p_per_kg_s_m2=base.k_p_per_kg_s_m2,
         )
-    return DeviceConfig(
+    return SystemConfig(
         salt_name=args.salt,
         salt_to_polymer_ratio=args.salt_loading,
         hydrogel_thickness_m=args.hydrogel_thickness_mm * 1e-3,
@@ -69,7 +69,7 @@ def _build_config(args: argparse.Namespace) -> DeviceConfig:
     )
 
 
-def _build_profile(args: argparse.Namespace, config: DeviceConfig):
+def _build_profile(args: argparse.Namespace, config: SystemConfig):
     kwargs = dict(
         tau_half_s=config.tau_half_s,
         t_amb_c=args.t_amb_c,
@@ -94,14 +94,14 @@ def _output_tag(args: argparse.Namespace) -> str:
     return tag
 
 
-def _inventory_prefix(config: DeviceConfig) -> str:
+def _inventory_prefix(config: SystemConfig) -> str:
     return "water_in_gel"
 
 
 def _write_inventory_outputs(
     *,
     args: argparse.Namespace,
-    config: DeviceConfig,
+    config: SystemConfig,
     inventory,
     note: str,
 ) -> None:
@@ -139,7 +139,7 @@ def _write_inventory_outputs(
         print(f"Wrote {simple_plot}")
 
 
-def _half_cycle_note(half_a, half_b, config: DeviceConfig) -> str:
+def _half_cycle_note(half_a, half_b, config: SystemConfig) -> str:
     dur_a_min = float(half_a.time_s[-1]) / 60.0
     dur_b_min = float(half_b.time_s[-1]) / 60.0
     rh_a = rh_outside_desorber(float(half_a.t_d_c[-1]), float(half_a.t_cond_c[-1]))
@@ -181,7 +181,7 @@ def main() -> None:
         "--c-vac-max",
         type=float,
         default=None,
-        help="Max vacuum conductance C_vac (kg/s/Pa/m²); default from device_defaults",
+        help="Max vacuum conductance C_vac (kg/s/Pa/m²); default from system defaults",
     )
     p.add_argument("--t-wh-in-c", type=float, default=T_WH_IN_C)
     p.add_argument("--m-dot-wh", type=float, default=M_WH_KG_S_M2)
@@ -204,7 +204,7 @@ def main() -> None:
     p.add_argument(
         "--detailed",
         action="store_true",
-        help="Write CSV and plot device temperatures (contactors, condenser) "
+        help="Write CSV and plot system temperatures (contactors, condenser) "
         "and boundary conditions over the cycle",
     )
     p.add_argument(
@@ -262,12 +262,12 @@ def main() -> None:
             detailed = detailed_daily_series(results, config=config, profile=profile)
             warmup_note = f", {args.warmup_cycles} warmup" if args.warmup_cycles > 0 else ""
             plot_title = (
-                f"Device and boundaries — {args.profile} "
+                f"System and boundaries — {args.profile} "
                 f"({len(results)} cycles{warmup_note})"
             )
         else:
             detailed = detailed_series(cyc, config=config, profile=profile)
-            plot_title = f"Device and boundaries — {args.profile}"
+            plot_title = f"System and boundaries — {args.profile}"
 
         detailed_csv = args.detailed_csv
         if detailed_csv is None:

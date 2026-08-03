@@ -4,12 +4,13 @@
 Step 1 of validating the GPU-sweep prototype (see docs/gpu_sweep_handoff.md):
 before trusting any integrated trajectory, confirm the pointwise RHS agrees at
 a handful of representative (c_w, H, T_cond, T_amb, Q_solar) states spanning
-the physically relevant range for the Atacama baseline device.
+the physically relevant range for the Atacama baseline system.
 """
 
 from __future__ import annotations
 
 import sys
+from datetime import date
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
@@ -19,21 +20,22 @@ if str(_SRC) not in sys.path:
 
 import numpy as np  # noqa: E402
 
-from solar_lumped.physics import DeviceThermalParams  # noqa: E402
+from solar_lumped.physics import SystemThermalParams  # noqa: E402
 from solar_lumped.physics import initial_loading  # noqa: E402
 from solar_lumped.simulation import evaluate_coupled_rates  # noqa: E402
-from solar_lumped.simulation import DeviceConfig  # noqa: E402
+from solar_lumped.simulation import SystemConfig  # noqa: E402
 from solar_lumped.simulation import _integrate_absorption, _integrate_desorption  # noqa: E402
-from solar_lumped.weather import WeatherClient  # noqa: E402
-from solar_lumped.weather import representative_mean_day_df  # noqa: E402
-from solar_lumped.weather import profile_from_day_df  # noqa: E402
+from solar_lumped.weather import real_day_profile  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import jax_physics as jp  # noqa: E402
+
+# Mid-year real day used by every single-day validator here.
+VALIDATION_DAY = date(2024, 6, 15)
 import jax.numpy as jnp  # noqa: E402
 
 
-def cpu_rhs(config: DeviceConfig, *, c_w, h_m, t_cond_c, t_amb_c, q_solar_w_m2, h_amb):
+def cpu_rhs(config: SystemConfig, *, c_w, h_m, t_cond_c, t_amb_c, q_solar_w_m2, h_amb):
     mass = config.mass_params()
     thermal = config.thermal_params()
     rates = evaluate_coupled_rates(
@@ -63,7 +65,7 @@ def cpu_rhs(config: DeviceConfig, *, c_w, h_m, t_cond_c, t_amb_c, q_solar_w_m2, 
     )
 
 
-def jax_rhs(config: DeviceConfig, *, c_w, h_m, t_cond_c, t_amb_c, q_solar_w_m2, h_amb, x0_guess):
+def jax_rhs(config: SystemConfig, *, c_w, h_m, t_cond_c, t_amb_c, q_solar_w_m2, h_amb, x0_guess):
     mass_p = config.mass_params()
     thermal_p = config.thermal_params()
     mass = jp.MassParams(
@@ -96,7 +98,7 @@ def jax_rhs(config: DeviceConfig, *, c_w, h_m, t_cond_c, t_amb_c, q_solar_w_m2, 
     return np.array(dy), tuple(float(v) for v in aux)
 
 
-def cpu_absorption_rhs(config: DeviceConfig, *, c_w, h_m, t_amb_c, rh):
+def cpu_absorption_rhs(config: SystemConfig, *, c_w, h_m, t_amb_c, rh):
     mass = config.mass_params()
     rates = evaluate_coupled_rates(
         c_w=c_w, h_m=h_m, t_cond_c=0.0, t_amb_c=t_amb_c, rh=rh, q_solar_w_m2=0.0,
@@ -109,7 +111,7 @@ def cpu_absorption_rhs(config: DeviceConfig, *, c_w, h_m, t_amb_c, rh):
     return np.array([rates.dc_w_dt, dh])
 
 
-def jax_absorption_rhs(config: DeviceConfig, *, c_w, h_m, t_amb_c, rh):
+def jax_absorption_rhs(config: SystemConfig, *, c_w, h_m, t_amb_c, rh):
     mass_p = config.mass_params()
     mass = jp.MassParams(
         h0_ref_m=config.hydrogel_thickness_m, vapor_gap_m=config.vapor_gap_m, tilt_deg=config.tilt_deg,
@@ -125,7 +127,7 @@ def jax_absorption_rhs(config: DeviceConfig, *, c_w, h_m, t_amb_c, rh):
     return np.array(dy)
 
 
-def _validate_absorption(config: DeviceConfig, profile) -> float:
+def _validate_absorption(config: SystemConfig, profile) -> float:
     cw0 = initial_loading(config)
     abs_res = _integrate_absorption(cw0, config.hydrogel_thickness_m, profile.absorption, config)
     n = len(abs_res.time_s)
@@ -150,28 +152,20 @@ def _validate_absorption(config: DeviceConfig, profile) -> float:
     return worst
 
 
-def _atacama_annual_mean_profile():
-    client = WeatherClient(cache_dir=str(_REPO / ".weather_cache"))
-    lat, lon = -23.6, -70.4
-    start, end = "2024-01-01", "2024-12-31"
-    try:
-        _, df = client.get_historical_forecast_site_weather(lat, lon, start, end)
-    except Exception:
-        df = client.get_historical(lat, lon, start, end)
-    ref_day = df.index[len(df) // 2].date()
-    mean_day_df = representative_mean_day_df(df, reference_day=ref_day)
-    return profile_from_day_df(mean_day_df)
+def _atacama_day_profile():
+    """One real day at the Atacama site -- no averaging (see VALIDATION_DAY)."""
+    return real_day_profile(-23.6, -70.4, VALIDATION_DAY, cache_dir=str(_REPO / ".weather_cache"))
 
 
 def main() -> int:
-    print("Fetching Atacama annual-mean weather profile (cached)...", flush=True)
-    profile = _atacama_annual_mean_profile()
+    print("Fetching Atacama single-day weather profile (cached)...", flush=True)
+    profile = _atacama_day_profile()
 
     for eps_abs in (0.90, 0.95):
-        config = DeviceConfig(
+        config = SystemConfig(
             tilt_deg=35.0,
             fin_area_ratio=7.1,
-            thermal=DeviceThermalParams(
+            thermal=SystemThermalParams(
                 insulation_gap_m=0.005,
                 vapor_gap_m=0.04,
                 eps_abs=eps_abs,

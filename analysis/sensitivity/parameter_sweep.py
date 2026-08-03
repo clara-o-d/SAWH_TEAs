@@ -144,13 +144,13 @@ def _product(axes):
 
 
 class SolarModel:
-    """Passive solar hydrogel device (``solar_lumped``)."""
+    """Passive solar hydrogel system (``solar_lumped``)."""
 
     metric_names = ("daily_yield_kg_m2", "thermal_efficiency", "lcow_usd_per_m3",
                     "npv_usd_per_m2", "payback_years_simple", "payback_years_discounted")
 
     def __init__(self) -> None:
-        from solar_lumped.device import default_solar_sim_args
+        from solar_lumped.system import default_solar_sim_args
 
         self._args_factory = default_solar_sim_args
         base = default_solar_sim_args()
@@ -165,7 +165,7 @@ class SolarModel:
         }
 
     def run(self, overrides: dict, *, site: dict | None) -> dict:
-        from solar_lumped.device import resolve_solar_sim_arguments, run_solar_simulation
+        from solar_lumped.system import resolve_solar_sim_arguments, run_solar_simulation
         from solar_lumped.economics import npv_from_daily_yield
 
         args = self._args_factory()
@@ -197,15 +197,15 @@ class SolarModel:
 
 
 class WasteHeatModel:
-    """Two-bed waste-heat device with direct coupling (``waste_heat``)."""
+    """Two-bed waste-heat system with direct coupling (``waste_heat``)."""
 
     metric_names = ("daily_yield_kg_m2", "thermal_efficiency", "n_cycles_per_day",
                     "lcow_usd_per_m3", "npv_usd_per_m2", "payback_years_simple")
 
     def __init__(self) -> None:
-        from waste_heat.simulation import DeviceConfig
+        from waste_heat.simulation import SystemConfig
 
-        base = DeviceConfig()
+        base = SystemConfig()
         self.knobs = {
             "hydrogel_thickness_mm": base.hydrogel_thickness_m * 1e3,
             "vapor_gap_mm": base.vapor_gap_m * 1e3,
@@ -214,7 +214,7 @@ class WasteHeatModel:
             "rh_desorber_switch": base.rh_desorber_switch,
             "tilt_deg": base.tilt_deg,
         }
-        # knob -> (DeviceConfig field, scale from knob units to SI)
+        # knob -> (SystemConfig field, scale from knob units to SI)
         self._fields = {
             "hydrogel_thickness_mm": ("hydrogel_thickness_m", 1e-3),
             "vapor_gap_mm": ("vapor_gap_m", 1e-3),
@@ -226,14 +226,14 @@ class WasteHeatModel:
 
     def run(self, overrides: dict, *, site: dict | None) -> dict:
         from waste_heat.economics import LCOEconomicParams, lcow_from_daily_yield, npv_from_daily_yield
-        from waste_heat.simulation import DeviceConfig, simulate_daily
+        from waste_heat.simulation import SystemConfig, simulate_daily
         from waste_heat.weather import datacenter_baseline_profile
 
         kwargs = {}
         for knob, value in overrides.items():
             field, scale = self._fields[knob]
             kwargs[field] = value * scale
-        cfg = DeviceConfig(**kwargs)
+        cfg = SystemConfig(**kwargs)
         profile = datacenter_baseline_profile(tau_half_s=cfg.tau_half_s)
         econ = LCOEconomicParams()
 

@@ -59,7 +59,7 @@ scripts/hp_sweep.py --help` doesn't exist yet, the pull didn't pick them up.
 sbatch scripts/sbatch_hp_sweep_smoke.sh
 ```
 
-2 tiny combinations (single site, single-day resolution, ~12 evaluations
+2 tiny combinations (single site, ~12 evaluations
 each), 2 workers sharing 1 GPU -- this validates the whole
 sweep-plus-diagnostics-plus-plotting pipeline (including the GPU-memory-
 sharing setup described in `hp_sweep.py`'s module docstring) in well under
@@ -86,7 +86,7 @@ sbatch scripts/sbatch_hp_sweep_full.sh
 ```
 
 27 combinations (3 ei_xi x 3 stall_rel_tol x 3 n_init values, full two-site
-monthly evaluations each), 4 workers split across 2 GPUs, 12-hour time
+annual (365 real day) evaluations each), 4 workers split across 2 GPUs, 12-hour time
 limit -- adjust `--gres=gpu:2`/`--cpus-per-task`/`--time` in the sbatch
 script if your allocation differs. Each combination writes its own
 `outputs/runs/hp_sweep_1/<combo-tag>/` (same layout as any single

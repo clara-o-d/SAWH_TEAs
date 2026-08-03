@@ -245,11 +245,11 @@ def plot_atacama_weather() -> Path:
     ax_l.text(6.0, 0.97, "☾", transform=trans, ha="center", va="top", fontsize=14)
     ax_l.text(17.0, 0.97, "☼", transform=trans, ha="center", va="top", fontsize=14)
 
-    # Vertical line at device install (~8 am = hour 14)
+    # Vertical line at system install (~8 am = hour 14)
     install_h = 14.0
     ax_l.axvline(install_h, color="#444444", linewidth=0.8, linestyle="--", alpha=0.6)
     ax_l.text(
-        install_h + 0.3, 0.92, "device install\n(~8 am)",
+        install_h + 0.3, 0.92, "system install\n(~8 am)",
         transform=trans, fontsize=7, color="#444444", va="top",
     )
 

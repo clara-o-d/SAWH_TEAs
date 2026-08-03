@@ -1,7 +1,7 @@
 # Reference defaults for solar_lumped (not loaded automatically by code).
 # Authoritative physics + economics: docs/parameters.xlsx
 
-device:
+system:
   hydrogel_thickness_mm: 4.0
   vapor_gap_mm: 40.0
   insulation_gap_mm: 5.0

@@ -23,7 +23,7 @@ tl = tiledlayout(fig, 2, 3, 'TileSpacing', 'compact', 'Padding', 'compact');
 
 nexttile(tl);
 axis off;
-text(0.5, 0.5, {'Device'; 'schematic'; '(see Fig. 2A'; 'in paper)'}, ...
+text(0.5, 0.5, {'System'; 'schematic'; '(see Fig. 2A'; 'in paper)'}, ...
     'HorizontalAlignment', 'center', 'FontSize', 11, 'Color', [0.5 0.5 0.5]);
 title('A', 'FontWeight', 'bold', 'HorizontalAlignment', 'left');
 
@@ -34,7 +34,7 @@ plot_panel_e(nexttile(tl), modelDir, refDir, refLabel);
 plot_panel_f(nexttile(tl), modelDir, refDir, refLabel);
 
 sgtitle(fig, { ...
-    'Wilson et al. (2025) Figure 2 — Thermofluidic optimisation of the hydrogel SAWH device', ...
+    'Wilson et al. (2025) Figure 2 — Thermofluidic optimisation of the hydrogel SAWH system', ...
     'dashed = solar\_lumped model; circles = digitized paper data; bands = h_{amb}=10±2.5 W/m^2K'}, ...
     'Interpreter', 'tex', 'FontSize', 11);
 
@@ -63,7 +63,7 @@ for i = 1:numel(epsVals)
     end
 end
 xlabel(ax, 'transmission through glass, \tau_{glass}');
-ylabel(ax, 'device productivity [L/m^2/day]');
+ylabel(ax, 'system productivity [L/m^2/day]');
 xlim(ax, [0.2, 1.0]);
 style_panel(ax, 'B');
 end
@@ -88,7 +88,7 @@ for i = 1:numel(arVals)
     overlay_ref(ax, refDir, sprintf('2c_%d_no-glass.csv', ar), [0.6 0.6 0.6], '');
 end
 xlabel(ax, 'ambient heat transfer coefficient, h_{amb} [W/m^2K]');
-ylabel(ax, 'device productivity [L/m^2/day]');
+ylabel(ax, 'system productivity [L/m^2/day]');
 xlim(ax, [1, 10]);
 style_panel(ax, 'C');
 end
@@ -112,7 +112,7 @@ for i = 1:numel(tVals)
     end
 end
 xlabel(ax, 'ambient humidity RH [ ]');
-ylabel(ax, 'device productivity [L/m^2/day]');
+ylabel(ax, 'system productivity [L/m^2/day]');
 xlim(ax, [0.2, 0.9]);
 style_panel(ax, 'D');
 end
@@ -136,7 +136,7 @@ for i = 1:numel(lgVals)
     end
 end
 xlabel(ax, 'thickness of gel, H_0 [mm]');
-ylabel(ax, 'device productivity [L/m^2/day]');
+ylabel(ax, 'system productivity [L/m^2/day]');
 xlim(ax, [0, 8]);
 style_panel(ax, 'E');
 end
@@ -159,7 +159,7 @@ for i = 1:numel(h0Vals)
         overlay_ref(ax, refDir, sprintf('2f_prod_%d.csv', h0), [0 0 0], '');
     end
 end
-ylabel(ax, 'device productivity [L/m^2/day]');
+ylabel(ax, 'system productivity [L/m^2/day]');
 yyaxis(ax, 'right');
 for i = 1:numel(h0Vals)
     h0 = h0Vals(i);

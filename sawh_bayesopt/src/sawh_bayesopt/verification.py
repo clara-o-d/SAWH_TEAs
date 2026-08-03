@@ -13,9 +13,7 @@ from pathlib import Path
 import numpy as np
 
 from sawh_bayesopt.bayesopt import BayesOptConfig, BayesOptResult
-from sawh_bayesopt.design_space import VAR_ORDER
-from sawh_bayesopt.evaluator import DesignEvalResult, EvalCache, evaluate_batch
-from sawh_bayesopt.sites import fetch_daily_profiles
+from sawh_bayesopt.evaluator import DesignEvalResult, EvalCache, evaluate_for_config
 from sawh_bayesopt.surrogate import predict
 
 
@@ -45,7 +43,7 @@ def _perturbed_neighbors(
     span = hi - lo
     out = []
     for _ in range(n):
-        delta = rng.uniform(-frac, frac, size=len(VAR_ORDER)) * span
+        delta = rng.uniform(-frac, frac, size=span.shape[0]) * span
         out.append(np.clip(x_best + delta, lo, hi))
     return out
 
@@ -64,9 +62,6 @@ def verify_optimum(
 
     run_dir = Path(run_dir)
     econ = LCOEconomicParams()
-    site_profiles = {
-        s.name: fetch_daily_profiles(s, cache_dir=cfg.weather_cache_dir) for s in cfg.sites
-    }
     cache = EvalCache(run_dir / "cache.jsonl")
 
     x_best = np.array(result.best.design_vector, dtype=float)
@@ -74,16 +69,7 @@ def verify_optimum(
         x_best, cfg.bounds, n=n_neighbors, frac=perturbation_frac, seed=seed
     )
     xs = [x_best, *neighbors]
-    results = evaluate_batch(
-        xs,
-        cache=cache,
-        sites=cfg.sites,
-        site_profiles=site_profiles,
-        econ=econ,
-        combine_rule=cfg.combine_rule,
-        resolution=cfg.resolution,
-        case=cfg.case,
-    )
+    results = evaluate_for_config(xs, cfg=cfg, cache=cache, econ=econ)
 
     best_true = results[0].combined_lcow
     neighbor_results = results[1:]

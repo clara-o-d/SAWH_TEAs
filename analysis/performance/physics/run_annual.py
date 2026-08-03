@@ -19,12 +19,12 @@ from solar_lumped.simulation import (
     simulate_annual_year,
     write_daily_summary_csv,
 )
-from solar_lumped.simulation import DeviceConfig
+from solar_lumped.simulation import SystemConfig
 from solar_lumped.weather import fetch_year_weather
 from solar_lumped.weather import real_weather_days_from_df
 
 
-def build_device_config(
+def build_system_config(
     *,
     salt: str = "LiCl",
     salt_loading: float = 4.0,
@@ -33,9 +33,9 @@ def build_device_config(
     insulation_gap_mm: float = 5.0,
     tilt_deg: float = TILT_DEG,
     fin_area_ratio: float = 7.1,
-) -> DeviceConfig:
+) -> SystemConfig:
     get_salt(salt)
-    return DeviceConfig(
+    return SystemConfig(
         salt_name=salt,
         salt_to_polymer_ratio=salt_loading,
         hydrogel_thickness_m=hydrogel_thickness_mm * 1e-3,
@@ -85,7 +85,7 @@ def main(argv: list[str] | None = None) -> int:
     output = args.output or default_output_path(args.lat, args.lon, args.year)
     timeseries_dir = output.parent / output.stem / "timeseries"
 
-    config = build_device_config(
+    config = build_system_config(
         salt=args.salt,
         salt_loading=args.salt_loading,
         hydrogel_thickness_mm=args.hydrogel_thickness_mm,

@@ -32,6 +32,9 @@ def test_nacl_aw_decreases_with_salt_fraction():
 
 def test_catalog_drh_matches_electrolyte():
     nacl = get_salt("NaCl")
-    assert nacl.rh_min == 0.757
+    # rh_min is now derived from solubility (physics.deliquescence_rh), not tabulated.
+    # electrolyte_optimization's tabulated DRH is 0.757; the derivation lands within
+    # 0.005 of it, which is the cross-check that matters here.
+    assert nacl.rh_min == pytest.approx(0.757, abs=0.005)
     assert nacl.h_des_j_per_kg == 2_500_000
     assert nacl.price_usd_per_kg == pytest.approx(0.045)

@@ -2,7 +2,7 @@
 """
 Generate Wilson et al. (2025) Figure 2 sweep data (panels B–F).
 
-Figure 2 in the paper uses the **Table S3 / Note S1** device model (Methods), not
+Figure 2 in the paper uses the **Table S3 / Note S1** system model (Methods), not
 the authors' internal COMSOL prototype defaults (H₀=2 mm, Q=1000 W/m², 8 h
 desorption, copper condenser, custom Nu).  Digitized-curve agreement is best with:
 
@@ -44,9 +44,9 @@ from solar_lumped.physics import (
     L_G_M,
     TAU_GLASS,
     TILT_DEG,
-    DeviceThermalParams,
+    SystemThermalParams,
 )
-from solar_lumped.simulation import DeviceConfig
+from solar_lumped.simulation import SystemConfig
 from solar_lumped.simulation import run_daily_cycle
 from solar_lumped.weather import baseline_profile
 
@@ -62,6 +62,10 @@ _H_AMB = 10.0
 _H_AMB_LO = 7.5
 _H_AMB_HI = 12.5
 
+# Note S2 / Table S3 — the paper's chamber-calibrated absorption g, used for every
+# Wilson figure. The package default (0.015, parameters.xlsx) stands for our own work.
+_G_CONV_M_S: float = 0.0085
+
 _H0_MM = H0_M * 1000.0
 _LG_MM = L_G_M * 1000.0
 _A_R = FIN_AREA_RATIO
@@ -75,14 +79,17 @@ def _make_thermal(
     tau_glass: float = _TAU_GLASS,
     has_glass: bool = True,
     vapor_gap_m: float = _LG_MM / 1000.0,
-) -> DeviceThermalParams:
-    return DeviceThermalParams(
+) -> SystemThermalParams:
+    return SystemThermalParams(
         eps_abs=eps_abs,
         tau_glass=tau_glass,
         has_glass=has_glass,
         vapor_gap_m=vapor_gap_m,
         h_des_j_per_kg=H_DES_J_PER_KG,
-        physics_model="note_s1",
+        # Case 1: original Wilson Eqs. 3/4 blackbody/cavity radiative exchange --
+        # this reproduces the paper, not the package's Case 2 default.
+        eps_abs_ir=1.0,
+        eps_glass_ir=1.0,
     )
 
 
@@ -94,18 +101,19 @@ def make_config(
     eps_abs: float = _EPS_ABS,
     tau_glass: float = _TAU_GLASS,
     has_glass: bool = True,
-) -> DeviceConfig:
+) -> SystemConfig:
     thermal = _make_thermal(
         eps_abs=eps_abs,
         tau_glass=tau_glass,
         has_glass=has_glass,
         vapor_gap_m=Lg_mm / 1000.0,
     )
-    return DeviceConfig.baseline(
+    return SystemConfig.baseline(
         hydrogel_thickness_m=H0_mm / 1000.0,
         vapor_gap_m=Lg_mm / 1000.0,
         fin_area_ratio=A_r,
         tilt_deg=TILT_DEG,
+        g_conv_m_s=_G_CONV_M_S,
         thermal=thermal,
     )
 
@@ -125,7 +133,13 @@ def _make_profile(
     )
 
 
-def _run_single(config: DeviceConfig, profile) -> tuple[float, float]:
+def _run_single(config: SystemConfig, profile) -> tuple[float, float]:
+    # One day from the fabrication charge, NOT a periodic steady state. Cycling was
+    # tried: it helps panel C-with-cover (7.4%→2.5% mean rms) but wrecks panel D
+    # (0.3%→2.8%, and 0.7%→15.2% at 280 K) and flips panel F at H0=8 mm from +7% to
+    # -16%, because a cold night or a thick gel cannot recharge in 12 h and the cycle
+    # settles low. The paper's curves stay high in exactly those corners, so their
+    # Fig. 2 is a single seeded day. Mean rms/peak over all panels: 7.8% vs 9.9% cyclic.
     try:
         yield_kg, eta, _abs, _des = run_daily_cycle(profile, config)
     except (RuntimeError, ValueError):
@@ -135,7 +149,7 @@ def _run_single(config: DeviceConfig, profile) -> tuple[float, float]:
 
 class _Job(NamedTuple):
     key: tuple
-    config: DeviceConfig
+    config: SystemConfig
     profile: object
 
 

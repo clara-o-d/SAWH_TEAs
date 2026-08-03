@@ -14,7 +14,7 @@ from waste_heat.economics import (
 )
 from waste_heat.physics import H_FG_J_PER_KG
 from waste_heat.simulation import simulate_daily
-from waste_heat.simulation import DeviceConfig
+from waste_heat.simulation import SystemConfig
 from waste_heat.weather import datacenter_baseline_profile
 
 
@@ -42,7 +42,7 @@ def test_total_specific_energy_sums_components():
 
 
 def test_simulate_daily_reports_specific_energy():
-    cfg = DeviceConfig.datacenter_baseline()
+    cfg = SystemConfig.datacenter_baseline()
     profile = datacenter_baseline_profile(tau_half_s=cfg.tau_half_s)
     result = simulate_daily(profile, cfg)
     assert math.isfinite(result.specific_energy_wh_kwh_per_l)

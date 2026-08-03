@@ -45,7 +45,7 @@ ylim(axB, [10, 80]);
 axC = nexttile(tl);
 hold(axC, 'on');
 plot(axC, t, mid(:, 6), 'Color', colWater, 'DisplayName', 'water output (model)');
-aC = 0.078; % Wilson Table S3 A_c [m²] — digitized data is device-total mL
+aC = 0.078; % Wilson Table S3 A_c [m²] — digitized data is system-total mL
 [xRef, yRef] = load_ref_csv(refDir, 'Cambridge_water_output_ml.csv');
 if ~isempty(xRef)
     scatter(axC, xRef, yRef / aC, 36, 'o', ...

@@ -1,6 +1,6 @@
 # Physics checks
 
-Room for conservation checks on the device models:
+Room for conservation checks on the system models:
 
 * **Mass** — water leaving the sorbent equals water reaching the condenser, and the
   integrated flux matches the change in bed inventory.

@@ -5,8 +5,8 @@ FINDINGS.md's next steps; no GPU was available when this prototype was built).
 Answers the handoff doc's open sizing question directly: how many
 (site, combo) instances fit in one batched compiled call on one GPU, and how
 does compile time / per-instance throughput scale as batch size grows toward
-the real grid's 189,675 total? Tiles the 12 real Atacama monthly profiles and a
-handful of device configs up to each target batch size (repetition is fine for
+the real grid's 189,675 total? Tiles real Atacama day profiles and a
+handful of system configs up to each target batch size (repetition is fine for
 a throughput/memory test -- it doesn't need to be 189,675 *distinct* physical
 setups, just the same shapes and arithmetic intensity as the real grid).
 
@@ -30,12 +30,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import jax  # noqa: E402
 import numpy as np  # noqa: E402
 
-from solar_lumped.physics import DeviceThermalParams  # noqa: E402
+from solar_lumped.physics import SystemThermalParams  # noqa: E402
 from solar_lumped.physics import initial_loading  # noqa: E402
-from solar_lumped.simulation import DeviceConfig  # noqa: E402
+from solar_lumped.simulation import SystemConfig  # noqa: E402
 from solar_lumped.weather import WeatherClient  # noqa: E402
-from solar_lumped.weather import representative_mean_day_df  # noqa: E402
-from solar_lumped.weather import profile_from_day_df  # noqa: E402
+from solar_lumped.weather import real_weather_days_from_df  # noqa: E402
 
 from jax_daily_cycle import build_batch_arrays, find_cyclic_state_batched, make_batched_daily_cycle_fn  # noqa: E402
 
@@ -51,17 +50,14 @@ def _gpu_memory_used_mb() -> str:
         return f"(nvidia-smi unavailable: {e})"
 
 
-def monthly_mean_profiles(df):
+# Base profiles are real days sampled across the year (tiled up to each target batch
+# size below), never mean days.
+PROFILE_STRIDE = 30
 
-    out = []
-    for m in sorted(set(df.index.month)):
-        month_df = df[df.index.month == m]
-        if month_df.empty:
-            continue
-        ref_day = month_df.index[len(month_df) // 2].date()
-        mean_day_df = representative_mean_day_df(month_df, reference_day=ref_day)
-        out.append(profile_from_day_df(mean_day_df))
-    return out
+
+def sampled_real_day_profiles(df):
+    """Real day profiles sampled every PROFILE_STRIDE days across the year."""
+    return [prof for _day, prof, _group in real_weather_days_from_df(df, stride=PROFILE_STRIDE)]
 
 
 def build_tiled_batch(target_size: int, base_profiles, base_configs):
@@ -88,13 +84,13 @@ def main() -> int:
         _, df = client.get_historical_forecast_site_weather(args.lat, args.lon, "2024-01-01", "2024-12-31")
     except Exception:
         df = client.get_historical(args.lat, args.lon, "2024-01-01", "2024-12-31")
-    base_profiles = monthly_mean_profiles(df)
-    print(f"Built {len(base_profiles)} base monthly profiles.\n", flush=True)
+    base_profiles = sampled_real_day_profiles(df)
+    print(f"Built {len(base_profiles)} base real-day profiles.\n", flush=True)
 
     base_configs = [
-        DeviceConfig(
+        SystemConfig(
             tilt_deg=35.0, fin_area_ratio=7.1,
-            thermal=DeviceThermalParams(insulation_gap_m=0.005, vapor_gap_m=0.04, eps_abs=eps, tau_glass=0.85, tilt_deg=35.0),
+            thermal=SystemThermalParams(insulation_gap_m=0.005, vapor_gap_m=0.04, eps_abs=eps, tau_glass=0.85, tilt_deg=35.0),
         )
         for eps in (0.85, 0.90, 0.95)
     ]

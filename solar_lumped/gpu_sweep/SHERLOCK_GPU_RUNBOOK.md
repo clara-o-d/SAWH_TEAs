@@ -70,11 +70,11 @@ correctness), but the timing numbers are the new, real information:
 ```bash
 python3 gpu_sweep/validate_rhs.py
 python3 gpu_sweep/validate_desorption_integration_tsit5.py
-python3 gpu_sweep/validate_monthly_pipeline.py
+python3 gpu_sweep/validate_single_day_pipeline.py
 python3 gpu_sweep/validate_batched_pipeline.py
 ```
 
-`validate_monthly_pipeline.py` and `validate_batched_pipeline.py` are the slowest
+`validate_single_day_pipeline.py` and `validate_batched_pipeline.py` are the slowest
 (each does a real CPU run for comparison too, ~5 minutes each on the CPU side per
 `FINDINGS.md`) -- if you're short on allocation time, `validate_batched_pipeline.py`
 alone is the most informative one (it's the cross-length batching + fixed-round
@@ -83,8 +83,8 @@ Aitken test, i.e. the actual architecture the full sweep would use).
 ## 5. The real question: how big a batch fits, and how fast?
 
 This is new -- `benchmark_gpu_batch_size.py` doesn't exist in the CPU findings
-because there was no GPU to run it on. It tiles the same 12 real Atacama monthly
-profiles + a few device configs up to increasingly large batch sizes and reports
+because there was no GPU to run it on. It tiles real Atacama day
+profiles + a few system configs up to increasingly large batch sizes and reports
 compile time, per-instance throughput, and GPU memory at each size, stopping at
 whatever size first fails (out-of-memory or otherwise):
 

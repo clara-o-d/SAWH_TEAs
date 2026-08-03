@@ -1,9 +1,9 @@
 # sawh-bayesopt
 
 Surrogate-assisted (Gaussian process + Expected Improvement) global optimization
-of solar-driven SAWH device design, built on top of `solar_lumped`'s forward
+of solar-driven SAWH system design, built on top of `solar_lumped`'s forward
 ODE simulation of the Wilson et al. 2025 / Díaz-Marín et al. 2024 PAM-LiCl
-hydrogel device.
+hydrogel system.
 
 `solar_lumped` itself has no optimizer — only brute-force grid/OAT sweeps, and
 its CPU ODE solver is too slow (~380s/site per evaluation) for a dense grid or

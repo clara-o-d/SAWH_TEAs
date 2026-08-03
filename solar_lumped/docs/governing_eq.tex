@@ -14,7 +14,7 @@
 \newcommand{\code}[1]{\texttt{\seqsplit{#1}}}
 
 \title{Model Documentation: Governing Equations and Economics for a\\
-Solar-Driven, Single-Bed PAM--LiCl SAWH Device}
+Solar-Driven, Single-Bed PAM--LiCl SAWH System}
 \author{}
 \date{}
 
@@ -23,29 +23,29 @@ Solar-Driven, Single-Bed PAM--LiCl SAWH Device}
 
 \section*{Reference and scope}
 
-This document describes the lumped device + techno-economic model implemented in
+This document describes the lumped system + techno-economic model implemented in
 \code{solar\_lumped}, following Wilson \& D\'{i}az-Mar\'{i}n \textit{Device} (2025) Eqs.~1--6
 and Note~S1 (COMSOL Table~S3 parameters) for the physics, and the package's own
-\code{economics/} module for cost. The device is a single hydrogel bed that alternates
+\code{economics/} module for cost. The system is a single hydrogel bed that alternates
 between open \emph{absorption} (night) and sealed \emph{desorption} (day) half-cycles. This
 is the default (\code{desorption\_solver="quasi\_steady"}) configuration; one alternate
 exists in code but is out of scope here: \code{segregated} / \code{coupled\_bdf} desorption
 integrators, which trade the quasi-steady algebraic thermal solve for COMSOL-mimicking or
-fully transient alternatives (\code{device\_config.py}).
+fully transient alternatives (\code{system\_config.py}).
 
 \textbf{Base case is Case 2, not Wilson's original paper physics.} As of 2026-07,
-\code{DeviceConfig.thermal\_params()} -- the physics every plain \code{DeviceConfig()} call
+\code{SystemConfig.thermal\_params()} -- the physics every plain \code{SystemConfig()} call
 gets unless it explicitly overrides \code{thermal=} -- defaults to real absorber/glass IR
 emissivities ($\varepsilon_{abs,ir}=0.05$, $\varepsilon_{gl,ir}=0.95$, the "selective surface"
 variant, Case~2 in \code{sawh\_bayesopt.design\_space.CASE\_EPS\_IR}) rather than Wilson's
 original blackbody/cavity approximation (Case~1). Every equation, assumption, and default value
 below describes Case~2 unless stated otherwise. Case~1 (Wilson's exact paper physics) remains
-reachable via an explicit \code{DeviceThermalParams(eps\_abs\_ir=1.0, eps\_glass\_ir=1.0)} (or
+reachable via an explicit \code{SystemThermalParams(eps\_abs\_ir=1.0, eps\_glass\_ir=1.0)} (or
 the equivalent \code{eps\_abs\_ir=eps\_glass\_ir=None}, still numerically identical -- see
 Section~\ref{sec:radiative}) override, and is exactly what the paper-reproduction scripts under
 \code{analysis/paper\_recreation/wilson/} use -- those scripts build their own
-\code{DeviceThermalParams} directly rather than going through
-\code{DeviceConfig.thermal\_params()}, so they are unaffected by this default and continue to
+\code{SystemThermalParams} directly rather than going through
+\code{SystemConfig.thermal\_params()}, so they are unaffected by this default and continue to
 reproduce Wilson's digitized figures under Case~1. Case~3 (idealized optical-material limits,
 $\varepsilon_{abs,ir}=\varepsilon_{gl,ir}=0.0$) is a third explicit sensitivity variant, also not
 the default.
@@ -57,9 +57,9 @@ aluminum condenser; $amb$ = ambient.
 
 \section{Model design}
 
-\subsection{Device overview}
+\subsection{System overview}
 
-A footprint-area device stacks (top to bottom, day-side up): cover glass $\to$ air/insulation
+A footprint-area system stacks (top to bottom, day-side up): cover glass $\to$ air/insulation
 gap $\to$ solar absorber (aluminum) $\to$ hydrogel-salt composite bed $\to$ vapor gap $\to$
 aluminum condenser (finned, ambient-cooled). All balances are per unit footprint area
 (\si{\metre\squared}) unless noted. During \textbf{desorption} (daytime), the chamber is
@@ -194,7 +194,7 @@ Same value, same equation, different symbol.
 $L_g - H$ (tilt-dependent; Eqs.~S3--S4).
 \item \textbf{Tilt and solar gain (optional POA, off by default).} Wilson's Eq.~4 drives the
 absorber with the site's \emph{horizontal} irradiance (GHI), so by default the tilt $\theta$
-enters the model \emph{only} through the two Hollands gap correlations -- tilting the device
+enters the model \emph{only} through the two Hollands gap correlations -- tilting the system
 changes internal natural convection but not the energy it collects, which makes $\theta$
 monotone in the wrong direction for a solar collector. Passing
 \code{profile\_from\_day\_df(..., poa\_tilt\_deg=$\theta$)} (CLI:
@@ -325,7 +325,7 @@ without adding real signal).
 \begin{itemize}
 \item \textbf{LCOW} is a standard fixed-charge-rate techno-economic calculation: annualized cost
 divided by annual usable water volume. CAPEX is amortized via a capital recovery factor (CRF) at
-a fixed discount rate over a fixed device lifetime -- not a full multi-year cash-flow model with
+a fixed discount rate over a fixed system lifetime -- not a full multi-year cash-flow model with
 price escalation.
 \item \textbf{NPV / payback} (\code{npv.py}) reuses the same cost components as LCOW, but
 restructures CAPEX as an upfront year-0 payment against a level (non-escalating) annual net cash
@@ -334,7 +334,7 @@ level-annuity NPV, not a full pro forma.
 \item \textbf{CAPEX} is a fixed per-footprint bill of materials (BOM), summed from six line items,
 scaled uniformly by a \code{total\_investment\_factor} (contingency / installation multiplier
 that is easy to sweep even though the underlying line items themselves are not).
-\item \textbf{Maintenance} is a fixed fraction of the bare device BOM cost per year (not the
+\item \textbf{Maintenance} is a fixed fraction of the bare system BOM cost per year (not the
 TIC-inflated CAPEX, so it is unaffected by the total investment factor) -- not tied to any
 modeled failure or service-call process.
 \item \textbf{Sorbent replacement:} the hydrogel is replaced on a fixed interval
@@ -346,7 +346,7 @@ per-ingredient cost. MOF sorbent instead uses mass $\times$ price / lifetime dir
 \item \textbf{Utilization factor} is a single multiplicative derating of the physics-simulated
 gross annual yield (daily yield $\times$ 365 $\times$ cycles/day), meant to stand in for real-world
 downtime / non-ideal weather years -- not a modeled reliability/availability process.
-\item \textbf{No energy cost:} the device is passive solar -- no electricity, electric-heat
+\item \textbf{No energy cost:} the system is passive solar -- no electricity, electric-heat
 assist, or per-cycle energy term exists in this package (see Eq.~\eqref{eq:annual-cost}).
 \item \textbf{Out of scope:} water transport/distribution, land, installation labor, permitting,
 and end-of-life salvage value are not modeled.
@@ -363,7 +363,7 @@ market model.
 CRF = \frac{i(1+i)^L}{(1+i)^L - 1}
 \label{eq:crf}
 \end{equation}
-where $i$ is the discount rate and $L$ the device lifetime (years).
+where $i$ is the discount rate and $L$ the system lifetime (years).
 
 \textbf{Sorbent (hydrogel) replacement, annualized:}
 \begin{equation}
@@ -403,15 +403,15 @@ $c_{polymer}/(1+S/L)$ back into its four per-ingredient terms
 $\frac{\phi_k}{\sum_k \phi_k}\,\frac{c_k}{1+S/L}$ for reporting. (MOF sorbent:
 $C_{sorbent} = m_{MOF}\,c_{MOF} / L_{gel}$ directly.)
 
-\textbf{Annualized device cost:}
+\textbf{Annualized system cost:}
 \begin{equation}
-C_{annual} = CRF \cdot f_{inv}\,C_{device} + C_{sorbent} + f_{maint}\,C_{device}
+C_{annual} = CRF \cdot f_{inv}\,C_{system} + C_{sorbent} + f_{maint}\,C_{system}
 \label{eq:annual-cost}
 \end{equation}
-where $C_{device} = \sum_j C_{BOM,j}$ (six BOM line items),
+where $C_{system} = \sum_j C_{BOM,j}$ (six BOM line items),
 $f_{inv}$ is the total investment factor, and $f_{maint}$ the maintenance cost fraction.
 
-\textbf{No purchased-energy term:} this device is passive solar, so $C_{annual}$ has no
+\textbf{No purchased-energy term:} this system is passive solar, so $C_{annual}$ has no
 electricity, electric-heat-assist, or per-extra-cycle energy term at all --
 \code{LCOEconomicParams} carries no \code{electricity\_price\_usd\_per\_kwh},
 \code{desorption\_hours\_per\_day}, or \code{max\_electric\_heat\_w\_per\_m2} field. Those
@@ -437,12 +437,12 @@ maintenance / energy segments sum exactly to $LCOW$.
 through $C_{sorbent}$ (Eq.~\eqref{eq:sorbent}), which is a summand of $C_{annual}$
 (Eq.~\eqref{eq:annual-cost}), the numerator of Eq.~\eqref{eq:lcow}. A shorter $L_{gel}$
 (more frequent hydrogel replacement) raises $C_{sorbent}$ and therefore raises LCOW, all else
-equal; it does not otherwise affect device physics or yield -- \code{lcow\_from\_daily\_yield}
+equal; it does not otherwise affect system physics or yield -- \code{lcow\_from\_daily\_yield}
 (\code{economics.py::\_sorbent\_replacement\_annual\_usd}) is the code path.
 
 \textbf{NPV and payback:}
 \begin{align}
-NPV &= -f_{inv}\,C_{device} + \left(R_{annual} - OPEX_{annual}\right)\cdot
+NPV &= -f_{inv}\,C_{system} + \left(R_{annual} - OPEX_{annual}\right)\cdot
 \frac{1-(1+i)^{-L}}{i}
 \label{eq:npv} \\
 R_{annual} &= f_{util}\left(\frac{365\cdot n_{cyc}\cdot Y_{daily}}{\rho_w}\right) p_{water}
@@ -478,13 +478,14 @@ flags) also now defaults its own case-selection axis to \code{case2}, and \code{
 now built with an explicit \code{eps\_abs\_ir=eps\_glass\_ir=1.0} override rather than relying on
 omission -- numerically identical to the old \code{None, None} encoding (verified;
 $\varepsilon_{ag}=\varepsilon_{ga}=1.0$ either way), so historical \code{case1} \code{cache.jsonl}
-entries remain valid, but every \code{to\_device\_config\_kwargs} call now always includes a
+entries remain valid, but every \code{to\_system\_config\_kwargs} call now always includes a
 \code{"thermal"} key (previously omitted for \code{case1}), which changes that request's cache
-key. \code{scripts/grid\_param\_sweep.py}'s \code{--eps-abs-ir}/\code{--eps-glass-ir} CLI flags
-(used for the already-executed Sherlock global-grid sweep, \code{sherlock\_param\_sweep.tex})
-were deliberately \emph{not} changed -- they still default to \code{None} (Case~1) to keep that
-documented, already-run production sweep's baseline meaning intact; a rerun under Case~2 would
-need those flags set explicitly.
+key. \code{site\_sweep.py}'s (formerly \code{scripts/grid\_param\_sweep.py}) and
+\code{run\_gpu\_sweep.py}'s \code{--eps-abs-ir}/\code{--eps-glass-ir} CLI flags now also default
+to Case~2, matching every other entry point (2026-08). This \emph{does} change the baseline
+meaning of a bare rerun relative to the already-executed Sherlock global-grid sweep
+(\code{sherlock\_param\_sweep.tex}), which ran under the old Case~1-by-omission default: reproducing
+that sweep now requires \code{--eps-abs-ir 1.0 --eps-glass-ir 1.0} explicitly.
 \end{itemize}
 
 \end{document}

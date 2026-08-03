@@ -21,23 +21,23 @@ from waste_heat.simulation import (
     detailed_series,
     write_detailed_csv,
 )
-from waste_heat.simulation import DeviceConfig
+from waste_heat.simulation import SystemConfig
 from waste_heat.simulation import run_cycle, run_daily_operation
 from waste_heat.simulation import water_inventory_series
 from waste_heat.weather import datacenter_baseline_profile
 
 
 @pytest.fixture
-def config_hydrogel() -> DeviceConfig:
-    return DeviceConfig.datacenter_baseline()
+def config_hydrogel() -> SystemConfig:
+    return SystemConfig.datacenter_baseline()
 
 
 @pytest.fixture
-def profile(config_hydrogel: DeviceConfig):
+def profile(config_hydrogel: SystemConfig):
     return datacenter_baseline_profile(tau_half_s=config_hydrogel.tau_half_s)
 
 
-def test_half_cycle_ends_at_rh_threshold(config_hydrogel: DeviceConfig, profile):
+def test_half_cycle_ends_at_rh_threshold(config_hydrogel: SystemConfig, profile):
     cyc = run_cycle(profile, config_hydrogel)
     ha = cyc.half_a
     end_rh = rh_outside_desorber(float(ha.t_d_c[-1]), float(ha.t_cond_c[-1]))
@@ -45,7 +45,7 @@ def test_half_cycle_ends_at_rh_threshold(config_hydrogel: DeviceConfig, profile)
     assert float(ha.time_s[-1]) < config_hydrogel.tau_half_s - 60.0
 
 
-def test_equal_mass_transfer_over_half_cycle(config_hydrogel: DeviceConfig, profile):
+def test_equal_mass_transfer_over_half_cycle(config_hydrogel: SystemConfig, profile):
     cyc = run_cycle(profile, config_hydrogel)
     ha = cyc.half_a
     imb = abs(ha.integral_ads_kg_m2 - ha.integral_des_kg_m2)
@@ -54,14 +54,14 @@ def test_equal_mass_transfer_over_half_cycle(config_hydrogel: DeviceConfig, prof
     assert imb / mean_m < 0.05
 
 
-def test_hydrogel_cycle_runs(config_hydrogel: DeviceConfig, profile):
+def test_hydrogel_cycle_runs(config_hydrogel: SystemConfig, profile):
     cyc = run_cycle(profile, config_hydrogel)
     assert cyc.water_collected_kg_m2 >= 0.0
     assert math.isfinite(cyc.water_collected_kg_m2)
 
 
 def test_water_inventory_tracks_one_bed_absorb_then_desorb(
-    config_hydrogel: DeviceConfig, profile
+    config_hydrogel: SystemConfig, profile
 ):
     cyc = run_cycle(profile, config_hydrogel)
     inv = water_inventory_series(cyc, config=config_hydrogel)
@@ -78,14 +78,14 @@ def test_water_inventory_tracks_one_bed_absorb_then_desorb(
     assert inv.collected_water_l_m2[-1] == pytest.approx(cyc.water_collected_kg_m2, rel=0.02)
 
 
-def test_hydrogel_swelling(config_hydrogel: DeviceConfig, profile):
+def test_hydrogel_swelling(config_hydrogel: SystemConfig, profile):
     cyc = run_cycle(profile, config_hydrogel)
     ha = cyc.half_a
     assert ha.h_a is not None
     assert float(ha.h_a[-1]) >= config_hydrogel.hydrogel_thickness_m - 1e-9
 
 
-def test_hydrogel_adsorption_increases_c_w(config_hydrogel: DeviceConfig):
+def test_hydrogel_adsorption_increases_c_w(config_hydrogel: SystemConfig):
     params = mass_transfer_params(config_hydrogel)
     h0 = config_hydrogel.hydrogel_thickness_m
     c0 = 5000.0
@@ -99,7 +99,7 @@ def test_hydrogel_adsorption_increases_c_w(config_hydrogel: DeviceConfig):
     assert dc > 0.0
 
 
-def test_hydrogel_isotherm_inverts(config_hydrogel: DeviceConfig):
+def test_hydrogel_isotherm_inverts(config_hydrogel: SystemConfig):
     params = mass_transfer_params(config_hydrogel)
     rh = 0.45
     cw = equilibrium_c_w_at_rh(
@@ -142,7 +142,7 @@ def test_hx_effectiveness_limits():
     assert abs(q_high - ua * dt) / (ua * dt) < 1e-3
 
 
-def test_detailed_series_single_cycle(config_hydrogel: DeviceConfig, profile, tmp_path: Path):
+def test_detailed_series_single_cycle(config_hydrogel: SystemConfig, profile, tmp_path: Path):
     cyc = run_cycle(profile, config_hydrogel)
     detailed = detailed_series(cyc, config=config_hydrogel, profile=profile)
 
@@ -165,7 +165,7 @@ def test_detailed_series_single_cycle(config_hydrogel: DeviceConfig, profile, tm
     assert "t_tracked_c" not in text
 
 
-def test_detailed_daily_series(config_hydrogel: DeviceConfig, profile, tmp_path: Path):
+def test_detailed_daily_series(config_hydrogel: SystemConfig, profile, tmp_path: Path):
     _, _, results = run_daily_operation(profile, config_hydrogel, n_cycles=2)
     detailed = detailed_daily_series(results, config=config_hydrogel, profile=profile)
 

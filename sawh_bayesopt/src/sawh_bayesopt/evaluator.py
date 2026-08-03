@@ -1,7 +1,12 @@
-"""Cached combined_lcow(design_vector) over gpu_sweep's JAX daily-cycle + Aitken pipeline.
+"""Cached combined_lcow(design_vector), over either physics backend.
 
-Agrees with solar_lumped's CPU path to <0.03% and is ~8x faster (FINDINGS.md 6/7): every
-uncached design's (site, month) instances stack into one jax.vmap-compiled call."""
+"jax" is gpu_sweep's daily-cycle + Aitken pipeline: every uncached design's (site,
+day) instances stack into one jax.vmap-compiled call, which is what makes global
+sweeps affordable. "cpu" is solar_lumped's own ODE path -- sequential, no GPU stack,
+and the reference when a single site is being studied closely.
+
+Both backends implement simple *and* complex fidelity, and agree to <0.03% simple /
+<0.5% complex (FINDINGS.md 6/7, solar_lumped/tests/test_cpu_jax_parity.py)."""
 
 from __future__ import annotations
 
@@ -22,6 +27,15 @@ from sawh_bayesopt import design_space
 from sawh_bayesopt.sites import DailyProfiles, SiteSpec
 
 CombineRule = Literal["mean", "worst_case"]
+
+# Which physics backend evaluates a design. Both implement simple *and* complex
+# fidelity and agree to <0.5% on every configuration
+# (solar_lumped/tests/test_cpu_jax_parity.py):
+#   "jax" -- gpu_sweep's vmapped/jitted path. Batches every (design, site) instance
+#            into one call, so it is the backend for global sweeps. Needs jax+diffrax.
+#   "cpu" -- solar_lumped's own ODE path. Sequential, no GPU stack required, and the
+#            reference implementation when a single site is being studied closely.
+Backend = Literal["jax", "cpu"]
 
 # Finite stand-in for FAIL_LCO (1e30), which would wreck GP hyperparameter fitting;
 # still far worse than any real design (LCOW is typically single/low-double-digit).
@@ -80,15 +94,19 @@ def design_vector_hash(
     x: np.ndarray,
     *,
     sites: tuple[str, ...],
-    resolution: str = "annual",
     case: str = "case2",
 ) -> str:
-    """Stable cache key: sig-fig-rounded design vector + sites + resolution (+ case when
-    non-default), so LHS/EI float jitter doesn't cause spurious misses. The ``case``
-    default must stay in sync with evaluate_batch's, and "case1" is omitted from the
-    payload so pre-case-awareness cache.jsonl records stay valid."""
+    """Stable cache key: sig-fig-rounded design vector + sites (+ case when non-default),
+    so LHS/EI float jitter doesn't cause spurious misses. The ``case`` default must stay
+    in sync with evaluate_batch's, and "case1" is omitted from the payload so
+    pre-case-awareness cache.jsonl records stay valid.
+
+    The "annual" resolution tag is a fixed objective-version marker: every evaluation
+    walks the real 365-day year, so pre-refactor mean-day entries (tagged "monthly")
+    can never collide with these.
+    """
     rounded = tuple(_round_sig(float(v)) for v in np.asarray(x, dtype=float).reshape(-1))
-    payload = {"x": rounded, "sites": sorted(sites), "resolution": resolution}
+    payload = {"x": rounded, "sites": sorted(sites), "resolution": "annual"}
     if case != "case1":
         payload["case"] = case
     blob = json.dumps(payload, sort_keys=True)
@@ -175,6 +193,7 @@ def _run_jax_year(
     owner: list[tuple[int, int]],
     *,
     initial_loading,
+    complex_mode: bool = False,
 ) -> tuple[dict[tuple[int, int], float], dict[tuple[int, int], float], str | None]:
     """Run a full 365-day year for every (design, site) instance and reduce to mean daily
     yield/eta per pair. Returns (yield, eta, error); on a raised jax/diffrax call, error is
@@ -189,8 +208,10 @@ def _run_jax_year(
     try:
         jdc = _load_jax_daily_cycle()
         dt, n_abs_max, n_des_max = jdc.year_padding(instance_profiles)
-        device = jdc.build_device_arrays(instance_configs)
-        step_fn = jdc.make_year_step_fn(device, dt, n_abs_max, n_des_max)
+        system = jdc.build_system_arrays(instance_configs, complex_mode=complex_mode)
+        step_fn = jdc.make_year_step_fn(
+            system, dt, n_abs_max, n_des_max, complex_mode=complex_mode
+        )
 
         # Instances can disagree on year length (leap years, gaps in the weather record);
         # truncate to the shortest so every day is a full batch.
@@ -213,6 +234,113 @@ def _run_jax_year(
     return yield_by_pair, eta_by_pair, None
 
 
+def fetch_site_inputs(cfg) -> tuple[dict, dict | None]:
+    """(site_profiles, site_frames) for a run config.
+
+    Complex mode rebuilds profiles per design point -- A1's schedule offsets, B4's
+    condenser air, and POA tilt all live *in* the profile -- so it needs the raw
+    frames and the usual fetch-once-per-site reuse does not apply.
+    """
+    from sawh_bayesopt.sites import fetch_daily_profiles, fetch_site_frame
+
+    if cfg.complex_mode:
+        return {}, {
+            s.name: fetch_site_frame(s, cache_dir=cfg.weather_cache_dir) for s in cfg.sites
+        }
+    return {
+        s.name: fetch_daily_profiles(s, cache_dir=cfg.weather_cache_dir) for s in cfg.sites
+    }, None
+
+
+def evaluate_for_config(xs, *, cfg, cache, econ, site_profiles=None, site_frames=None):
+    """evaluate_batch with every mode argument taken from ``cfg``.
+
+    The loop, the verification pass, and the baseline comparison must all evaluate
+    designs identically -- each one that assembled these kwargs by hand was a place
+    to silently drop complex_mode or backend and score a 13-dim design against
+    6-dim physics. Callers that already fetched weather can pass it through.
+    """
+    if site_profiles is None and site_frames is None:
+        site_profiles, site_frames = fetch_site_inputs(cfg)
+    return evaluate_batch(
+        xs,
+        cache=cache,
+        sites=cfg.sites,
+        site_profiles=site_profiles,
+        econ=econ,
+        combine_rule=cfg.combine_rule,
+        case=cfg.case,
+        complex_mode=cfg.complex_mode,
+        site_frames=site_frames,
+        backend=cfg.backend,
+    )
+
+
+def _profiles_for_design(df, config) -> DailyProfiles:
+    """Rebuild a site's per-day profiles under one design's profile-level variables.
+
+    Complex mode puts three design variables inside the weather profile itself: A1's
+    seal/open offsets move the day/night split, B4's forced condenser air fills the
+    ``h_amb_cond`` channel, and POA transposition makes ``tilt_deg`` drive solar gain
+    instead of only the Hollands ``cos(theta)``. So profiles become design-dependent
+    and the fetch-once-per-site reuse no longer applies -- this rebuilds them from
+    the site's cached DataFrame, which is the expensive-but-correct option.
+    """
+    from solar_lumped.weather import real_weather_days_from_df
+
+    cx = config.complex
+    days = real_weather_days_from_df(
+        df,
+        seal_offset_h=cx.seal_offset_h,
+        open_offset_h=cx.open_offset_h,
+        condenser_air_speed_m_s=cx.condenser_air_speed_m_s,
+        poa_tilt_deg=config.tilt_deg,
+    )
+    return [(d.timetuple().tm_yday, prof) for d, prof, _group in days]
+
+
+def _run_cpu_year(
+    instance_profiles: list,
+    instance_configs: list,
+    owner: list[tuple[int, int]],
+    *,
+    initial_loading,
+    complex_mode: bool = False,
+) -> tuple[dict[tuple[int, int], float], dict[tuple[int, int], float], str | None]:
+    """CPU equivalent of :func:`_run_jax_year`.
+
+    The JAX fast path is LiCl-hardcoded (``water_activity_licl_from_c_w``,
+    ``_XI_MAX_LICL``) and knows nothing about glazing stacks or ZSR blends, so
+    complex mode runs solar_lumped's own ODE path instead. That costs the vmap
+    batching: instances run sequentially, days chained the same way -- steady
+    periodic state on day 1, then each day warm-starting from the last.
+    """
+    from solar_lumped.simulation import find_cyclic_state, run_daily_cycle
+
+    yield_by_pair: dict[tuple[int, int], float] = {}
+    eta_by_pair: dict[tuple[int, int], float] = {}
+    for profiles, config, pair in zip(instance_profiles, instance_configs, owner):
+        if not profiles:
+            continue
+        try:
+            c_w, h = find_cyclic_state(
+                profiles[0], config, max_rounds=JAX_AITKEN_MAX_ROUNDS, verbose=False
+            )
+            yields, etas = [], []
+            for prof in profiles:
+                y, eta, _abs_res, des_res = run_daily_cycle(
+                    prof, config, c_w_initial=c_w, h_initial=h
+                )
+                yields.append(y)
+                etas.append(eta)
+                c_w, h = float(des_res.c_w[-1]), float(des_res.H[-1])
+        except Exception as exc:  # noqa: BLE001 -- one bad design must not kill the batch
+            return {}, {}, str(exc).split("\n", 1)[0][:240]
+        yield_by_pair[pair] = float(np.mean(yields))
+        eta_by_pair[pair] = float(np.mean(etas))
+    return yield_by_pair, eta_by_pair, None
+
+
 def evaluate_batch(
     xs: list[np.ndarray],
     *,
@@ -221,18 +349,25 @@ def evaluate_batch(
     site_profiles: dict[str, DailyProfiles],
     econ,
     combine_rule: CombineRule = "mean",
-    resolution: str = "annual",
     case: str = "case2",
+    complex_mode: bool = False,
+    site_frames: dict[str, object] | None = None,
+    backend: Backend = "jax",
 ) -> list[DesignEvalResult]:
     """Evaluate every x in *xs* not already in *cache*. Each (design, site) instance runs
     all 365 real days, batched across designs and sites. ``case`` picks the IR emissivity
     variant (design_space.CASE_EPS_IR); "case2" matches solar_lumped base-case physics."""
     from solar_lumped.economics import FAIL_LCO, lcow_from_daily_yield
     from solar_lumped.physics import initial_loading
-    from solar_lumped.simulation import DeviceConfig
+    from solar_lumped.simulation import SystemConfig
 
     site_names = tuple(s.name for s in sites)
-    keys = [design_vector_hash(x, sites=site_names, resolution=resolution, case=case) for x in xs]
+    # Complex results are not interchangeable with simple ones at the same design
+    # vector, so the mode joins the cache key rather than silently colliding.
+    key_case = f"{case}+complex" if complex_mode else case
+    if backend != "jax":
+        key_case = f"{key_case}+{backend}"
+    keys = [design_vector_hash(x, sites=site_names, case=key_case) for x in xs]
     results: list[DesignEvalResult | None] = [None] * len(xs)
 
     to_run = [i for i, key in enumerate(keys) if cache.get_or_none(key) is None]
@@ -245,7 +380,12 @@ def evaluate_batch(
         assert all(r is not None for r in results)
         return results  # type: ignore[return-value]
 
-    configs = {i: DeviceConfig(**design_space.to_device_config_kwargs(xs[i], case=case)) for i in to_run}
+    configs = {
+        i: SystemConfig(
+            **design_space.to_system_config_kwargs(xs[i], case=case, complex_mode=complex_mode)
+        )
+        for i in to_run
+    }
 
     # One instance per (design, site); each carries that site's full list of day profiles.
     instance_profiles: list[list] = []
@@ -254,7 +394,15 @@ def evaluate_batch(
     no_weather: set[tuple[int, int]] = set()
     for i in to_run:
         for si, spec in enumerate(sites):
-            profiles = site_profiles[spec.name]
+            # Complex mode's A1 schedule shift, B4 condenser air, and POA tilt are all
+            # design variables that live in the *weather profile*, so profiles cannot be
+            # built once per site and shared -- they are rebuilt per design point.
+            if complex_mode:
+                if site_frames is None:
+                    raise ValueError("complex_mode requires site_frames (profiles are per-design)")
+                profiles = _profiles_for_design(site_frames[spec.name], configs[i])
+            else:
+                profiles = site_profiles[spec.name]
             if not profiles:
                 no_weather.add((i, si))
                 continue
@@ -262,9 +410,11 @@ def evaluate_batch(
             instance_configs.append(configs[i])
             owner.append((i, si))
 
+    run_year = _run_cpu_year if backend == "cpu" else _run_jax_year
     t0 = time.perf_counter()
-    yield_by_pair, eta_by_pair, batch_error = _run_jax_year(
-        instance_profiles, instance_configs, owner, initial_loading=initial_loading,
+    yield_by_pair, eta_by_pair, batch_error = run_year(
+        instance_profiles, instance_configs, owner,
+        initial_loading=initial_loading, complex_mode=complex_mode,
     )
     wall = time.perf_counter() - t0
 
@@ -298,6 +448,10 @@ def evaluate_batch(
                 salt_to_polymer_ratio=cfg.salt_to_polymer_ratio,
                 hydrogel_thickness_m=cfg.hydrogel_thickness_m,
                 econ=econ,
+                # Complex mode prices the design itself: B1/B2/B3/B4 move the BOM and
+                # B8 sets the blended salt price, so LCOW stops being yield-only.
+                complex_options=cfg.complex,
+                fin_area_ratio=cfg.fin_area_ratio if cfg.complex is not None else None,
             )
             if not math.isfinite(lcow) or lcow >= 0.99 * FAIL_LCO:
                 site_results.append(SiteResult(spec.name, FAIL_LCO, False, "invalid LCOW", mean_yield, mean_eta))

@@ -92,7 +92,7 @@ def main(argv: list[str] | None = None) -> int:
         batch = list(X[start : start + args.eval_batch_size])
         results = evaluate_batch(
             batch, cache=cache, sites=sites, site_profiles=site_profiles, econ=econ,
-            combine_rule=bo_config["combine_rule"], resolution=bo_config["resolution"],
+            combine_rule=bo_config["combine_rule"],
             case=bo_config.get("case", "case2"),
         )
         history.extend(results)

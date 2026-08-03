@@ -14,7 +14,7 @@ import numpy as np
 from sawh_bayesopt.acquisition import propose_batch
 from sawh_bayesopt.design_space import DesignBounds, latin_hypercube_design
 from sawh_bayesopt.evaluator import DesignEvalResult, EvalCache, evaluate_batch
-from sawh_bayesopt.sites import DEFAULT_SITES, SiteSpec, fetch_daily_profiles
+from sawh_bayesopt.sites import DEFAULT_SITES, SiteSpec, fetch_daily_profiles, fetch_site_frame
 from sawh_bayesopt.surrogate import (
     SurrogateState,
     append_observations,
@@ -45,11 +45,18 @@ class BayesOptConfig:
     ei_xi: float = 0.01
     stall_rel_tol: float = 0.005
     stall_rounds: int = 3
-    resolution: str = "annual"
     weather_cache_dir: str = ".weather_cache"
     # IR emissivity variant (design_space.CASE_EPS_IR): "case2" matches solar_lumped's
     # base case, "case1" Wilson's original blackbody/cavity approximation.
     case: str = "case2"
+    # Complex fidelity (solar_lumped.complex_model): 13 design dims evaluated on the
+    # CPU ODE path. Must agree with ``bounds.complex_mode``; the JAX fast path is
+    # LiCl-hardcoded and cannot represent glazing stacks or ZSR blends.
+    complex_mode: bool = False
+    # "jax" batches every (design, site) into one vmapped call -- the backend for
+    # global sweeps. "cpu" is sequential and needs no GPU stack, which is what a
+    # single-site study wants. Both support simple and complex fidelity.
+    backend: str = "jax"
     # Inner differential_evolution budget per EI proposal; matches acquisition.py's
     # defaults (1000/40) but overridable so synthetic tests don't pay real DE cost.
     de_maxiter: int = 1000
@@ -93,9 +100,18 @@ def run_bayesopt(cfg: BayesOptConfig, run_dir: str | Path) -> BayesOptResult:
     run_dir.mkdir(parents=True, exist_ok=True)
     econ = LCOEconomicParams()
 
-    site_profiles = {
-        s.name: fetch_daily_profiles(s, cache_dir=cfg.weather_cache_dir) for s in cfg.sites
-    }
+    # Complex mode rebuilds profiles per design point (A1/B4/POA are design
+    # variables that live in the profile), so it needs the raw frames instead.
+    if cfg.complex_mode:
+        site_profiles = {}
+        site_frames = {
+            s.name: fetch_site_frame(s, cache_dir=cfg.weather_cache_dir) for s in cfg.sites
+        }
+    else:
+        site_profiles = {
+            s.name: fetch_daily_profiles(s, cache_dir=cfg.weather_cache_dir) for s in cfg.sites
+        }
+        site_frames = None
     cache = EvalCache(run_dir / "cache.jsonl")
 
     def _evaluate(xs: list[np.ndarray]) -> list[DesignEvalResult]:
@@ -106,14 +122,19 @@ def run_bayesopt(cfg: BayesOptConfig, run_dir: str | Path) -> BayesOptResult:
             site_profiles=site_profiles,
             econ=econ,
             combine_rule=cfg.combine_rule,
-            resolution=cfg.resolution,
             case=cfg.case,
+            complex_mode=cfg.complex_mode,
+            site_frames=site_frames,
+            backend=cfg.backend,
         )
 
     X0 = latin_hypercube_design(cfg.n_init, cfg.bounds, seed=cfg.seed, reject_gap_degenerate=True)
     history = _evaluate(list(X0))
 
-    state = SurrogateState(gp=build_gp(seed=cfg.seed), bounds=cfg.bounds)
+    # The Matern kernel is anisotropic (one length scale per dimension), so it must
+    # be built at this run's width -- 6 simple, 13 complex.
+    n_dims = len(cfg.bounds.names())
+    state = SurrogateState(gp=build_gp(n_dims=n_dims, seed=cfg.seed), bounds=cfg.bounds)
     X_all, y_all, feasible_all = _to_xyf(history)
     state = append_observations(state, X_all, y_all, feasible_all)
     state, fitted = _try_fit(state, seed=cfg.seed)

@@ -26,34 +26,37 @@ from solar_lumped.physics import (
     saturation_vapor_pressure_pa,
 )
 from solar_lumped.simulation import evaluate_coupled_rates
-from solar_lumped.simulation import DeviceConfig
+from solar_lumped.simulation import SystemConfig
 from solar_lumped.simulation import run_daily_cycle
 from solar_lumped.weather import baseline_profile
 
 
 @pytest.fixture
-def config() -> DeviceConfig:
-    return DeviceConfig.baseline()
+def config() -> SystemConfig:
+    return SystemConfig.baseline()
 
 
 @pytest.fixture
-def mass(config: DeviceConfig):
+def mass(config: SystemConfig):
     return config.mass_params()
 
 
 @pytest.fixture
-def thermal(config: DeviceConfig):
+def thermal(config: SystemConfig):
     return config.thermal_params()
 
 
-def test_eq5_mass_transfer_formula_absorption(config: DeviceConfig, mass):
+def test_eq5_mass_transfer_formula_absorption(config: SystemConfig, mass):
     """dc_w/dt = (g/H₀) · P_sat/(RT) · (C_R − a_w) during absorption."""
     from solar_lumped.physics import _absorption_effective_water_activity
 
     h0 = config.hydrogel_thickness_m
     t_gel = 25.0
     rh = 0.5
-    c_w = 8000.0
+    # Unsaturated gel state, so this exercises the real Conde a_w rather than the
+    # saturation plateau: c_w=40000 sits at ~0.38 brine salt fraction, below
+    # XI_SAT_LICL=0.458 (the sim's own operating range is 0.22-0.39).
+    c_w = 40000.0
     c_r = concentration_ratio_absorption(rh)
     g = mass_transfer_g_m_s(phase="absorption", params=mass, h_m=h0, t_gel_c=t_gel)
     aw = _absorption_effective_water_activity(
@@ -74,7 +77,7 @@ def test_eq5_mass_transfer_formula_absorption(config: DeviceConfig, mass):
     assert dc == pytest.approx(expected, rel=1e-9)
 
 
-def test_eq6_thickness_rate_ratio_to_eq5(config: DeviceConfig, mass):
+def test_eq6_thickness_rate_ratio_to_eq5(config: SystemConfig, mass):
     """dH/dt and dc_w/dt share the same driving force; ratio is MW/ρ_sol · H₀.
 
     dc_w/dt = g/H₀ · (p_sat/RT) · driving  [mol/m³/s]
@@ -118,7 +121,7 @@ def test_concentration_ratio_desorption_formula():
     assert concentration_ratio_desorption(t_gel, t_cond) == pytest.approx(expected)
 
 
-def test_desorption_g_uses_lewis_analogy(config: DeviceConfig, mass):
+def test_desorption_g_uses_lewis_analogy(config: SystemConfig, mass):
     """Note S1 Eq. S5: g = h_conv · D_air / k_air in desorption."""
     h0 = config.hydrogel_thickness_m
     t_gel, t_cond = 50.0, 30.0
@@ -139,7 +142,7 @@ def test_desorption_g_uses_lewis_analogy(config: DeviceConfig, mass):
     assert g == pytest.approx(expected_g, rel=1e-12)
 
 
-def test_m_des_from_gel_inventory(config: DeviceConfig):
+def test_m_des_from_gel_inventory(config: SystemConfig):
     """Eq. mdot: ṁ_des = MW · (−dc_w/dt · H − c_w · dH/dt), ṁ ≥ 0."""
     c_w, h_m = 15000.0, 0.0045
     dc, dh = -0.5, -1e-5
@@ -150,7 +153,7 @@ def test_m_des_from_gel_inventory(config: DeviceConfig):
     assert m_des_kg_s_m2_from_state(c_w, h_m, dc, dh) == pytest.approx(expected)
 
 
-def test_steady_thermal_residuals_near_zero(config: DeviceConfig, thermal):
+def test_steady_thermal_residuals_near_zero(config: SystemConfig, thermal):
     """Eqs. 1, 3, 4 residuals ≈ 0 at solve_steady_thermal solution (effective gap)."""
     h0 = config.hydrogel_thickness_m
     gap_eff = config.vapor_gap_m - h0
@@ -178,12 +181,12 @@ def test_steady_thermal_residuals_near_zero(config: DeviceConfig, thermal):
     assert float(np.linalg.norm(r)) < 1e-4
 
 
-def test_absorption_coupled_rates_match_doc(config: DeviceConfig, mass, thermal):
+def test_absorption_coupled_rates_match_doc(config: SystemConfig, mass, thermal):
     """Absorption: Q_solar=0, ṁ_des=0, dT_cond/dt=0; Note S1 T_gel = T_amb."""
     h0 = config.hydrogel_thickness_m
     t_amb = 20.0
     rates = evaluate_coupled_rates(
-        c_w=9000.0,
+        c_w=40000.0,  # unsaturated (see test_eq5_mass_transfer_formula_absorption)
         h_m=h0,
         t_cond_c=t_amb,
         t_amb_c=t_amb,
@@ -205,7 +208,7 @@ def test_absorption_coupled_rates_match_doc(config: DeviceConfig, mass, thermal)
     assert rates.dc_w_dt > 0.0
 
 
-def test_desorption_m_des_self_consistent(config: DeviceConfig, mass, thermal):
+def test_desorption_m_des_self_consistent(config: SystemConfig, mass, thermal):
     """Desorption root find: ṁ_des matches Note S1 flux (Eq. 5 with H₀)."""
     from solar_lumped.physics import m_des_kg_s_m2_from_dc_w
 
@@ -234,7 +237,7 @@ def test_desorption_m_des_self_consistent(config: DeviceConfig, mass, thermal):
         assert m_calc == pytest.approx(rates.m_des_kg_s_m2, rel=1e-8, abs=1e-14)
 
 
-def test_eq2_condenser_rate_matches_formula(config: DeviceConfig, mass, thermal):
+def test_eq2_condenser_rate_matches_formula(config: SystemConfig, mass, thermal):
     """Wilson Eq. 2: dT_cond/dt from evaluate_coupled_rates matches explicit balance."""
     h0 = config.hydrogel_thickness_m
     t_cond = 35.0
@@ -273,7 +276,7 @@ def test_eq2_condenser_rate_matches_formula(config: DeviceConfig, mass, thermal)
     assert rates.dT_cond_dt == pytest.approx(expected, rel=1e-10)
 
 
-def test_thickness_constraints_at_h0(config: DeviceConfig, mass, thermal):
+def test_thickness_constraints_at_h0(config: SystemConfig, mass, thermal):
     """H = H₀: absorption allows swelling only; desorption forbids shrinkage."""
     h0 = config.hydrogel_thickness_m
     abs_rates = evaluate_coupled_rates(
@@ -315,7 +318,7 @@ def test_thickness_constraints_at_h0(config: DeviceConfig, mass, thermal):
     assert des_rates.dH_dt == 0.0
 
 
-def test_integrated_cycle_state_dimensions(config: DeviceConfig):
+def test_integrated_cycle_state_dimensions(config: SystemConfig):
     """Absorption integrates [c_w, H]; desorption adds transient T_cond."""
     _, _, abs_res, des_res = run_daily_cycle(baseline_profile(), config)
     assert abs_res.t_cond_c is None
@@ -324,14 +327,14 @@ def test_integrated_cycle_state_dimensions(config: DeviceConfig):
     assert len(des_res.c_w) == len(des_res.H) == len(des_res.t_cond_c)
 
 
-def test_integrated_h_never_below_h0(config: DeviceConfig):
+def test_integrated_h_never_below_h0(config: SystemConfig):
     h0 = config.hydrogel_thickness_m
     _, _, abs_res, des_res = run_daily_cycle(baseline_profile(), config)
     assert np.min(abs_res.H) >= h0 - 1e-12
     assert np.min(des_res.H) >= h0 - 1e-12
 
 
-def test_thermal_efficiency_definition(config: DeviceConfig):
+def test_thermal_efficiency_definition(config: SystemConfig):
     """η_th = m_water · h_fg / ∫ Q_solar dt over desorption."""
     profile = baseline_profile()
     y, eta, _, des_res = run_daily_cycle(profile, config)

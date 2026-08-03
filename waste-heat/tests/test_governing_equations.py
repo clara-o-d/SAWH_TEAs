@@ -17,20 +17,20 @@ from waste_heat.physics import (
     saturation_vapor_pressure_pa,
 )
 from waste_heat.physics import mass_transfer_params
-from waste_heat.simulation import DeviceConfig
+from waste_heat.simulation import SystemConfig
 
 
 @pytest.fixture
-def config() -> DeviceConfig:
-    return DeviceConfig.datacenter_baseline()
+def config() -> SystemConfig:
+    return SystemConfig.datacenter_baseline()
 
 
 @pytest.fixture
-def mass(config: DeviceConfig):
+def mass(config: SystemConfig):
     return mass_transfer_params(config)
 
 
-def test_eq5_mass_transfer_formula_absorption(config: DeviceConfig, mass):
+def test_eq5_mass_transfer_formula_absorption(config: SystemConfig, mass):
     """dc_w/dt = (g/H₀) · P_sat/(RT) · (C_R − a_w) during absorption."""
     from waste_heat.physics import _absorption_effective_water_activity
 
@@ -58,7 +58,7 @@ def test_eq5_mass_transfer_formula_absorption(config: DeviceConfig, mass):
     assert dc == pytest.approx(expected, rel=1e-9)
 
 
-def test_eq6_thickness_rate_ratio_to_eq5(config: DeviceConfig, mass):
+def test_eq6_thickness_rate_ratio_to_eq5(config: SystemConfig, mass):
     """dH/dt and dc_w/dt share the same driving force; ratio is MW/ρ_sol · H₀."""
     h0 = config.hydrogel_thickness_m
     t_gel = 40.0
@@ -89,7 +89,7 @@ def test_eq6_thickness_rate_ratio_to_eq5(config: DeviceConfig, mass):
     assert dh / dc == pytest.approx(expected_ratio, rel=1e-9)
 
 
-def test_eq6_thickness_rate_ratio_absorption(config: DeviceConfig, mass):
+def test_eq6_thickness_rate_ratio_absorption(config: SystemConfig, mass):
     """Same g-limited ratio holds during absorption (g = g_chamber)."""
     h0 = config.hydrogel_thickness_m
     t_gel = 32.0

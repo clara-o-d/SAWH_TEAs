@@ -44,8 +44,47 @@ def daily_profiles(df) -> DailyProfiles:
 
 def fetch_daily_profiles(site: SiteSpec, *, cache_dir: str | Path) -> DailyProfiles:
     """Fetch *site*'s full year of weather and split it into per-day profiles."""
-    df = fetch_year_weather(site.lat, site.lon, site.year, cache_dir=str(cache_dir))
-    return daily_profiles(df)
+    return daily_profiles(fetch_site_frame(site, cache_dir=cache_dir))
+
+
+def fetch_site_frame(site: SiteSpec, *, cache_dir: str | Path):
+    """Fetch *site*'s raw year of weather, unsplit.
+
+    Complex mode needs the frame rather than prebuilt profiles: A1's schedule
+    offsets, B4's condenser airflow, and POA tilt are design variables that change
+    the split itself, so profiles are rebuilt per design point (see
+    ``evaluator._profiles_for_design``).
+    """
+    return fetch_year_weather(site.lat, site.lon, site.year, cache_dir=str(cache_dir))
+
+
+def site_from_lat_lon(lat: float, lon: float, *, year: int = 2024, name: str | None = None) -> SiteSpec:
+    """A SiteSpec at arbitrary coordinates, named from them unless given a name."""
+    return SiteSpec(name or f"lat{lat:+.4f}_lon{lon:+.4f}", float(lat), float(lon), year)
+
+
+def land_grid_sites(
+    *, step_deg: float, indices: list[int] | None = None, year: int = 2024
+) -> tuple[SiteSpec, ...]:
+    """Sites on solar_lumped's land grid, for global sweeps.
+
+    Reuses ``weather.grid_land_points`` -- the same land mask the gpu_sweep global
+    sweep already runs on -- so a global BayesOpt run and a global grid sweep cover
+    an identical site list and stay comparable.
+    """
+    from solar_lumped.weather import grid_land_points
+
+    points = list(grid_land_points(step_deg=step_deg))
+    picked = list(range(len(points))) if indices is None else list(indices)
+    return tuple(
+        SiteSpec(
+            f"grid{i:05d}_lat{points[i][0]:+.3f}_lon{points[i][1]:+.3f}",
+            float(points[i][0]),
+            float(points[i][1]),
+            year,
+        )
+        for i in picked
+    )
 
 
 __all__ = [

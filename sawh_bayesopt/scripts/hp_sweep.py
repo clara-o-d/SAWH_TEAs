@@ -28,7 +28,7 @@ Usage (full sweep, 4 workers on 1 GPU):
 Usage (smoke test -- see docs/HP_SWEEP_RUNBOOK.md):
     python3 scripts/hp_sweep.py --sweep-id hp_sweep_smoke \\
         --ei-xi-values 0.02,0.1 --stall-rel-tol-values 0.005 --n-init-values 8 \\
-        --bo-budget 4 --batch-size 2 --sites cambridge --resolution single \\
+        --bo-budget 4 --batch-size 2 --sites cambridge \\
         --n-workers 2 --gpu-ids 0 --weather-cache-dir ../solar_lumped/.weather_cache
 """
 
@@ -69,7 +69,6 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--seed", type=int, default=0, help="Shared across every combination on purpose -- see module docstring.")
     p.add_argument("--combine-rule", choices=("mean", "worst_case"), default="mean")
     p.add_argument("--sites", choices=("both", "cambridge", "atacama"), default="both")
-    p.add_argument("--resolution", choices=("monthly", "single"), default="monthly")
     p.add_argument("--case", choices=("case1", "case2", "case3"), default="case2")
     p.add_argument("--weather-cache-dir", type=str, default=str(_REPO / ".weather_cache"))
     p.add_argument("--n-workers", type=int, default=1)
@@ -144,7 +143,6 @@ def _run_one_combo(task: dict) -> dict:
         ei_xi=task["ei_xi"],
         stall_rel_tol=task["stall_rel_tol"],
         stall_rounds=task["stall_rounds"],
-        resolution=task["resolution"],
         weather_cache_dir=task["weather_cache_dir"],
         case=task["case"],
     )
@@ -262,7 +260,6 @@ def main(argv: list[str] | None = None) -> int:
             "seed": args.seed,
             "combine_rule": args.combine_rule,
             "sites": args.sites,
-            "resolution": args.resolution,
             "case": args.case,
             "weather_cache_dir": args.weather_cache_dir,
             "gpu_id": gpu_ids[i % len(gpu_ids)] if gpu_ids else None,

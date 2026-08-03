@@ -1,5 +1,5 @@
-"""Device physics for the two-bed waste-heat SAWH with direct waste-heat coupling (no HTF
-loop): heat-transfer correlations, device defaults, brine/salt thermodynamics,
+"""System physics for the two-bed waste-heat SAWH with direct waste-heat coupling (no HTF
+loop): heat-transfer correlations, system defaults, brine/salt thermodynamics,
 contactor/condenser energy balances, mass transfer, and the hydrogel sorbent model."""
 
 from __future__ import annotations
@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 
 if TYPE_CHECKING:
-    from waste_heat.simulation import DeviceConfig
+    from waste_heat.simulation import SystemConfig
 
 STEFAN_BOLTZMANN_W_M2_K4: float = 5.670374419e-8
 K_AIR_W_M_K: float = 0.0286
@@ -71,9 +71,6 @@ def condenser_h_conv_w_m2_k(h_amb: float, *, fin_area_ratio: float = 7.0) -> flo
     return fin_area_ratio * h_amb
 
 
-def vacuum_conductance_kg_s_pa_m2(c_vac: float) -> float:
-    """Identity map — C_vac setpoint already in kg/(s·Pa·m²)."""
-    return max(0.0, float(c_vac))
 CONTACTOR_THERMAL_MASS_J_M2_K: float = 1.5e5
 CONTACTOR_AREA_M2: float = 1.0
 CONTACTOR_EMISSIVITY: float = 0.90
@@ -287,27 +284,6 @@ def licl_water_activity_at_brine_fraction(
     return max(0.0, min(1.0, float(concentration_term * temperature_term)))
 
 
-def pam_licl_composite_salt_fraction(
-    c_w: float,
-    *,
-    c_s: float,
-    h_m: float,
-    h0_ref_m: float,
-    formula_weight_g_mol: float,
-    salt_to_polymer_ratio: float,
-) -> float:
-    """Salt mass fraction in wet PAM-LiCl: m_s / (m_w + m_s + m_p) on a footprint basis."""
-    h = max(h_m, h0_ref_m * 0.25)
-    salt_mol_m2 = c_s * h0_ref_m
-    mass_salt = salt_mol_m2 * formula_weight_g_mol / 1000.0
-    mass_polymer = mass_salt / max(salt_to_polymer_ratio, 1e-9)
-    mass_water = max(0.0, c_w) * h * WATER_MOLAR_MASS_KG_MOL
-    total = mass_water + mass_salt + mass_polymer
-    if total <= 0.0:
-        return 1.0
-    return mass_salt / total
-
-
 def water_activity_from_c_w(
     c_w: float,
     *,
@@ -433,10 +409,6 @@ def equilibrium_c_w_from_dvs_at_rh(
     h = max(h_m, h0_ref_m * 0.25)
     c_w = mass_water_kg_m2 / (h * WATER_MOLAR_MASS_KG_MOL)
     return max(C_W_MIN_MOL_M3, min(C_W_MAX_MOL_M3, c_w))
-
-
-def _materials_dir() -> Path:
-    return Path(__file__).resolve().parent / "data" / "materials"
 
 
 def m_des_kg_s_m2(
@@ -799,31 +771,31 @@ class SorbentMassRates:
     m_des_kg_s_m2: float
 
 
-def mass_state_size(config: DeviceConfig) -> int:
+def mass_state_size(config: SystemConfig) -> int:
     return 4
 
 
-def inventory_label(config: DeviceConfig) -> str:
+def inventory_label(config: SystemConfig) -> str:
     return "gel"
 
 
-def inventory_column(config: DeviceConfig) -> str:
+def inventory_column(config: SystemConfig) -> str:
     return "water_in_gel_l_m2"
 
 
-def inventory_ylabel(config: DeviceConfig) -> str:
+def inventory_ylabel(config: SystemConfig) -> str:
     return "Water in gel (L/m²)"
 
 
-def h_ads_j_per_kg(config: DeviceConfig) -> float:
+def h_ads_j_per_kg(config: SystemConfig) -> float:
     return get_salt(config.salt_name).h_des_j_per_kg
 
 
-def h_des_j_per_kg(config: DeviceConfig) -> float:
+def h_des_j_per_kg(config: SystemConfig) -> float:
     return get_salt(config.salt_name).h_des_j_per_kg
 
 
-def mass_transfer_params(config: DeviceConfig) -> MassTransferParams:
+def mass_transfer_params(config: SystemConfig) -> MassTransferParams:
     s = get_salt(config.salt_name)
     return MassTransferParams(
         g_conv_m_s=config.g_conv_m_s,
@@ -843,23 +815,18 @@ def mass_transfer_params(config: DeviceConfig) -> MassTransferParams:
     )
 
 
-def water_kg_m2_bed(loading: float, *, config: DeviceConfig, h_m: float | None = None) -> float:
-    h = h_m if h_m is not None else config.hydrogel_thickness_m
-    return WATER_MOLAR_MASS_KG_MOL * loading * h
-
-
 def water_in_gel_l_m2(
     loading: float,
     h_m: float,
     *,
-    config: DeviceConfig,
+    config: SystemConfig,
 ) -> float:
     """Water in gel (L/m²) on Wilson Fig. S1 DVS gravimetric basis."""
     u = pam_licl_gravimetric_uptake_g_g(loading, h_m, h0_ref_m=config.hydrogel_thickness_m)
     return u * pam_licl_dry_mass_kg_m2(config.hydrogel_thickness_m)
 
 
-def initial_bed_states(config: DeviceConfig) -> tuple[BedState, BedState]:
+def initial_bed_states(config: SystemConfig) -> tuple[BedState, BedState]:
     h0 = config.hydrogel_thickness_m
     c_ads = equilibrium_c_w_from_dvs_at_rh(RH_AMB * 0.65, h_m=h0, h0_ref_m=h0)
     c_regen = equilibrium_c_w_from_dvs_at_rh(FABRICATION_EQUILIBRIUM_RH, h_m=h0, h0_ref_m=h0)
@@ -953,7 +920,7 @@ def mass_rates(
     t_cond_c: float,
     rh_amb: float,
     c_vac_kg_s_pa_m2: float,
-    config: DeviceConfig,
+    config: SystemConfig,
     equalize: bool = True,
 ) -> SorbentMassRates:
     params = mass_transfer_params(config)
@@ -1001,7 +968,7 @@ def fluxes_for_control(
     t_cond_c: float,
     rh_amb: float,
     c_vac_kg_s_pa_m2: float,
-    config: DeviceConfig,
+    config: SystemConfig,
 ) -> tuple[float, float]:
     rates = mass_rates(
         loading_a=loading_a,

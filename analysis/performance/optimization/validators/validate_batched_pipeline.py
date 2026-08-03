@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Step 4: validate cross-length batching (Result 7 in FINDINGS.md).
 
-The 12 real monthly mean-day profiles at one site naturally have different
+Real day profiles sampled across the year at one site naturally have different
 absorption/desorption step counts (day length varies by month) -- a perfect,
 already-available test bed for the padding+masking approach needed to batch
 across sites/months in one compiled call, without fetching new weather data.
 
 Compares the batched (padded, masked, fixed-round-count Aitken) JAX pipeline
 against the serial per-month JAX pipeline (already validated against CPU in
-validate_monthly_pipeline.py) on the same 12 profiles.
+validate_single_day_pipeline.py) on the same profiles.
 """
 
 from __future__ import annotations
@@ -25,12 +25,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import numpy as np  # noqa: E402
 
-from solar_lumped.physics import DeviceThermalParams  # noqa: E402
+from solar_lumped.physics import SystemThermalParams  # noqa: E402
 from solar_lumped.physics import initial_loading  # noqa: E402
-from solar_lumped.simulation import DeviceConfig  # noqa: E402
+from solar_lumped.simulation import SystemConfig  # noqa: E402
 from solar_lumped.weather import WeatherClient  # noqa: E402
-from solar_lumped.weather import representative_mean_day_df  # noqa: E402
-from solar_lumped.weather import profile_from_day_df  # noqa: E402
+from solar_lumped.weather import real_weather_days_from_df  # noqa: E402
 
 from jax_daily_cycle import (  # noqa: E402
     build_batch_arrays,
@@ -41,20 +40,14 @@ from jax_daily_cycle import (  # noqa: E402
 )
 
 
-def monthly_mean_profiles(df):
-    import pandas as pd
+# One real day per ~month, sampled across the year by stride -- real days, never means.
+# 12 keeps the serial arm (one Aitken solve per profile) tractable for a validator.
+PROFILE_STRIDE = 30
 
-    out = []
-    for m in sorted(set(df.index.month)):
-        month_df = df[df.index.month == m]
-        if month_df.empty:
-            continue
-        ref_day = month_df.index[len(month_df) // 2].date()
-        mean_day_df = representative_mean_day_df(month_df, reference_day=ref_day)
-        profile = profile_from_day_df(mean_day_df)
-        n_days = len(pd.unique(month_df.index.date))
-        out.append((m, profile, n_days))
-    return out
+
+def sampled_real_day_profiles(df):
+    """Real day profiles sampled every PROFILE_STRIDE days across the year."""
+    return [prof for _day, prof, _group in real_weather_days_from_df(df, stride=PROFILE_STRIDE)]
 
 
 def main() -> int:
@@ -65,14 +58,13 @@ def main() -> int:
         _, df = client.get_historical_forecast_site_weather(lat, lon, "2024-01-01", "2024-12-31")
     except Exception:
         df = client.get_historical(lat, lon, "2024-01-01", "2024-12-31")
-    monthly = monthly_mean_profiles(df)
-    months, profiles, n_days = zip(*monthly)
-    print(f"Built {len(profiles)} monthly profiles, lengths (desorption steps): "
+    profiles = sampled_real_day_profiles(df)
+    print(f"Built {len(profiles)} real-day profiles, lengths (desorption steps): "
           f"{[len(p.desorption.temperature_c) for p in profiles]}\n", flush=True)
 
-    config = DeviceConfig(
+    config = SystemConfig(
         tilt_deg=35.0, fin_area_ratio=7.1,
-        thermal=DeviceThermalParams(insulation_gap_m=0.005, vapor_gap_m=0.04, eps_abs=0.90, tau_glass=0.85, tilt_deg=35.0),
+        thermal=SystemThermalParams(insulation_gap_m=0.005, vapor_gap_m=0.04, eps_abs=0.90, tau_glass=0.85, tilt_deg=35.0),
     )
     cw0 = initial_loading(config)
     h0 = config.hydrogel_thickness_m

@@ -66,6 +66,8 @@ def build_gp_classifier(
 class SurrogateState:
     gp: GaussianProcessRegressor
     bounds: DesignBounds
+    # Width is the run's design dimensionality (6 simple / 13 complex); the empty
+    # default is reshaped to match on the first append_observations call.
     X_raw: np.ndarray = field(default_factory=lambda: np.zeros((0, len(VAR_ORDER))))
     y: np.ndarray = field(default_factory=lambda: np.zeros((0,)))
     # True iff y is a real LCOW measurement (all sites feasible). gp fits on
@@ -103,7 +105,7 @@ def append_observations(
 ) -> SurrogateState:
     """feasible_new=None treats every new point as feasible -- right for synthetic objectives
     and Kriging-Believer fantasy points; bayesopt.py must pass real flags."""
-    X_new = np.asarray(X_new, dtype=float).reshape(-1, len(VAR_ORDER))
+    X_new = np.asarray(X_new, dtype=float).reshape(-1, len(state.bounds.names()))
     y_new = np.asarray(y_new, dtype=float).reshape(-1)
     feasible_new = (
         np.ones(y_new.shape[0], dtype=bool) if feasible_new is None
@@ -138,7 +140,7 @@ def fit_feasibility(state: SurrogateState, *, seed: int = 0) -> SurrogateState:
         state.clf = None
         return state
     u = to_unit_cube(state.X_raw, state.bounds)
-    clf = build_gp_classifier(seed=seed)
+    clf = build_gp_classifier(n_dims=u.shape[1], seed=seed)
     clf.fit(u, state.feasible)
     state.clf = clf
     return state
@@ -188,14 +190,14 @@ def predict(state: SurrogateState, x: np.ndarray) -> tuple[float, float]:
 
 
 def predict_batch(state: SurrogateState, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    u = to_unit_cube(np.asarray(X, dtype=float).reshape(-1, len(VAR_ORDER)), state.bounds)
+    u = to_unit_cube(np.asarray(X, dtype=float).reshape(-1, len(state.bounds.names())), state.bounds)
     mu, sigma = state.gp.predict(u, return_std=True)
     return mu, sigma
 
 
 def predict_feasibility_batch(state: SurrogateState, X: np.ndarray) -> np.ndarray:
     """P(feasible) at raw design vectors X, shape (n,); all-ones when state.clf is None."""
-    X = np.asarray(X, dtype=float).reshape(-1, len(VAR_ORDER))
+    X = np.asarray(X, dtype=float).reshape(-1, len(state.bounds.names()))
     if state.clf is None:
         return np.ones(X.shape[0])
     u = to_unit_cube(X, state.bounds)
@@ -214,7 +216,7 @@ def save_state(state: SurrogateState, path: str | Path) -> None:
     sidecar.write_text(
         json.dumps(
             {
-                "bounds": {name: list(getattr(state.bounds, name)) for name in VAR_ORDER},
+                "bounds": {name: list(getattr(state.bounds, name)) for name in state.bounds.names()},
                 "X_raw": state.X_raw.tolist(),
                 "y": state.y.tolist(),
                 "feasible": state.feasible.tolist(),
@@ -227,21 +229,3 @@ def save_state(state: SurrogateState, path: str | Path) -> None:
         )
     )
 
-
-def load_state(path: str | Path) -> SurrogateState:
-    import joblib
-
-    path = Path(path)
-    models = joblib.load(path)
-    sidecar = json.loads(path.with_suffix(path.suffix + ".json").read_text())
-    bounds = DesignBounds(**{name: tuple(v) for name, v in sidecar["bounds"].items()})
-    n = len(sidecar["y"])
-    feasible = np.array(sidecar.get("feasible", [True] * n), dtype=bool)  # old saves predate feasibility tracking
-    return SurrogateState(
-        gp=models["gp"],
-        bounds=bounds,
-        X_raw=np.array(sidecar["X_raw"], dtype=float),
-        y=np.array(sidecar["y"], dtype=float),
-        feasible=feasible,
-        clf=models.get("clf"),
-    )

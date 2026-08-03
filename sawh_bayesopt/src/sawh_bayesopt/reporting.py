@@ -14,8 +14,7 @@ import numpy as np
 
 from sawh_bayesopt.bayesopt import BayesOptConfig, BayesOptResult
 from sawh_bayesopt.design_space import VAR_ORDER
-from sawh_bayesopt.evaluator import DesignEvalResult, EvalCache, evaluate_batch
-from sawh_bayesopt.sites import fetch_daily_profiles
+from sawh_bayesopt.evaluator import DesignEvalResult, EvalCache, evaluate_for_config
 from sawh_bayesopt.verification import VerificationReport
 
 # .../SAWH_TEAs/sawh_bayesopt/src/sawh_bayesopt/reporting.py -> .../SAWH_TEAs
@@ -31,7 +30,7 @@ def write_run_config(cfg: BayesOptConfig, path: str | Path) -> None:
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "bounds": {name: list(getattr(cfg.bounds, name)) for name in VAR_ORDER},
+        "bounds": {name: list(getattr(cfg.bounds, name)) for name in cfg.bounds.names()},
         "sites": [s.name for s in cfg.sites],
         "combine_rule": cfg.combine_rule,
         "n_init": cfg.n_init,
@@ -41,7 +40,6 @@ def write_run_config(cfg: BayesOptConfig, path: str | Path) -> None:
         "ei_xi": cfg.ei_xi,
         "stall_rel_tol": cfg.stall_rel_tol,
         "stall_rounds": cfg.stall_rounds,
-        "resolution": cfg.resolution,
         "case": cfg.case,
     }
     path.write_text(json.dumps(payload, indent=2))
@@ -58,11 +56,14 @@ def write_de_diagnostics(de_diagnostics: list[dict], path: str | Path) -> None:
     path.write_text(json.dumps(de_diagnostics, indent=2))
 
 
-def write_history_csv(history: list[DesignEvalResult], path: str | Path) -> None:
+def write_history_csv(
+    history: list[DesignEvalResult], path: str | Path, *, var_order=VAR_ORDER
+) -> None:
+    """``var_order`` is the run's design order -- 6 names simple, 13 complex."""
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     site_names = sorted({r.site_name for res in history for r in res.site_results})
-    fieldnames = ["index", *VAR_ORDER, "combined_lcow", "wall_time_s"]
+    fieldnames = ["index", *var_order, "combined_lcow", "wall_time_s"]
     for name in site_names:
         fieldnames += [
             f"{name}_lcow",
@@ -80,7 +81,7 @@ def write_history_csv(history: list[DesignEvalResult], path: str | Path) -> None
                 "combined_lcow": res.combined_lcow,
                 "wall_time_s": res.wall_time_s,
             }
-            row.update(dict(zip(VAR_ORDER, res.design_vector)))
+            row.update(dict(zip(var_order, res.design_vector)))
             for r in res.site_results:
                 row[f"{r.site_name}_lcow"] = r.lcow
                 row[f"{r.site_name}_feasible"] = r.feasible
@@ -115,29 +116,40 @@ def write_convergence_plot(history: list[DesignEvalResult], path: str | Path) ->
 
 
 def evaluate_baseline(cfg: BayesOptConfig, run_dir: str | Path) -> DesignEvalResult:
-    """Wilson Table S3 baseline device (DeviceConfig.baseline()), run through
+    """Wilson Table S3 baseline system (SystemConfig.baseline()), run through
     the same two-site pipeline, for an apples-to-apples comparison."""
     from solar_lumped.economics import LCOEconomicParams
-    from solar_lumped.simulation import DeviceConfig
+    from solar_lumped.simulation import SystemConfig
 
     run_dir = Path(run_dir)
     econ = LCOEconomicParams()
-    site_profiles = {
-        s.name: fetch_daily_profiles(s, cache_dir=cfg.weather_cache_dir) for s in cfg.sites
-    }
     cache = EvalCache(run_dir / "cache.jsonl")
-    baseline_cfg = DeviceConfig.baseline()
-    x_baseline = np.array([getattr(baseline_cfg, name) for name in VAR_ORDER], dtype=float)
-    [result] = evaluate_batch(
-        [x_baseline],
-        cache=cache,
-        sites=cfg.sites,
-        site_profiles=site_profiles,
-        econ=econ,
-        combine_rule=cfg.combine_rule,
-        resolution=cfg.resolution,
-        case=cfg.case,
+    baseline_cfg = SystemConfig.baseline()
+    # Wilson's Table S3 system expressed in this run's design order. In complex
+    # mode the extra dimensions come from ComplexOptions' own defaults, which are
+    # exactly the simple model -- so the baseline stays Wilson's system, not a
+    # partly-complex hybrid.
+    from solar_lumped.complex_model import ComplexOptions
+    from sawh_bayesopt.design_space import GLAZING_CONFIGS
+
+    defaults = ComplexOptions()
+    baseline_extra = {
+        "eps_abs_ir": defaults.eps_abs_ir,
+        "glazing_config": float(GLAZING_CONFIGS.index((defaults.n_glazing_panes, defaults.evacuated_gap))),
+        "condenser_air_speed_m_s": defaults.condenser_air_speed_m_s,
+        "seal_offset_h": defaults.seal_offset_h,
+        "open_offset_h": defaults.open_offset_h,
+        "blend_u": 1.0,  # stick-breaking coords for pure LiCl
+        "blend_v": 0.0,
+    }
+    x_baseline = np.array(
+        [
+            baseline_extra[name] if name in baseline_extra else getattr(baseline_cfg, name)
+            for name in cfg.bounds.names()
+        ],
+        dtype=float,
     )
+    [result] = evaluate_for_config([x_baseline], cfg=cfg, cache=cache, econ=econ)
     return result
 
 
@@ -187,7 +199,7 @@ def write_final_report(
 
     report = {
         "case": cfg.case,
-        "recommended_design": dict(zip(VAR_ORDER, result.best.design_vector)),
+        "recommended_design": dict(zip(cfg.bounds.names(), result.best.design_vector)),
         "recommended_combined_lcow_usd_per_m3": result.best.combined_lcow,
         "recommended_per_site": {
             r.site_name: {
@@ -207,7 +219,7 @@ def write_final_report(
             "flagged_as_surrogate_artifact": verification.flagged_as_surrogate_artifact,
         },
         "baseline_wilson_table_s3": {
-            "design": dict(zip(VAR_ORDER, baseline_result.design_vector)),
+            "design": dict(zip(cfg.bounds.names(), baseline_result.design_vector)),
             "combined_lcow_usd_per_m3": baseline_result.combined_lcow,
             "per_site": {
                 r.site_name: {"lcow_usd_per_m3": r.lcow, "feasible": r.feasible}

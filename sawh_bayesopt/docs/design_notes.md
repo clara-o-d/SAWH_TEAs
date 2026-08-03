@@ -4,13 +4,13 @@
 
 `solar_lumped` has no optimizer -- only brute-force grid/OAT sweeps
 (`scripts/parameter_sweep.py`, `scripts/grid_param_sweep.py`). One LCOW
-evaluation (monthly-resolution, Aitken-converged cyclic state) costs ~380s on
+evaluation (all 365 real days, Aitken-converged cyclic state on day 1) costs ~380s on
 a laptop (`solar_lumped/docs/sherlock_param_sweep.tex`), which rules out
 anything that needs hundreds-to-thousands of evaluations. Bayesian
 optimization (EGO: GP surrogate + Expected Improvement) is designed
 specifically for this "few, expensive, black-box evaluations" regime, unlike
 the local NLP solvers (Ipopt/Bonmin) tried on the earlier, unrelated ZSR
-device model, which got stuck in local optima 36-47% worse than what
+system model, which got stuck in local optima 36-47% worse than what
 multistart could find.
 
 ## How this actually works, step by step
@@ -26,7 +26,7 @@ There are two models involved, and it's easy to conflate them:
 
 1. **The true model** -- `solar_lumped/gpu_sweep`'s JAX daily-cycle + Aitken
    pipeline (`jax_daily_cycle.py`), wrapped by `evaluator.py`. Feed it 6
-   numbers describing a device design (hydrogel thickness, vapor gap, tilt,
+   numbers describing a system design (hydrogel thickness, vapor gap, tilt,
    ...) and it simulates a year of operation and returns one number,
    `combined_lcow` (USD/m^3 of water, averaged across the two weather
    sites). This is the function we're minimizing. It agrees with
@@ -149,7 +149,7 @@ No `condenser_thickness_m` row: it isn't a design variable in this package
   hardcodes condenser thermal mass at Table S3's constant
   (`jax_physics.py::CONDENSER_THERMAL_MASS_J_M2_K = RHO_AL * CP_AL * L_C_M`)
   rather than taking it as a per-instance input, so it isn't a real physics
-  knob on that path either. `DeviceConfig`'s own default for
+  knob on that path either. `SystemConfig`'s own default for
   `condenser_thickness_m` already matches `table_s3.L_C_M`, i.e. the same
   constant `jax_physics.py` hardcodes -- simply not setting it is correct,
   not an approximation.

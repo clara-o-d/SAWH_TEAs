@@ -1,4 +1,4 @@
-"""Simulation: device config, coupled thermal/mass dynamics, ODE integration, detailed
+"""Simulation: system config, coupled thermal/mass dynamics, ODE integration, detailed
 plotting, water-inventory accounting, site feasibility, and annual yield."""
 
 from __future__ import annotations
@@ -17,15 +17,15 @@ import pandas as pd
 from scipy.integrate import solve_ivp
 from scipy.optimize import brentq
 
+from solar_lumped.complex_model import ComplexOptions
 from solar_lumped.economics import LCOEconomicParams, lcow_from_daily_yield
 from solar_lumped.physics import (
+    FABRICATION_EQUILIBRIUM_RH,
     CP_AL_J_KG_K,
     DRY_COMPOSITE_DENSITY_KG_M3,
     EPS_ABS,
-    EPS_ABS_IR_CASE2,
     EPS_AL,
     EPS_GEL,
-    EPS_GLASS_IR_CASE2,
     FIN_AREA_RATIO,
     G_CHAMBER_M_S,
     H0_M,
@@ -36,12 +36,11 @@ from solar_lumped.physics import (
     L_INS_M,
     RHO_AL_KG_M3,
     SALT_TO_POLYMER_RATIO_DEFAULT,
-    STEFAN_BOLTZMANN_W_M2_K4,
     SaltProperties,
     TAU_GLASS,
     TILT_DEG,
     VAPOR_GAP_TRANSPORT_MIN_M,
-    DeviceThermalParams,
+    SystemThermalParams,
     MassTransferParams,
     ThermalState,
     clamp_temperature_c,
@@ -63,10 +62,10 @@ from solar_lumped.physics import (
 from solar_lumped.weather import DailyWeatherProfile, PhaseProfile, day_weather_stats
 
 
-# --- Device configuration dataclass ---
+# --- System configuration dataclass ---
 
 @dataclass(frozen=True, slots=True)
-class DeviceConfig:
+class SystemConfig:
     salt_name: str = "LiCl"
     salt_to_polymer_ratio: float = SALT_TO_POLYMER_RATIO_DEFAULT
     hydrogel_thickness_m: float = H0_M
@@ -80,7 +79,7 @@ class DeviceConfig:
     condenser_cp_j_kg_k: float = CP_AL_J_KG_K
     h_fg_j_per_kg: float = H_FG_J_PER_KG
     tilt_deg: float = TILT_DEG
-    thermal: DeviceThermalParams | None = None
+    thermal: SystemThermalParams | None = None
     # Override catalog salt formula weight (g/mol) for sensitivity sweeps.
     salt_formula_weight_g_mol: float | None = None
     # Scales MW_salt in gravimetric uptake only (DVS cap during absorption).
@@ -91,6 +90,10 @@ class DeviceConfig:
     # Per-component desorption-start temperatures (T_gel, T_abs, T_glass, T_cond) in °C;
     # takes precedence over ``segregated_initial_temp_c``.
     coupled_initial_temps_c: tuple[float, float, float, float] | None = None
+    # Complex-fidelity option set (A1/B1/B2/B3/B4/B8). None (default) runs the simple
+    # Wilson model, which is what gpu_sweep's JAX path and every existing script keep
+    # doing -- see solar_lumped/complex_model.py.
+    complex: ComplexOptions | None = None
 
     def desorption_surface_ic_c(self) -> tuple[float, float, float, float] | None:
         """Configured (T_gel, T_abs, T_glass, T_cond) at desorption start, if any."""
@@ -111,6 +114,32 @@ class DeviceConfig:
             if self.salt_formula_weight_g_mol is not None
             else s.formula_weight_g_mol
         )
+        # Complex mode (B8) always routes through ZSR, including the pure-salt
+        # corners where the mixing rule reduces to a single isotherm anyway.
+        #
+        # That is deliberate symmetry with the JAX backend, which has no choice but
+        # to read every water activity off the tabulated inversion. Letting the CPU
+        # take a closed-form shortcut here reintroduces a real divergence: the
+        # closed-form LiCl isotherm returns NaN above its validity limit (xi > 0.56)
+        # and silently stalls desorption, while the table clamps at saturation and
+        # keeps going. The simple model never gets the gel dry enough to notice, but
+        # an evacuated double-glazed absorber runs ~10 C hotter and crosses it --
+        # which showed up as a 35% backend disagreement. Same inversion on both
+        # paths, no shortcut, no divergence.
+        blend_weights = None
+        if self.complex is not None:
+            blend_weights = self.complex.blend_weights
+            if self.salt_formula_weight_g_mol is None:
+                # The salt inventory is fixed at fabrication, so the blend's
+                # effective formula weight is pinned at the fabrication
+                # equilibrium RH (see zsr_effective_formula_weight_g_mol).
+                from solar_lumped.complex_model import zsr_effective_formula_weight_g_mol
+
+                fw_blend = zsr_effective_formula_weight_g_mol(
+                    blend_weights, reference_rh=FABRICATION_EQUILIBRIUM_RH
+                )
+                if math.isfinite(fw_blend):
+                    fw = fw_blend
         return MassTransferParams(
             g_conv_m_s=self.g_conv_m_s,
             h0_ref_m=self.hydrogel_thickness_m,
@@ -127,9 +156,11 @@ class DeviceConfig:
             formula_weight_g_mol=fw,
             salt_to_polymer_ratio=self.salt_to_polymer_ratio,
             salt_weight_factor=self.salt_weight_factor,
+            blend_weights=blend_weights,
+            use_dvs_cap=self.complex is None,
         )
 
-    def thermal_params(self) -> DeviceThermalParams:
+    def thermal_params(self) -> SystemThermalParams:
         if self.thermal is not None:
             return self.thermal
         if self.salt_name == "LiCl":
@@ -138,7 +169,29 @@ class DeviceConfig:
             h_des = H_DES_J_PER_KG
         else:
             h_des = self.salt().h_des_j_per_kg
-        return DeviceThermalParams(
+        if self.complex is not None:
+            cx = self.complex
+            # B1 puts eps_abs_ir under continuous optimizer control (it is a priced
+            # coating choice, not a fixed case flag); B2 sets the stack's
+            # transmittance and pane count.
+            return SystemThermalParams(
+                insulation_gap_m=self.insulation_gap_m,
+                vapor_gap_m=self.vapor_gap_m,
+                eps_abs=EPS_ABS,
+                tau_glass=cx.tau_glass,
+                eps_gel=EPS_GEL,
+                eps_al=EPS_AL,
+                tilt_deg=self.tilt_deg,
+                h_des_j_per_kg=h_des,
+                eps_abs_ir=cx.eps_abs_ir,
+                has_glass=cx.has_glass,
+                n_glazing_panes=cx.n_glazing_panes,
+                evacuated_gap=cx.evacuated_gap,
+            )
+        # eps_abs_ir/eps_glass_ir are left unset -- SystemThermalParams' own default
+        # is Case 2 (selective surface). Pass thermal=SystemThermalParams(eps_abs_ir=1.0,
+        # eps_glass_ir=1.0) for Case 1's original Wilson blackbody/cavity approximation.
+        return SystemThermalParams(
             insulation_gap_m=self.insulation_gap_m,
             vapor_gap_m=self.vapor_gap_m,
             eps_abs=EPS_ABS,
@@ -147,10 +200,6 @@ class DeviceConfig:
             eps_al=EPS_AL,
             tilt_deg=self.tilt_deg,
             h_des_j_per_kg=h_des,
-            # Case 2 ("selective surface") is the base case: real absorber/glass IR
-            # emissivities. Case 1 needs an explicit thermal= with both set to 1.0.
-            eps_abs_ir=EPS_ABS_IR_CASE2,
-            eps_glass_ir=EPS_GLASS_IR_CASE2,
         )
 
     def condenser_thermal_mass_j_m2_k(self) -> float:
@@ -161,13 +210,13 @@ class DeviceConfig:
         )
 
     @classmethod
-    def comsol_table_s3(cls, **overrides: object) -> DeviceConfig:
-        """Wilson Table S3 / Note S1 COMSOL SAWH device defaults."""
+    def comsol_table_s3(cls, **overrides: object) -> SystemConfig:
+        """Wilson Table S3 / Note S1 COMSOL SAWH system defaults."""
         return cls(**overrides)  # type: ignore[arg-type]
 
     @classmethod
-    def baseline(cls, **overrides: object) -> DeviceConfig:
-        """Wilson Fig. 2 baseline device (Table S3, tilt 30°, fin area ratio 7.1)."""
+    def baseline(cls, **overrides: object) -> SystemConfig:
+        """Wilson Fig. 2 baseline system (Table S3, tilt 30°, fin area ratio 7.1)."""
         base = {
             "tilt_deg": TILT_DEG,
             "fin_area_ratio": FIN_AREA_RATIO,
@@ -176,7 +225,7 @@ class DeviceConfig:
         return cls(**base)  # type: ignore[arg-type]
 
     @classmethod
-    def atacama_field(cls, **overrides: object) -> DeviceConfig:
+    def atacama_field(cls, **overrides: object) -> SystemConfig:
         """Wilson Atacama field-test geometry (Methods): tilt 25°, fin area ratio 5."""
         base = {
             "tilt_deg": 25.0,
@@ -217,9 +266,9 @@ def _m_des_calc(
     q_solar_w_m2: float,
     h_amb: float,
     mass: MassTransferParams,
-    thermal: DeviceThermalParams,
+    thermal: SystemThermalParams,
     vapor_gap_m: float,
-    config: DeviceConfig,
+    config: SystemConfig,
     t_guess: tuple[float, float, float] | None,
 ) -> tuple[float, float, float, ThermalState]:
     state = solve_steady_thermal(
@@ -259,12 +308,12 @@ def evaluate_coupled_rates(
     h_amb: float,
     phase: CyclePhase,
     mass: MassTransferParams,
-    thermal: DeviceThermalParams,
+    thermal: SystemThermalParams,
     vapor_gap_m: float,
     condenser_thermal_mass_j_m2_k: float,
     fin_area_ratio: float,
     h_fg_j_per_kg: float,
-    config: DeviceConfig,
+    config: SystemConfig,
     t_guess: tuple[float, float, float] | None = None,
     h_amb_cond: float | None = None,
 ) -> CoupledRates:
@@ -398,8 +447,22 @@ def evaluate_coupled_rates(
     )
 
     h_conv_g = state.h_conv_g
+    # B4: the design's fan speed is the source of truth for condenser-side
+    # convection; the profile channel is only an override for weather that carries
+    # one. Deriving it here too keeps the CPU symmetric with the JAX backend, which
+    # has only the design to work from (jax_daily_cycle._h_amb_cond_for).
+    if h_amb_cond is None and config.complex is not None:
+        h_amb_cond = config.complex.condenser_h_amb_w_m2_k()
     h_amb_for_cond = h_amb if h_amb_cond is None else h_amb_cond
-    h_conv_cond = condenser_h_conv_w_m2_k(h_amb_for_cond, fin_area_ratio=fin_area_ratio)
+    # Complex mode (B3) supplies fin geometry, which derates the added fin area by
+    # its efficiency; without it this stays Wilson's ideal A_r * h_amb.
+    cx = config.complex
+    h_conv_cond = condenser_h_conv_w_m2_k(
+        h_amb_for_cond,
+        fin_area_ratio=fin_area_ratio,
+        fin_thickness_m=cx.fin_thickness_m if cx is not None else None,
+        fin_height_m=cx.fin_height_m if cx is not None else None,
+    )
     eps_gc = parallel_plate_emissivity(thermal.eps_gel, thermal.eps_al)
     q_rad = radiative_exchange_w_m2(t_gel, t_cond, emissivity=eps_gc)
     tmass = max(condenser_thermal_mass_j_m2_k, 1.0)
@@ -448,7 +511,7 @@ def _integrate_absorption(
     c_w0: float,
     h0: float,
     profile: PhaseProfile,
-    config: DeviceConfig,
+    config: SystemConfig,
 ) -> PhaseResult:
     mass = config.mass_params()
     thermal = config.thermal_params()
@@ -547,7 +610,7 @@ def _integrate_desorption(
     c_w0: float,
     h0: float,
     profile: PhaseProfile,
-    config: DeviceConfig,
+    config: SystemConfig,
     *,
     t_guess0: tuple[float, float, float] | None = None,
 ) -> PhaseResult:
@@ -679,61 +742,14 @@ def _integrate_desorption(
     )
 
 
-def _h_rad_w_m2_k(t_hot_c: float, t_cold_c: float, emissivity: float) -> float:
-    """Linearized radiative exchange coefficient σε(Tₕ²+T_c²)(Tₕ+T_c) [W/m²K]."""
-    if emissivity <= 0.0:
-        return 0.0
-    th = t_hot_c + 273.15
-    tc = t_cold_c + 273.15
-    return emissivity * STEFAN_BOLTZMANN_W_M2_K4 * (th * th + tc * tc) * (th + tc)
-
-
 def cycle_end_state(des_res: PhaseResult) -> tuple[float, float]:
     """Gel state (c_w, H) at end of a full absorption–desorption cycle."""
     return float(des_res.c_w[-1]), float(des_res.H[-1])
 
 
-def warmup_cycle_state(
-    profile: DailyWeatherProfile,
-    config: DeviceConfig,
-    *,
-    c_w_initial: float | None = None,
-    h_initial: float | None = None,
-) -> tuple[float, float]:
-    """Run one full cycle; return gel state after desorption (for next-day IC)."""
-    _, _, _, des_res = run_daily_cycle(
-        profile,
-        config,
-        c_w_initial=c_w_initial,
-        h_initial=h_initial,
-    )
-    return cycle_end_state(des_res)
-
-
-def warmup_to_cyclic_state(
-    profile: DailyWeatherProfile,
-    config: DeviceConfig,
-    *,
-    n_cycles: int = 2,
-    c_w_initial: float | None = None,
-    h_initial: float | None = None,
-) -> tuple[float, float]:
-    """Run repeated daily cycles until a periodic post-desorption (c_w, H) is reached."""
-    cw, h = c_w_initial, h_initial
-    for _ in range(max(1, n_cycles)):
-        _, _, _, des_res = run_daily_cycle(
-            profile,
-            config,
-            c_w_initial=cw,
-            h_initial=h,
-        )
-        cw, h = cycle_end_state(des_res)
-    return cw, h
-
-
 def find_cyclic_state(
     profile: DailyWeatherProfile,
-    config: DeviceConfig,
+    config: SystemConfig,
     *,
     c_w_initial: float | None = None,
     h_initial: float | None = None,
@@ -812,7 +828,7 @@ def find_cyclic_state(
 
 def run_daily_cycle(
     profile: DailyWeatherProfile,
-    config: DeviceConfig,
+    config: SystemConfig,
     *,
     c_w_initial: float | None = None,
     h_initial: float | None = None,
@@ -856,7 +872,7 @@ def run_daily_cycle(
     eta = (yield_kg * config.h_fg_j_per_kg / q_solar_int) if q_solar_int > 0 else 0.0
     return yield_kg, eta, abs_res, des_res
 
-# --- Device temperatures and weather time series for a daily SAWH cycle ---
+# --- System temperatures and weather time series for a daily SAWH cycle ---
 
 @dataclass(frozen=True, slots=True)
 class DetailedSeries:
@@ -901,11 +917,11 @@ def detailed_series(
     profile: DailyWeatherProfile,
     abs_res: PhaseResult,
     des_res: PhaseResult,
-    config: DeviceConfig,
+    config: SystemConfig,
 ) -> DetailedSeries:
-    """Build full-cycle device and weather trajectories."""
+    """Build full-cycle system and weather trajectories."""
 
-    def _absorption_device_temps() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def _absorption_system_temps() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         mass = config.mass_params()
         thermal = config.thermal_params()
         abs_profile = profile.absorption
@@ -953,7 +969,7 @@ def detailed_series(
             np.array(t_gel),
         )
 
-    def _desorption_device_temps() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    def _desorption_system_temps() -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
         if des_res.t_cond_c is None:
             raise ValueError("Desorption result missing condenser temperature history.")
 
@@ -1008,8 +1024,8 @@ def detailed_series(
             des_res.t_gel_c,
         )
 
-    abs_t_abs, abs_t_glass, abs_t_cond, abs_t_gel = _absorption_device_temps()
-    des_t_abs, des_t_glass, des_t_cond, des_t_gel = _desorption_device_temps()
+    abs_t_abs, abs_t_glass, abs_t_cond, abs_t_gel = _absorption_system_temps()
+    des_t_abs, des_t_glass, des_t_cond, des_t_gel = _desorption_system_temps()
 
     abs_weather = _phase_weather(abs_res.time_s, profile.absorption)
     des_weather = _phase_weather(des_res.time_s, profile.desorption)
@@ -1179,7 +1195,7 @@ def water_inventory_series(
     abs_res: PhaseResult,
     des_res: PhaseResult,
     *,
-    config: DeviceConfig,
+    config: SystemConfig,
 ) -> WaterInventorySeries:
     """Concatenate absorption and desorption phases into one sorbent water trajectory."""
     w_abs = np.array(
@@ -1241,7 +1257,7 @@ def plot_water_inventory(
     path: Path,
     series: WaterInventorySeries,
     *,
-    config: DeviceConfig,
+    config: SystemConfig,
     title: str | None = None,
 ) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -1303,7 +1319,7 @@ def profile_diagnostics(profile: DailyWeatherProfile) -> dict[str, float]:
     }
 
 
-def passive_gel_temperature_c(profile: DailyWeatherProfile, config: DeviceConfig) -> float:
+def passive_gel_temperature_c(profile: DailyWeatherProfile, config: SystemConfig) -> float:
     """Passive sun-only gel temperature at peak desorption conditions."""
     des = profile.desorption
     i_peak = int(np.argmax(des.solar_w_m2))
@@ -1340,7 +1356,7 @@ def salt_climate_feasible(
 
 def simulate_salt_lcow(
     profile: DailyWeatherProfile,
-    config: DeviceConfig,
+    config: SystemConfig,
     econ: LCOEconomicParams | None = None,
     *,
     rh_abs: float | None = None,
@@ -1497,7 +1513,7 @@ DAILY_SUMMARY_COLUMNS: tuple[str, ...] = (
 
 def simulate_annual_year(
     day_items: list[tuple[date, DailyWeatherProfile, pd.DataFrame]],
-    config: DeviceConfig,
+    config: SystemConfig,
     *,
     warmup_cycles: int = 2,
     save_daily_timeseries: bool = False,
@@ -1623,36 +1639,3 @@ def write_daily_summary_csv(
                     "t_gel_peak_c": f"{rec.t_gel_peak_c:.4f}",
                 }
             )
-
-
-def aggregate_yields(
-    day_profiles: list[tuple[date, DailyWeatherProfile]] | list[DailyWeatherProfile],
-    config: DeviceConfig,
-    *,
-    c_w_initial: float | None = None,
-    h_initial: float | None = None,
-    warmup: bool = False,
-) -> SimulationResult:
-    yields: list[float] = []
-    etas: list[float] = []
-    cw, h = c_w_initial, h_initial
-    for i, item in enumerate(day_profiles):
-        prof = item[1] if isinstance(item, tuple) else item
-        y, eta, _, des_res = run_daily_cycle(prof, config, c_w_initial=cw, h_initial=h)
-        cw, h = cycle_end_state(des_res)
-        if warmup and i == 0:
-            continue
-        if y >= 0.0:
-            yields.append(y)
-            etas.append(eta)
-    if not yields:
-        return SimulationResult(0.0, 0.0, 0.0, 0, tuple())
-    mean_y = sum(yields) / len(yields)
-    mean_eta = sum(etas) / len(etas)
-    return SimulationResult(
-        mean_daily_yield_kg_m2=mean_y,
-        mean_daily_yield_l_m2=mean_y,
-        mean_thermal_efficiency=mean_eta,
-        n_days=len(yields),
-        daily_yields_kg_m2=tuple(yields),
-    )

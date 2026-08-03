@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from waste_heat.economics import (
-    C_PATENT_BOM_USD as C_DEVICE_USD,
-    PATENT_BOM_USD_PER_M2 as DEVICE_BOM_USD_PER_M2,
+    C_PATENT_BOM_USD as C_SYSTEM_USD,
+    PATENT_BOM_USD_PER_M2 as SYSTEM_BOM_USD_PER_M2,
 )
 from waste_heat.economics import lcow_from_daily_yield
 from waste_heat.economics import HYDROGEL_THICKNESS_M, LCOEconomicParams
@@ -14,9 +14,9 @@ from waste_heat.economics import (
 )
 
 
-def test_device_bom_matches_patent_midpoints():
-    assert len(DEVICE_BOM_USD_PER_M2) == 9
-    assert C_DEVICE_USD == 8715.0
+def test_system_bom_matches_patent_midpoints():
+    assert len(SYSTEM_BOM_USD_PER_M2) == 9
+    assert C_SYSTEM_USD == 8715.0
 
 
 def test_default_parasitic_loads_include_efficiency():

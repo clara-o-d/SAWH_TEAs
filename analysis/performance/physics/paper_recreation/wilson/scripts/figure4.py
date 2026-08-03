@@ -41,6 +41,7 @@ for _p in (_SRC, _SOLAR_ROOT):
         sys.path.insert(0, str(_p))
 
 from solar_lumped.physics import solve_steady_thermal
+from solar_lumped.physics import SystemThermalParams
 from solar_lumped.plotting import (
     figure_size_inches,
     plot_defaults_slides,
@@ -49,7 +50,7 @@ from solar_lumped.plotting import (
     scaled_fontsize,
     style_axes,
 )
-from solar_lumped.simulation import DeviceConfig
+from solar_lumped.simulation import SystemConfig
 from solar_lumped.simulation import PhaseResult, run_daily_cycle
 from solar_lumped.simulation import cumulative_desorption_yield_l_m2
 from solar_lumped.weather import (
@@ -67,6 +68,27 @@ _REF_LABEL = "Wilson et al. (digitized)"
 
 # Measured final water yield from the paper (L/m²)
 _MEASURED_YIELD_L_M2 = 0.62
+
+# Note S2 / Table S3 — the paper's chamber-calibrated absorption g, used for every
+# Wilson figure. The package default (0.015, parameters.xlsx) stands for our own work.
+_G_CONV_M_S: float = 0.0085
+
+# Table S3 is the COMSOL model's fin area ratio. SystemConfig.atacama_field carries the
+# as-built heat sink (A_r = 5, Methods); we are recreating the model, not the hardware.
+_A_R: float = 7.1
+
+# Fig. 4D model prediction and its h_amb error bounds, digitized in mL of system total.
+# The measured point on the same axis is 47.819 mL, which the paper quotes as
+# 0.62 L/m² — a 0.0771 m² normalisation, i.e. A_c to three figures.
+_FIG4D_CSV = "Fig4d_results_and_error.csv"
+_FIG4D_MEASURED_ML = 47.81893004115226
+
+
+def _fig4d_model_l_m2() -> tuple[float, float, float]:
+    """(lower, central, upper) of the paper's own Fig. 4D model prediction, in L/m²."""
+    ml = np.sort(np.loadtxt(_REF_DIR / _FIG4D_CSV, delimiter=",")[:, 1])
+    scale = _MEASURED_YIELD_L_M2 / _FIG4D_MEASURED_ML
+    return tuple(float(v) * scale for v in ml)  # type: ignore[return-value]
 
 # Digitized Fig. 4C reference curves. The originally published panel mislabeled the
 # component curves (its "glass" was flat ~38 °C, inconsistent with Eq. 3); these
@@ -192,7 +214,7 @@ def _profile_index(t: float, dt_s: float, n: int) -> int:
 def _post_process_desorption(
     des_res: PhaseResult,
     profile_des,
-    config: DeviceConfig,
+    config: SystemConfig,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Re-evaluate steady thermal at each stored ODE timestep → T_abs, T_glass arrays.
 
@@ -244,7 +266,14 @@ def _post_process_desorption(
 def simulate_atacama() -> dict:
     """Run the Atacama field cycle and return all time-series needed for Fig. 4."""
     print("  Building Atacama field config…")
-    config = DeviceConfig.atacama_field(coupled_initial_temps_c=_atacama_initial_temps_c())
+    config = SystemConfig.atacama_field(
+        coupled_initial_temps_c=_atacama_initial_temps_c(),
+        g_conv_m_s=_G_CONV_M_S,
+        fin_area_ratio=_A_R,
+        # Case 1: original Wilson Eqs. 3/4 blackbody/cavity radiative exchange --
+        # this reproduces the paper, not the package's Case 2 default.
+        thermal=SystemThermalParams(eps_abs_ir=1.0, eps_glass_ir=1.0),
+    )
 
     print("  Loading Atacama weather profile…")
     profile = atacama_field_profile()
@@ -406,7 +435,14 @@ def plot_figure4(data: dict) -> Path:
     # ---- Panel D: cumulative water output ----
     ax_D.plot(time_h, data["cum_water_l_m2"], **_FIG4_STYLE["water"])
 
-    # Measured endpoint from paper
+    # The paper's own model band at the end of the run, and its measured endpoint
+    band_lo, band_mid, band_hi = _fig4d_model_l_m2()
+    ax_D.errorbar(
+        duration_h, band_mid,
+        yerr=[[band_mid - band_lo], [band_hi - band_mid]],
+        fmt="s", markersize=5, color="#555555", elinewidth=1.4, capsize=5, zorder=4,
+        label=f"Wilson model ({band_mid:.2f} L/m², {band_lo:.2f}–{band_hi:.2f})",
+    )
     ax_D.plot(
         duration_h, _MEASURED_YIELD_L_M2,
         marker="*", markersize=11, color="#e74c3c", zorder=5,
@@ -424,7 +460,7 @@ def plot_figure4(data: dict) -> Path:
     yield_val = data["yield_kg"]
     fig.suptitle(
         "Wilson et al. (2025) Figure 4 — Atacama Desert field test (May 2024)\n"
-        rf"Model yield = {yield_val:.3f} L/m² (measured 0.62 L/m²),"
+        rf"Our yield = {yield_val:.3f} L/m² (Wilson model {band_mid:.2f}, measured 0.62 L/m²),"
         rf"  $\eta_{{\mathrm{{th}}}}$ = {eta_pct:.1f}% (measured 9.3%);"
         r"  open circles = digitized paper data",
         fontsize=scaled_fontsize("axes.labelsize", 0.7), y=1.02,

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-from solar_lumped.simulation import DeviceConfig
+from solar_lumped.simulation import SystemConfig
 from solar_lumped.simulation import (
     FAIL_LCO,
     salt_climate_feasible,
@@ -21,7 +21,7 @@ def test_drh_rejects_nacl_at_low_rh():
 
 
 def test_simulate_licl_baseline_finite():
-    config = DeviceConfig.baseline(salt_name="LiCl")
+    config = SystemConfig.baseline(salt_name="LiCl")
     result = simulate_salt_lcow(
         baseline_profile(),
         config,
@@ -33,7 +33,7 @@ def test_simulate_licl_baseline_finite():
 
 
 def test_simulate_nacl_baseline_low_rh_infeasible():
-    config = DeviceConfig.baseline(salt_name="NaCl")
+    config = SystemConfig.baseline(salt_name="NaCl")
     result = simulate_salt_lcow(baseline_profile(relative_humidity=0.5), config)
     assert not result.feasible
     assert result.lcow >= 0.99 * FAIL_LCO

@@ -1,4 +1,4 @@
-"""Surrogate-assisted global optimization of solar_lumped SAWH device design."""
+"""Surrogate-assisted global optimization of solar_lumped SAWH system design."""
 
 from __future__ import annotations
 

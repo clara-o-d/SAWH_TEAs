@@ -23,7 +23,13 @@ from sawh_bayesopt.reporting import (  # noqa: E402
     write_history_csv,
     write_run_config,
 )
-from sawh_bayesopt.sites import ATACAMA, CAMBRIDGE, DEFAULT_SITES  # noqa: E402
+from sawh_bayesopt.sites import (  # noqa: E402
+    ATACAMA,
+    CAMBRIDGE,
+    DEFAULT_SITES,
+    land_grid_sites,
+    site_from_lat_lon,
+)
 from sawh_bayesopt.surrogate import save_state  # noqa: E402
 from sawh_bayesopt.verification import verify_optimum  # noqa: E402
 
@@ -38,8 +44,31 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--stall-rel-tol", type=float, default=0.005)
     p.add_argument("--stall-rounds", type=int, default=3)
     p.add_argument("--combine-rule", choices=("mean", "worst_case"), default="mean")
-    p.add_argument("--sites", choices=("both", "cambridge", "atacama"), default="both")
-    p.add_argument("--resolution", choices=("monthly", "single"), default="monthly")
+
+    # Site selection: the two validated field sites by name, arbitrary coordinates,
+    # or indices into solar_lumped's land grid (the same grid the gpu_sweep global
+    # sweep uses, so runs stay comparable).
+    site = p.add_mutually_exclusive_group()
+    site.add_argument("--sites", choices=("both", "cambridge", "atacama"), default="both")
+    site.add_argument(
+        "--lat-lon", type=float, nargs=2, action="append", metavar=("LAT", "LON"),
+        help="Optimize at these coordinates. Repeatable for a multi-site design.",
+    )
+    site.add_argument("--num-sites", type=int, help="First N sites of the --step land grid.")
+    site.add_argument("--site-indices", type=int, nargs="+", help="Indices into the --step land grid.")
+    p.add_argument("--step", type=float, default=3.0, help="Land-grid spacing (deg).")
+    p.add_argument("--year", type=int, default=2024)
+
+    p.add_argument(
+        "--complex", action="store_true",
+        help="Run the complex-fidelity model (A1/B1/B2/B3/B4/B8): 13 design dims on "
+             "solar_lumped's CPU path instead of 6 on the JAX fast path.",
+    )
+    p.add_argument(
+        "--backend", choices=("jax", "cpu"), default="jax",
+        help="jax: vmapped/jitted, batches designs x sites -- use for global sweeps. "
+             "cpu: sequential solar_lumped ODE path, no GPU stack -- use for one site.",
+    )
     p.add_argument("--case", choices=tuple(CASE_EPS_IR), default="case2")
     p.add_argument("--weather-cache-dir", type=str, default=str(_REPO / ".weather_cache"))
     p.add_argument("--run-id", type=str, default="run")
@@ -48,17 +77,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+def resolve_sites(args: argparse.Namespace) -> tuple:
+    """Turn the mutually exclusive site flags into a concrete SiteSpec tuple."""
+    if args.lat_lon:
+        return tuple(
+            site_from_lat_lon(lat, lon, year=args.year) for lat, lon in args.lat_lon
+        )
+    if args.num_sites is not None:
+        return land_grid_sites(step_deg=args.step, indices=list(range(args.num_sites)), year=args.year)
+    if args.site_indices is not None:
+        return land_grid_sites(step_deg=args.step, indices=args.site_indices, year=args.year)
+    return {"both": DEFAULT_SITES, "cambridge": (CAMBRIDGE,), "atacama": (ATACAMA,)}[args.sites]
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-
-    sites = {
-        "both": DEFAULT_SITES,
-        "cambridge": (CAMBRIDGE,),
-        "atacama": (ATACAMA,),
-    }[args.sites]
+    sites = resolve_sites(args)
 
     cfg = BayesOptConfig(
-        bounds=DesignBounds(),
+        bounds=DesignBounds(complex_mode=args.complex),
+        complex_mode=args.complex,
+        backend=args.backend,
         sites=sites,
         combine_rule=args.combine_rule,
         n_init=args.n_init,
@@ -68,7 +107,6 @@ def main(argv: list[str] | None = None) -> int:
         ei_xi=args.ei_xi,
         stall_rel_tol=args.stall_rel_tol,
         stall_rounds=args.stall_rounds,
-        resolution=args.resolution,
         weather_cache_dir=args.weather_cache_dir,
         case=args.case,
     )
@@ -86,7 +124,7 @@ def main(argv: list[str] | None = None) -> int:
     print(f"Stopped: {result.stopped_reason} after {len(result.history)} design points.", flush=True)
     print(f"Best combined LCOW: {result.best.combined_lcow:.4f} USD/m3", flush=True)
 
-    write_history_csv(result.history, run_dir / "history.csv")
+    write_history_csv(result.history, run_dir / "history.csv", var_order=cfg.bounds.names())
     write_convergence_plot(result.history, run_dir / "convergence.png")
     save_state(result.surrogate, run_dir / "gp_state.joblib")
     write_de_diagnostics(result.de_diagnostics, run_dir / "diagnostics" / "de_diagnostics.json")

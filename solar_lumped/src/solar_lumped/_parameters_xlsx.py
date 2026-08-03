@@ -1,5 +1,5 @@
 """Loads the Physics and Economics parameter tables directly from
-``docs/parameters.xlsx`` -- the single source of truth for device physics
+``docs/parameters.xlsx`` -- the single source of truth for system physics
 constants and LCOW/NPV economics inputs. Replaces the former
 ``lcow_economic_params.csv``.
 """

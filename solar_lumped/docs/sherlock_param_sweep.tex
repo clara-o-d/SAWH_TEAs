@@ -5,7 +5,7 @@
 \usepackage{siunitx}
 \usepackage{hyperref}
 
-\title{Sherlock Plan: Global Grid LiCl Device-Parameter Sweep}
+\title{Sherlock Plan: Global Grid LiCl System-Parameter Sweep}
 \author{}
 \date{}
 
@@ -15,7 +15,7 @@
 \section*{Reference and scope}
 
 This document describes the plan for \texttt{solar\_lumped/scripts/grid\_param\_sweep.py}: a
-full-factorial device-parameter sweep at every land point of a \SI{3}{\degree} lat/lon grid,
+full-factorial system-parameter sweep at every land point of a \SI{3}{\degree} lat/lon grid,
 using the Wilson lumped SAWH model with a LiCl salt bed. One invocation of the script runs the
 full parameter grid for a single site; the Sherlock job is a SLURM array with one task per site.
 
@@ -50,7 +50,7 @@ fifth axis but dropped from the sweep (fixed at the \SI{40}{\milli\meter} baseli
 Section~\ref{sec:fixed-above}) to keep the grid smaller. Two of the remaining swept parameters
 (absorber emissivity, glass transmission) were not previously exposed by any script -- they are
 hardcoded constants (\texttt{table\_s3.EPS\_ABS}, \texttt{table\_s3.TAU\_GLASS}) unless overridden
-via an explicit \texttt{DeviceThermalParams}, which is how \texttt{grid\_param\_sweep.py} wires
+via an explicit \texttt{SystemThermalParams}, which is how \texttt{grid\_param\_sweep.py} wires
 them in.
 
 \begin{table}[h]
@@ -154,9 +154,9 @@ does.
 Validated end to end, both locally and on Sherlock itself, before any full-grid submission.
 
 \begin{enumerate}
-  \item \textbf{Plumbing check} (no ODE, instant): built device configs for two combos at the
+  \item \textbf{Plumbing check} (no ODE, instant): built system configs for two combos at the
   extremes of all four swept axes plus the fixed vapor gap and confirmed each reaches
-  \texttt{DeviceConfig} / \texttt{DeviceThermalParams} as the intended value. Passed.
+  \texttt{SystemConfig} / \texttt{SystemThermalParams} as the intended value. Passed.
   \item \textbf{End-to-end run}, Atacama desert site (\ang{-23.6}, \ang{-70.4}), 2 combos
   (\texttt{eps\_abs} = 0.90 and 0.95, everything else at baseline), \texttt{--resolution monthly}
   (the production default):

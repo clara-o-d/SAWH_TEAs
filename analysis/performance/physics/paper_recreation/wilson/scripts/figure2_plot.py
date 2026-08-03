@@ -130,7 +130,7 @@ def plot_figure2(data_B, data_C, data_D, data_E, data_F_yield, data_F_eta):
     ax_A.axis("off")
     ax_A.text(
         0.5, 0.5,
-        "Device\nschematic\n(see Fig. 2A\nin paper)",
+        "System\nschematic\n(see Fig. 2A\nin paper)",
         ha="center", va="center", fontsize=scaled_fontsize("axes.labelsize", 0.6), color="gray",
         transform=ax_A.transAxes,
     )
@@ -155,7 +155,7 @@ def plot_figure2(data_B, data_C, data_D, data_E, data_F_yield, data_F_eta):
             label=_REF_LABEL if not ref_B else None,
         )
     ax_B.set_xlabel(r"transmission through glass, $\tau_{glass}$")
-    ax_B.set_ylabel(r"device productivity [L/m²/day]")
+    ax_B.set_ylabel(r"system productivity [L/m²/day]")
     ax_B.set_xlim(0.2, 1.0)
     ax_B.set_ylim(bottom=0)
     ax_B.legend(fontsize=scaled_fontsize("legend.fontsize", 0.65), loc="upper left", frameon=False)
@@ -194,7 +194,7 @@ def plot_figure2(data_B, data_C, data_D, data_E, data_F_yield, data_F_eta):
     ax_C.legend(handles=handles + extra, labels=labels + ["glass cover", "no cover"],
                 fontsize=scaled_fontsize("legend.fontsize", 0.65), loc="upper left", frameon=False, ncol=2)
     ax_C.set_xlabel(r"ambient heat transfer coefficient, $h_{amb}$ [W/m²K]")
-    ax_C.set_ylabel(r"device productivity [L/m²/day]")
+    ax_C.set_ylabel(r"system productivity [L/m²/day]")
     ax_C.set_xlim(1, 10)
     ax_C.set_ylim(bottom=0)
     ax_C.set_title("C", loc="left", fontweight="bold")
@@ -218,7 +218,7 @@ def plot_figure2(data_B, data_C, data_D, data_E, data_F_yield, data_F_eta):
             label=_REF_LABEL if not ref_D else None,
         )
     ax_D.set_xlabel(r"ambient humidity RH [ ]")
-    ax_D.set_ylabel(r"device productivity [L/m²/day]")
+    ax_D.set_ylabel(r"system productivity [L/m²/day]")
     ax_D.set_xlim(0.2, 0.9)
     ax_D.set_ylim(bottom=0)
     ax_D.legend(fontsize=scaled_fontsize("legend.fontsize", 0.65), loc="upper left", frameon=False)
@@ -243,7 +243,7 @@ def plot_figure2(data_B, data_C, data_D, data_E, data_F_yield, data_F_eta):
             label=_REF_LABEL if not ref_E else None,
         )
     ax_E.set_xlabel(r"thickness of gel, $H_0$ [mm]")
-    ax_E.set_ylabel(r"device productivity [L/m²/day]")
+    ax_E.set_ylabel(r"system productivity [L/m²/day]")
     ax_E.set_xlim(0, 8)
     ax_E.set_ylim(bottom=0)
     ax_E.legend(fontsize=scaled_fontsize("legend.fontsize", 0.65), loc="lower right", frameon=False)
@@ -276,7 +276,7 @@ def plot_figure2(data_B, data_C, data_D, data_E, data_F_yield, data_F_eta):
         _overlay_ref(ax_F2, f"2f_eff_{h0}.csv", color=col_e)
 
     ax_F.set_xlabel(r"incident solar flux, $Q_{solar}$ [kW/m²]")
-    ax_F.set_ylabel(r"device productivity [L/m²/day]", color=f_teal[0])
+    ax_F.set_ylabel(r"system productivity [L/m²/day]", color=f_teal[0])
     ax_F2.set_ylabel(r"thermal efficiency [%]", color=f_orange[1])
     ax_F.set_xlim(0.5, 1.5)
     ax_F.set_ylim(bottom=0)
@@ -289,11 +289,10 @@ def plot_figure2(data_B, data_C, data_D, data_E, data_F_yield, data_F_eta):
     _fig2_style(ax_F2)
 
     fig.suptitle(
-        "Wilson et al. (2025) Figure 2 — Thermofluidic optimisation of the hydrogel SAWH device\n"
+        "Wilson et al. (2025) Figure 2 — Thermofluidic optimisation of the hydrogel SAWH system\n"
         r"(dashed = solar\_lumped model; circles = digitized paper data; bands = $h_{amb}=10\pm2.5$ W/m²K)",
         fontsize=scaled_fontsize("axes.labelsize", 0.7), y=1.01,
     )
-    fig.tight_layout()
 
     out_path = _OUT_DIR / "figure2.png"
     print_figure(fig, out_path)

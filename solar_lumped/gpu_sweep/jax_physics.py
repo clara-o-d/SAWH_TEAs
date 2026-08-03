@@ -31,10 +31,15 @@ K_GEL_W_M_K = _pv("Hydrogel thermal conductivity (k_gel)")
 RABS_M2_K_W = _pv("Absorber-to-gel constant resistance (Rabs)")
 RHO_AL_KG_M3 = _pv("Aluminum density (rho_Al)")
 CP_AL_J_KG_K = _pv("Aluminum specific heat (cp_Al)")
+# Table S3 k_Al, for complex mode's (B3) fin-efficiency parameter m = sqrt(2h/(k t)).
+K_AL_W_M_K = 167.0
 
 EPS_GEL = _pv("Gel emissivity (eps_gel)")
 EPS_AL = _pv("Condenser (Al) emissivity (eps_Al)")
-TILT_DEG_DEFAULT = _pv("Tilt angle (theta)")
+# Case 2 (selective surface) IR emissivities -- same values as physics.py's
+# EPS_ABS_IR_CASE2/EPS_GLASS_IR_CASE2.
+EPS_ABS_IR_CASE2 = _pv("Absorber IR emissivity (eps_abs_ir)")
+EPS_GLASS_IR_CASE2 = _pv("Glass IR emissivity (eps_glass_ir)")
 
 STEFAN_BOLTZMANN = _pv("Stefan-Boltzmann constant (sigma)")
 D_AIR_M2_S = _pv("Water-vapor-in-air diffusivity (D_air)")
@@ -55,7 +60,11 @@ CONDENSER_THERMAL_MASS_J_M2_K = RHO_AL_KG_M3 * CP_AL_J_KG_K * L_C_M
 # Conde (2004) Table 3 LiCl vapour-pressure correlation parameters.
 _PI0, _PI1, _PI2, _PI3, _PI4 = 0.28, 4.30, 0.60, 0.21, 5.10
 _PI5, _PI6, _PI7, _PI8, _PI9 = 0.49, 0.362, -4.75, -0.40, 0.03
-_XI_MAX_LICL = 0.56
+# LiCl saturation (solubility) brine mass fraction: 845 g per litre of water -> 45.8 wt%.
+# Past saturation the excess salt is solid and a_w pins here. Same arithmetic as
+# physics.XI_SAT_LICL so the two stay bit-identical -- keep them in step.
+_SOLUBILITY_G_PER_L_LICL = 845.0
+_XI_SAT_LICL = _SOLUBILITY_G_PER_L_LICL / (_SOLUBILITY_G_PER_L_LICL + 1000.0)
 T_CRIT_H2O_K = 647.096
 P_CRIT_H2O_PA = 22.064e6
 _SAUL_WAGNER_A = jnp.array([-7.858230, 1.839910, -11.781100, 22.670500, -15.939300, 1.775160])
@@ -82,7 +91,7 @@ def saturation_vapor_pressure_pa(temperature_c):
 
 def vapor_pressure_ratio_licl(xi, temperature_c):
     """pi = p_sol / p_H2O = brine water activity a_w (Conde 2004 Table 3, LiCl)."""
-    xi = jnp.clip(xi, 1e-12, _XI_MAX_LICL)
+    xi = jnp.clip(xi, 1e-12, _XI_SAT_LICL)
     theta = (temperature_c + 273.15) / T_CRIT_H2O_K
     pi25 = 1.0 - (1.0 + (xi / _PI6) ** _PI7) ** _PI8 - _PI9 * jnp.exp(-((xi - 0.1) ** 2) / 0.005)
     a_term = 2.0 - (1.0 + (xi / _PI0) ** _PI1) ** _PI2
@@ -149,8 +158,51 @@ def hollands_vapor_gap_h_conv_w_m2_k(gap_m, t_hot_c, t_cold_c, *, tilt_deg):
     return jnp.where(gap_m <= 0.0, 0.0, h)
 
 
-def condenser_h_conv_w_m2_k(h_amb, *, fin_area_ratio):
-    return fin_area_ratio * h_amb
+def condenser_h_conv_w_m2_k(h_amb, *, fin_area_ratio, fin_thickness_m=None, fin_height_m=None):
+    """Wilson's ideal fin (``A_r * h_amb``) unless complex mode (B3) supplies geometry,
+    in which case the added fin area is derated by the straight-fin efficiency. Mirrors
+    solar_lumped.physics.condenser_h_conv_w_m2_k."""
+    if fin_thickness_m is None or fin_height_m is None:
+        return fin_area_ratio * h_amb
+    t = jnp.clip(fin_thickness_m, 1e-6, None)
+    length = jnp.clip(fin_height_m, 1e-6, None)
+    m = jnp.sqrt(2.0 * jnp.clip(h_amb, 0.0, None) / (K_AL_W_M_K * t))
+    ml = jnp.clip(m * length, 1e-9, None)
+    eta_f = jnp.tanh(ml) / ml
+    # Only the finned area (A_r - 1) is derated; the exposed base plate is not.
+    return h_amb * (1.0 + eta_f * jnp.clip(fin_area_ratio - 1.0, 0.0, None))
+
+
+def blend_water_activity_from_c_w(
+    c_w, *, c_s, h0_ref_m, formula_weight_g_mol, temperature_c, aw_table
+):
+    """B8 water activity by bilinear lookup on a host-built (T, f_b) -> a_w table.
+
+    ``aw_table`` is ``(t_grid_c, fb_grid, table)`` from
+    ``complex_model.zsr_inverse_table``, computed on the host because blend weights
+    are constant for a whole instance. That is what lets the ZSR inversion -- a root
+    solve on the CPU path -- run inside a jitted ODE right-hand side at all.
+    """
+    t_grid, fb_grid, table = aw_table
+    f_b = licl_brine_salt_fraction_from_gel(
+        c_w, c_s=c_s, h0_ref_m=h0_ref_m, formula_weight_g_mol=formula_weight_g_mol
+    )
+    # Fractional indices, edge-clamped: outside the tabulated range the nearest
+    # column is the right answer (it is the saturated / most-dilute limit).
+    fi = jnp.interp(temperature_c, t_grid, jnp.arange(t_grid.shape[0], dtype=t_grid.dtype))
+    fj = jnp.interp(f_b, fb_grid, jnp.arange(fb_grid.shape[0], dtype=fb_grid.dtype))
+    i0 = jnp.clip(jnp.floor(fi).astype(jnp.int32), 0, t_grid.shape[0] - 1)
+    j0 = jnp.clip(jnp.floor(fj).astype(jnp.int32), 0, fb_grid.shape[0] - 1)
+    i1 = jnp.minimum(i0 + 1, t_grid.shape[0] - 1)
+    j1 = jnp.minimum(j0 + 1, fb_grid.shape[0] - 1)
+    di, dj = fi - i0, fj - j0
+    aw = (
+        (1.0 - di) * (1.0 - dj) * table[i0, j0]
+        + (1.0 - di) * dj * table[i0, j1]
+        + di * (1.0 - dj) * table[i1, j0]
+        + di * dj * table[i1, j1]
+    )
+    return jnp.where(c_w <= 0.0, 1.0, aw)
 
 
 def mass_transfer_g_from_h_conv_m_s(h_conv):
@@ -175,13 +227,19 @@ def concentration_ratio_desorption(t_gel_c, t_cond_c):
 class MassParams:
     """Mirrors solar_lumped.physics.MassTransferParams for LiCl."""
 
-    def __init__(self, *, h0_ref_m, vapor_gap_m, tilt_deg, c_s_mol_m3, formula_weight_g_mol, g_conv_m_s=0.015):
+    def __init__(
+        self, *, h0_ref_m, vapor_gap_m, tilt_deg, c_s_mol_m3, formula_weight_g_mol,
+        g_conv_m_s=0.015, aw_table=None,
+    ):
         self.h0_ref_m = h0_ref_m
         self.vapor_gap_m = vapor_gap_m
         self.tilt_deg = tilt_deg
         self.c_s_mol_m3 = c_s_mol_m3
         self.formula_weight_g_mol = formula_weight_g_mol
         self.g_conv_m_s = g_conv_m_s
+        # Complex mode (B8): host-built (T, f_b) -> a_w table. None keeps the
+        # closed-form LiCl isotherm, which is what the simple model uses.
+        self.aw_table = aw_table
 
 
 def dc_dh_desorption(c_w, *, t_gel_c, t_cond_c, h_m, mass: MassParams):
@@ -192,13 +250,23 @@ def dc_dh_desorption(c_w, *, t_gel_c, t_cond_c, h_m, mass: MassParams):
     g = jnp.where(gap_m < VAPOR_GAP_TRANSPORT_MIN_M, 0.0, g)
 
     c_r = concentration_ratio_desorption(t_gel_c, t_cond_c)
-    aw = water_activity_licl_from_c_w(
-        c_w,
-        c_s=mass.c_s_mol_m3,
-        h0_ref_m=mass.h0_ref_m,
-        formula_weight_g_mol=mass.formula_weight_g_mol,
-        temperature_c=t_gel_c,
-    )
+    if mass.aw_table is None:
+        aw = water_activity_licl_from_c_w(
+            c_w,
+            c_s=mass.c_s_mol_m3,
+            h0_ref_m=mass.h0_ref_m,
+            formula_weight_g_mol=mass.formula_weight_g_mol,
+            temperature_c=t_gel_c,
+        )
+    else:
+        aw = blend_water_activity_from_c_w(
+            c_w,
+            c_s=mass.c_s_mol_m3,
+            h0_ref_m=mass.h0_ref_m,
+            formula_weight_g_mol=mass.formula_weight_g_mol,
+            temperature_c=t_gel_c,
+            aw_table=mass.aw_table,
+        )
     driving = jnp.where(jnp.isfinite(aw), c_r - aw, 0.0)
 
     t_k = jnp.clip(t_gel_c + 273.15, 200.0, None)
@@ -229,11 +297,18 @@ def m_des_kg_s_m2_from_dc_w(dc_w_dt_val, *, h0_ref_m):
 
 
 class ThermalParams:
-    """Mirrors DeviceThermalParams for the note_s1/has_glass=True Atacama baseline. The
-    default eps_abs_ir/eps_glass_ir of 1.0 reproduces Wilson's Eqs. 3/4 blackbody
-    approximation (Case 1); pass real IR emissivities for Case 2/3."""
+    """Mirrors SystemThermalParams for the note_s1/has_glass=True Atacama baseline. The
+    default eps_abs_ir/eps_glass_ir is Case 2 (selective surface); pass 1.0/1.0 for
+    Case 1's original Wilson Eqs. 3/4 blackbody approximation, or 0.0/0.0 for Case 3."""
 
-    def __init__(self, *, insulation_gap_m, vapor_gap_m, eps_abs, tau_glass, tilt_deg, eps_abs_ir=1.0, eps_glass_ir=1.0):
+    def __init__(
+        self, *, insulation_gap_m, vapor_gap_m, eps_abs, tau_glass, tilt_deg,
+        eps_abs_ir=EPS_ABS_IR_CASE2, eps_glass_ir=EPS_GLASS_IR_CASE2,
+        # Complex mode (B2). ``n_glazing_panes`` and ``evacuated_gap`` may be traced
+        # per-instance arrays; only ``complex_mode`` (set on the builder) is static,
+        # since it fixes how many unknowns the Newton solve carries.
+        n_glazing_panes=1.0, evacuated_gap=0.0, complex_mode=False,
+    ):
         self.insulation_gap_m = insulation_gap_m
         self.vapor_gap_m = vapor_gap_m
         self.eps_abs = eps_abs
@@ -241,7 +316,15 @@ class ThermalParams:
         self.tilt_deg = tilt_deg
         self.eps_abs_ir = eps_abs_ir
         self.eps_glass_ir = eps_glass_ir
+        self.n_glazing_panes = n_glazing_panes
+        self.evacuated_gap = evacuated_gap
+        self.complex_mode = complex_mode
         self.h_des_j_per_kg = H_DES_J_PER_KG
+
+    @property
+    def n_thermal_unknowns(self) -> int:
+        """4 in complex mode (the outer pane of a 2-pane stack), else Wilson's 3."""
+        return 4 if self.complex_mode else 3
 
 
 def _thermal_residuals(x, *, t_cond_c, t_amb_c, q_solar_w_m2, m_des, h_amb, params: ThermalParams, gap_eff_m, h_m):
@@ -256,17 +339,57 @@ def _thermal_residuals(x, *, t_cond_c, t_amb_c, q_solar_w_m2, m_des, h_amb, para
 
     eps_ag = parallel_plate_emissivity(params.eps_abs_ir, params.eps_glass_ir)
     eps_ga = params.eps_glass_ir
-    q_cond_ag = conduction_air_gap_w_m2(t_abs, t_glass, params.insulation_gap_m)
+    if not params.complex_mode:
+        q_cond_ag = conduction_air_gap_w_m2(t_abs, t_glass, params.insulation_gap_m)
+        q_rad_ag = radiative_exchange_w_m2(t_abs, t_glass, eps_ag)
+        q_rad_ga = radiative_exchange_w_m2(t_glass, t_amb_c, eps_ga)
+        r3 = q_cond_ag + q_rad_ag - h_amb * (t_glass - t_amb_c) - q_rad_ga
+        r4 = (
+            params.eps_abs * params.tau_glass * q_solar_w_m2
+            - q_cond_ag - q_rad_ag - u_gel * (t_abs - t_gel)
+        )
+        return jnp.array([r1, r3, r4])
+
+    # --- complex mode: outer pane is a real 4th unknown, switched on per instance ---
+    t_glass_outer = x[3]
+    two_pane = params.n_glazing_panes >= 1.5
+    uncovered = params.n_glazing_panes < 0.5
+    # An evacuated assembly kills gas conduction across every glazing gap but leaves
+    # radiation untouched -- that asymmetry is the whole point of paying for it.
+    cond_ag = conduction_air_gap_w_m2(t_abs, t_glass, params.insulation_gap_m)
+    q_cond_ag = jnp.where(params.evacuated_gap >= 0.5, 0.0, cond_ag)
     q_rad_ag = radiative_exchange_w_m2(t_abs, t_glass, eps_ag)
     q_rad_ga = radiative_exchange_w_m2(t_glass, t_amb_c, eps_ga)
-    r3 = q_cond_ag + q_rad_ag - h_amb * (t_glass - t_amb_c) - q_rad_ga
-    r4 = (
-        params.eps_abs * params.tau_glass * q_solar_w_m2
-        - q_cond_ag
-        - q_rad_ag
-        - u_gel * (t_abs - t_gel)
+
+    cond_io = conduction_air_gap_w_m2(t_glass, t_glass_outer, params.insulation_gap_m)
+    q_cond_io = jnp.where(params.evacuated_gap >= 0.5, 0.0, cond_io)
+    eps_pane = parallel_plate_emissivity(eps_ga, eps_ga)
+    q_rad_io = radiative_exchange_w_m2(t_glass, t_glass_outer, eps_pane)
+    q_rad_oa = radiative_exchange_w_m2(t_glass_outer, t_amb_c, eps_ga)
+
+    # Inner pane sheds to the outer pane when two-pane, else straight to ambient.
+    r3 = jnp.where(
+        two_pane,
+        q_cond_ag + q_rad_ag - q_cond_io - q_rad_io,
+        q_cond_ag + q_rad_ag - h_amb * (t_glass - t_amb_c) - q_rad_ga,
     )
-    return jnp.array([r1, r3, r4])
+    # Uncovered: no glass at all, so the absorber sees ambient directly.
+    q_rad_abs_amb = radiative_exchange_w_m2(t_abs, t_amb_c, params.eps_abs)
+    r4 = jnp.where(
+        uncovered,
+        params.eps_abs * q_solar_w_m2
+        - h_amb * (t_abs - t_amb_c) - q_rad_abs_amb - u_gel * (t_abs - t_gel),
+        params.eps_abs * params.tau_glass * q_solar_w_m2
+        - q_cond_ag - q_rad_ag - u_gel * (t_abs - t_gel),
+    )
+    r3 = jnp.where(uncovered, t_glass - t_amb_c, r3)
+    # Pin the unused outer pane to ambient so the Jacobian stays non-singular.
+    r5 = jnp.where(
+        two_pane,
+        q_cond_io + q_rad_io - h_amb * (t_glass_outer - t_amb_c) - q_rad_oa,
+        t_glass_outer - t_amb_c,
+    )
+    return jnp.array([r1, r3, r4, r5])
 
 
 def solve_steady_thermal(
@@ -294,63 +417,12 @@ def solve_steady_thermal(
     return x_final, h_conv_g
 
 
-def _m_calc_residual(m_des, *, c_w, h_m, t_cond_c, t_amb_c, q_solar_w_m2, h_amb, thermal, mass, gap_eff_m, x0):
-    x_star, _ = solve_steady_thermal(
-        t_cond_c=t_cond_c, t_amb_c=t_amb_c, q_solar_w_m2=q_solar_w_m2, m_des=jnp.clip(m_des, 0.0, None),
-        h_amb=h_amb, params=thermal, h_m=h_m, gap_eff_m=gap_eff_m, x0=x0,
-    )
-    t_gel = x_star[0]
-    dc, _ = dc_dh_desorption(c_w, t_gel_c=t_gel, t_cond_c=t_cond_c, h_m=h_m, mass=mass)
-    m_calc = m_des_kg_s_m2_from_dc_w(dc, h0_ref_m=mass.h0_ref_m)
-    return m_calc - m_des, x_star, dc, m_calc
-
-
-_M_DES_BRACKET_MAX = 0.01
-
-
-def solve_m_des_and_thermal(
-    *, c_w, h_m, t_cond_c, t_amb_c, q_solar_w_m2, h_amb, thermal: ThermalParams, mass: MassParams, gap_eff_m, x0,
-    n_bisect=22,
-):
-    """Fixed-iteration bisection root of m_calc(m) - m = 0, replacing scipy.brentq. Always
-    brackets [0, _M_DES_BRACKET_MAX]; the residual is monotone in m over that range, so the
-    CPU path's adaptive doubling is a speed optimization, not a correctness requirement."""
-    r0, x0_star, dc0, _ = _m_calc_residual(
-        0.0, c_w=c_w, h_m=h_m, t_cond_c=t_cond_c, t_amb_c=t_amb_c, q_solar_w_m2=q_solar_w_m2,
-        h_amb=h_amb, thermal=thermal, mass=mass, gap_eff_m=gap_eff_m, x0=x0,
-    )
-    no_desorption = r0 <= 0.0
-
-    def body(carry, _):
-        lo, hi = carry
-        mid = 0.5 * (lo + hi)
-        r_mid, _, _, _ = _m_calc_residual(
-            mid, c_w=c_w, h_m=h_m, t_cond_c=t_cond_c, t_amb_c=t_amb_c, q_solar_w_m2=q_solar_w_m2,
-            h_amb=h_amb, thermal=thermal, mass=mass, gap_eff_m=gap_eff_m, x0=x0,
-        )
-        lo_new = jnp.where(r_mid > 0.0, mid, lo)
-        hi_new = jnp.where(r_mid > 0.0, hi, mid)
-        return (lo_new, hi_new), None
-
-    (lo_f, hi_f), _ = jax.lax.scan(body, (0.0, _M_DES_BRACKET_MAX), None, length=n_bisect)
-    m_star = 0.5 * (lo_f + hi_f)
-    m_star = jnp.where(no_desorption, 0.0, m_star)
-
-    _, x_star, dc_star, m_calc_star = _m_calc_residual(
-        m_star, c_w=c_w, h_m=h_m, t_cond_c=t_cond_c, t_amb_c=t_amb_c, q_solar_w_m2=q_solar_w_m2,
-        h_amb=h_amb, thermal=thermal, mass=mass, gap_eff_m=gap_eff_m, x0=x0,
-    )
-    x_star = jnp.where(no_desorption, x0_star, x_star)
-    dc_star = jnp.where(no_desorption, dc0, dc_star)
-    m_final = jnp.where(no_desorption, 0.0, m_star)
-    return m_final, x_star, dc_star
-
-
 def _joint_residuals(z, *, c_w, h_m, t_cond_c, t_amb_c, q_solar_w_m2, h_amb, thermal, mass, gap_eff_m):
     """4x4 system [T_gel, T_abs, T_glass, m_des] (Eqs. 1/3/4 plus m_calc(m)-m=0) solved
     jointly: same fixed point as solve_m_des_and_thermal at ~n_iter cost instead of
     n_bisect * n_iter. See gpu_sweep/FINDINGS.md."""
-    x, m_des = z[:3], jnp.clip(z[3], 0.0, None)
+    n = thermal.n_thermal_unknowns
+    x, m_des = z[:n], jnp.clip(z[n], 0.0, None)
     r_thermal = _thermal_residuals(
         x, t_cond_c=t_cond_c, t_amb_c=t_amb_c, q_solar_w_m2=q_solar_w_m2,
         m_des=m_des, h_amb=h_amb, params=thermal, gap_eff_m=gap_eff_m, h_m=h_m,
@@ -358,7 +430,7 @@ def _joint_residuals(z, *, c_w, h_m, t_cond_c, t_amb_c, q_solar_w_m2, h_amb, the
     t_gel = x[0]
     dc, _ = dc_dh_desorption(c_w, t_gel_c=t_gel, t_cond_c=t_cond_c, h_m=h_m, mass=mass)
     m_calc = m_des_kg_s_m2_from_dc_w(dc, h0_ref_m=mass.h0_ref_m)
-    r_m = m_calc - z[3]
+    r_m = m_calc - z[n]
     return jnp.concatenate([r_thermal, jnp.array([r_m])])
 
 
@@ -368,6 +440,7 @@ def solve_desorption_state_joint(
 ):
     """Joint 4x4 Newton solve of (T_gel, T_abs, T_glass, m_des), replacing
     solve_m_des_and_thermal's bisection-wraps-Newton."""
+    n = thermal.n_thermal_unknowns
     z0 = jnp.concatenate([x0, jnp.array([0.0])])
 
     def body(z, _):
@@ -382,12 +455,12 @@ def solve_desorption_state_joint(
             )
         )(z)
         step = jnp.linalg.solve(jac, r)
-        x_new = clamp_temperature_c(z[:3] - step[:3])
-        m_new = jnp.clip(z[3] - step[3], 0.0, _M_DES_BRACKET_MAX)
+        x_new = clamp_temperature_c(z[:n] - step[:n])
+        m_new = jnp.clip(z[n] - step[n], 0.0, _M_DES_BRACKET_MAX)
         return jnp.concatenate([x_new, jnp.array([m_new])]), None
 
     z_final, _ = jax.lax.scan(body, z0, None, length=n_iter)
-    x_star, m_star = z_final[:3], jnp.clip(z_final[3], 0.0, None)
+    x_star, m_star = z_final[:n], jnp.clip(z_final[n], 0.0, None)
 
     # No-desorption branch: a negative equilibrium m_des means m_des=0 with the thermal
     # state solved there (mirrors solve_m_des_and_thermal's m_at_zero<=0 short-circuit).
@@ -417,9 +490,16 @@ def desorption_rhs(
     h_fg_j_per_kg,
     fin_area_ratio,
     x0_guess,
+    h_amb_cond=None,
+    fin_thickness_m=None,
+    fin_height_m=None,
 ):
     """dy/dt for y = [c_w, H, T_cond]: the 3-state quasi_steady desorption ODE, matching
-    evaluate_coupled_rates's desorption branch exactly (Eqs. 1-6 + Eq. 2)."""
+    evaluate_coupled_rates's desorption branch exactly (Eqs. 1-6 + Eq. 2).
+
+    Complex mode adds B4's ``h_amb_cond`` (forced condenser air, decoupled from the
+    absorber's ambient convection) and B3's fin geometry; both default to None,
+    which is Wilson's shared h_amb and ideal fin."""
     c_w, h_m_raw, t_cond = y[0], y[1], y[2]
     h_m = jnp.clip(h_m_raw, h0_ref_m, None)
     t_cond_c = clamp_temperature_c(t_cond)
@@ -435,7 +515,11 @@ def desorption_rhs(
     _, dh = dc_dh_desorption(c_w, t_gel_c=t_gel, t_cond_c=t_cond_c, h_m=h_m, mass=mass)
 
     h_conv_g = hollands_vapor_gap_h_conv_w_m2_k(gap_eff_m, t_gel, t_cond_c, tilt_deg=thermal.tilt_deg)
-    h_conv_cond = condenser_h_conv_w_m2_k(h_amb, fin_area_ratio=fin_area_ratio)
+    h_amb_for_cond = h_amb if h_amb_cond is None else h_amb_cond
+    h_conv_cond = condenser_h_conv_w_m2_k(
+        h_amb_for_cond, fin_area_ratio=fin_area_ratio,
+        fin_thickness_m=fin_thickness_m, fin_height_m=fin_height_m,
+    )
     eps_gc = parallel_plate_emissivity(EPS_GEL, EPS_AL)
     q_rad = radiative_exchange_w_m2(t_gel, t_cond_c, eps_gc)
     tmass = jnp.clip(CONDENSER_THERMAL_MASS_J_M2_K, 1.0, None)
@@ -482,7 +566,19 @@ def pam_licl_gravimetric_uptake_g_g(c_w, *, h0_ref_m, c_s_mol_m3, formula_weight
 
 
 def absorption_effective_water_activity(c_w, *, t_gel_c, mass: "MassParams", salt_to_polymer_ratio):
-    """max(brine activity, PAM-LiCl DVS cap) -- salt_properties.py's LiCl branch."""
+    """max(brine activity, PAM-LiCl DVS cap) -- salt_properties.py's LiCl branch.
+
+    Complex mode takes the brine alone: the DVS cap is a measurement of the PAM-LiCl
+    composite specifically, so it does not describe a ZSR blend, and applying it to
+    the pure-LiCl corner only would put a cliff there. Mirrors
+    solar_lumped.physics._absorption_effective_water_activity under use_dvs_cap=False.
+    """
+    if mass.aw_table is not None:
+        return blend_water_activity_from_c_w(
+            c_w, c_s=mass.c_s_mol_m3, h0_ref_m=mass.h0_ref_m,
+            formula_weight_g_mol=mass.formula_weight_g_mol, temperature_c=t_gel_c,
+            aw_table=mass.aw_table,
+        )
     aw_brine = water_activity_licl_from_c_w(
         c_w, c_s=mass.c_s_mol_m3, h0_ref_m=mass.h0_ref_m,
         formula_weight_g_mol=mass.formula_weight_g_mol, temperature_c=t_gel_c,

@@ -1,5 +1,5 @@
 """Levelized cost of water (LCOW), NPV, payback, patent bill-of-materials, parasitic
-electricity, and specific-energy economics for the two-bed waste-heat SAWH device with
+electricity, and specific-energy economics for the two-bed waste-heat SAWH system with
 direct waste-heat coupling (no HTF loop)."""
 
 from __future__ import annotations
@@ -17,7 +17,7 @@ from waste_heat.physics import (
 
 _COL_PARAMETER = "parameter"
 _COL_VALUE = "value"
-_DEVICE_BOM_PREFIX = "device_bom_"
+_SYSTEM_BOM_PREFIX = "system_bom_"
 _PHYSICAL_SCALAR_PARAMS: tuple[str, ...] = (
     "hydrogel_thickness_m",
     "hydrogel_thickness_min_m",
@@ -33,7 +33,7 @@ def _load_economic_data(
     csv_path: Path | str | None = None,
 ) -> tuple[dict[str, Any], tuple[tuple[str, float], ...]]:
     def _coerce(name: str, raw: Any) -> Any:
-        if name == "device_lifetime_years":
+        if name == "system_lifetime_years":
             return int(round(float(raw)))
         if name == "include_desorption_enthalpy":
             if isinstance(raw, bool):
@@ -63,7 +63,7 @@ def _load_economic_data(
             continue
         raw_val = row[_COL_VALUE]
         value = _coerce(name, raw_val)
-        if name.startswith(_DEVICE_BOM_PREFIX):
+        if name.startswith(_SYSTEM_BOM_PREFIX):
             notes = row.get("notes")
             label = str(notes).strip() if notes == notes and str(notes).strip() else name
             bom_rows.append((label, float(value)))
@@ -77,7 +77,7 @@ def _load_economic_data(
         if name not in scalars
     ]
     if not bom_rows:
-        missing.append("device_bom_*")
+        missing.append("system_bom_*")
     if missing:
         raise ValueError(f"Missing required parameters in {path}: {', '.join(missing)}")
     return scalars, tuple(bom_rows)
@@ -88,7 +88,7 @@ class LCOEconomicParams:
     """LCOW = annual_cost / (utilization_factor * gross_annual_water_m3)."""
 
     discount_rate: float
-    device_lifetime_years: int
+    system_lifetime_years: int
     total_investment_factor: float
     maintenance_cost_fraction: float
     utilization_factor: float
@@ -114,13 +114,13 @@ class LCOEconomicParams:
 
     def capital_recovery_factor(self) -> float:
         i = self.discount_rate
-        L = self.device_lifetime_years
+        L = self.system_lifetime_years
         if i <= 0.0 or L < 1:
-            raise ValueError("discount_rate must be > 0 and device_lifetime_years >= 1")
+            raise ValueError("discount_rate must be > 0 and system_lifetime_years >= 1")
         return (i * (1.0 + i) ** L) / ((1.0 + i) ** L - 1.0)
 
 
-_SCALARS, _DEVICE_BOM_ROWS = _load_economic_data()
+_SCALARS, _SYSTEM_BOM_ROWS = _load_economic_data()
 
 HYDROGEL_THICKNESS_M: float = float(_SCALARS["hydrogel_thickness_m"])
 HYDROGEL_THICKNESS_MIN_M: float = float(_SCALARS["hydrogel_thickness_min_m"])
@@ -132,8 +132,8 @@ MASS_TRANSFER_CONVECTION_COEFFICIENT_M_S: float = float(
 WATER_DENSITY_KG_PER_L: float = float(_SCALARS["water_density_kg_per_l"])
 L_PER_M3: float = float(_SCALARS["l_per_m3"])
 KG_WATER_PER_M3: float = WATER_DENSITY_KG_PER_L * L_PER_M3
-DEVICE_BOM_USD_PER_M2: tuple[tuple[str, float], ...] = _DEVICE_BOM_ROWS
-C_DEVICE_USD: float = sum(cost for _, cost in DEVICE_BOM_USD_PER_M2)
+SYSTEM_BOM_USD_PER_M2: tuple[tuple[str, float], ...] = _SYSTEM_BOM_ROWS
+C_SYSTEM_USD: float = sum(cost for _, cost in SYSTEM_BOM_USD_PER_M2)
 _LCOW_DEFAULTS: dict[str, Any] = {f.name: _SCALARS[f.name] for f in fields(LCOEconomicParams)}
 
 
@@ -183,7 +183,7 @@ def default_electrical_loads(
     *,
     vacuum_operating_hours_per_day: float = 12.0,
 ) -> tuple[ElectricalLoadSpec, ...]:
-    """Default parasitic loads for the data-center baseline device: no pumped HTF loop or
+    """Default parasitic loads for the data-center baseline system: no pumped HTF loop or
     transfer pump, since the desorbing contactor couples directly to the waste-heat stream."""
     return (
         ElectricalLoadSpec(
@@ -384,9 +384,9 @@ def lcow_from_daily_yield(
     annual_extra_cycle_energy = econ.annual_extra_cycle_energy_cost_usd(cycles_per_day)
 
     annual_cost_usd = (
-        econ.capital_recovery_factor() * econ.total_investment_factor * C_DEVICE_USD
+        econ.capital_recovery_factor() * econ.total_investment_factor * C_SYSTEM_USD
         + hydrogel_replacement
-        + econ.maintenance_cost_fraction * econ.total_investment_factor * C_DEVICE_USD
+        + econ.maintenance_cost_fraction * econ.total_investment_factor * C_SYSTEM_USD
         + econ.energy_cost_usd_per_year
         + annual_electricity_cost
         + annual_parasitic_electricity
@@ -442,7 +442,7 @@ def lcow_cost_breakdown_from_daily_yield(
 
     segments: list[tuple[str, float]] = []
     maintenance_annual = 0.0
-    for name, line_cost in DEVICE_BOM_USD_PER_M2:
+    for name, line_cost in SYSTEM_BOM_USD_PER_M2:
         scaled = inv * line_cost
         segments.append((f"CAPEX: {name}", _lcow_seg(crf * scaled)))
         maintenance_annual += maint_frac * scaled
@@ -499,7 +499,7 @@ def npv_from_daily_yield(
     electric_heat_w_per_m2: float = 0.0,
     salt_price_usd_per_kg: float | None = None,
 ) -> NpvResult | None:
-    """NPV and payback period (USD/m2 of device footprint) for one site."""
+    """NPV and payback period (USD/m2 of system footprint) for one site."""
     if daily_yield_kg_per_m2 <= 0.0 or not math.isfinite(daily_yield_kg_per_m2):
         return None
     if salt_to_polymer_ratio <= 0.0 or not math.isfinite(salt_to_polymer_ratio):
@@ -531,10 +531,10 @@ def npv_from_daily_yield(
     )
     annual_extra_cycle_energy = econ.annual_extra_cycle_energy_cost_usd(cycles_per_day)
 
-    capex = econ.total_investment_factor * C_DEVICE_USD
+    capex = econ.total_investment_factor * C_SYSTEM_USD
     annual_opex = (
         hydrogel_replacement
-        + econ.maintenance_cost_fraction * econ.total_investment_factor * C_DEVICE_USD
+        + econ.maintenance_cost_fraction * econ.total_investment_factor * C_SYSTEM_USD
         + econ.energy_cost_usd_per_year
         + annual_electricity_cost
         + annual_parasitic_electricity
@@ -546,7 +546,7 @@ def npv_from_daily_yield(
     if not math.isfinite(annual_net_cash_flow):
         return None
 
-    lifetime_years = float(econ.device_lifetime_years)
+    lifetime_years = float(econ.system_lifetime_years)
     i = econ.discount_rate
     pvaf = lifetime_years if i <= 0.0 else (1.0 - (1.0 + i) ** (-lifetime_years)) / i
     npv = -capex + annual_net_cash_flow * pvaf

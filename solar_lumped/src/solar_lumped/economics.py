@@ -1,4 +1,4 @@
-"""Levelized cost of water (LCOW), NPV, and payback economics for the solar SAWH device."""
+"""Levelized cost of water (LCOW), NPV, and payback economics for the solar SAWH system."""
 
 from __future__ import annotations
 
@@ -20,7 +20,7 @@ _BOM_PREFIX = "BOM: "
 # LCOEconomicParams field name -> parameters.xlsx Economics-sheet row name.
 _ECON_FIELD_ROWS: dict[str, str] = {
     "discount_rate": "Discount rate (i)",
-    "device_lifetime_years": "Device lifetime (L)",
+    "system_lifetime_years": "Device lifetime (L)",
     "total_investment_factor": "Total investment factor (f_inv)",
     "maintenance_cost_fraction": "Maintenance cost fraction (f_maint)",
     "utilization_factor": "Utilization factor (f_util)",
@@ -33,7 +33,7 @@ _ECON_FIELD_ROWS: dict[str, str] = {
     "include_desorption_enthalpy": "Include desorption enthalpy in T_g solve (flag)",
 }
 
-# No electricity / electric-heat rows: solar_lumped is the *passive* solar device, so
+# No electricity / electric-heat rows: solar_lumped is the *passive* solar system, so
 # there is no purchased-energy term at all (Wilson's Note S4 TEA likewise has none).
 # The parameters.xlsx Economics sheet still carries "Electricity price (p_elec)",
 # "Desorption hours per day (t_des)" and "Max electric heat, optimizer bound
@@ -51,7 +51,7 @@ def _load_economic_data() -> tuple[dict[str, Any], tuple[tuple[str, float], ...]
     scalars: dict[str, Any] = {}
     for field_name, row_name in _ECON_FIELD_ROWS.items():
         raw = _ev(row_name)
-        if field_name == "device_lifetime_years":
+        if field_name == "system_lifetime_years":
             scalars[field_name] = int(round(float(raw)))
         elif field_name == "include_desorption_enthalpy":
             scalars[field_name] = _coerce_bool(raw)
@@ -100,7 +100,7 @@ class LCOEconomicParams:
     """LCOW = annual_cost / (utilization_factor * gross_annual_water_m3)."""
 
     discount_rate: float
-    device_lifetime_years: int
+    system_lifetime_years: int
     total_investment_factor: float
     maintenance_cost_fraction: float
     utilization_factor: float
@@ -120,13 +120,13 @@ class LCOEconomicParams:
 
     def capital_recovery_factor(self) -> float:
         i = self.discount_rate
-        L = self.device_lifetime_years
+        L = self.system_lifetime_years
         if i <= 0.0 or L < 1:
-            raise ValueError("discount_rate must be > 0 and device_lifetime_years >= 1")
+            raise ValueError("discount_rate must be > 0 and system_lifetime_years >= 1")
         return (i * (1.0 + i) ** L) / ((1.0 + i) ** L - 1.0)
 
 
-_SCALARS, _DEVICE_BOM_ROWS = _load_economic_data()
+_SCALARS, _SYSTEM_BOM_ROWS = _load_economic_data()
 
 HYDROGEL_THICKNESS_M: float = float(_SCALARS["hydrogel_thickness_m"])
 HYDROGEL_THICKNESS_MIN_M: float = float(_SCALARS["hydrogel_thickness_min_m"])
@@ -136,8 +136,8 @@ MASS_TRANSFER_CONVECTION_COEFFICIENT_M_S: float = float(
     _SCALARS["mass_transfer_convection_coefficient_m_s"]
 )
 KG_WATER_PER_M3: float = _ev("Water density (rho_w)")
-DEVICE_BOM_USD_PER_M2: tuple[tuple[str, float], ...] = _DEVICE_BOM_ROWS
-C_DEVICE_USD: float = sum(cost for _, cost in DEVICE_BOM_USD_PER_M2)
+SYSTEM_BOM_USD_PER_M2: tuple[tuple[str, float], ...] = _SYSTEM_BOM_ROWS
+C_SYSTEM_USD: float = sum(cost for _, cost in SYSTEM_BOM_USD_PER_M2)
 _LCOW_DEFAULTS: dict[str, Any] = {f.name: _SCALARS[f.name] for f in fields(LCOEconomicParams)}
 
 # Polymer sub-mix (AM/APS/MBA/TEMED) blended price and water ratio from Table S1 batch
@@ -174,6 +174,24 @@ WATER_RATIO_PER_KG_DRY_COMPOSITE: float = _water_gel_fraction / (1.0 - _water_ge
 FAIL_LCO: float = 1e30
 
 
+def complex_system_cost_usd(complex_options, *, fin_area_ratio: float) -> float:
+    """System BOM under complex mode: the flat Wilson BOM plus the priced deltas.
+
+    ``complex_options`` of ``None`` returns the flat simple-model BOM unchanged, so
+    every existing caller is unaffected. Otherwise B1 (coating), B2 (glazing), B3
+    (fin aluminum), and B4 (fans + PV) each add a signed delta against Wilson's own
+    build -- see ``complex_model.complex_system_capex_usd_per_m2``.
+    """
+    if complex_options is None:
+        return C_SYSTEM_USD
+    from solar_lumped.complex_model import complex_system_capex_usd_per_m2
+
+    return float(
+        C_SYSTEM_USD
+        + complex_system_capex_usd_per_m2(complex_options, fin_area_ratio=fin_area_ratio)
+    )
+
+
 def lcow_from_daily_yield(
     daily_yield_kg_per_m2: float,
     *,
@@ -184,17 +202,35 @@ def lcow_from_daily_yield(
     cycles_per_day: float = 1.0,
     salt_price_usd_per_kg: float | None = None,
     simplified: bool = False,
+    complex_options=None,
+    fin_area_ratio: float | None = None,
 ) -> float:
     """Scalar LCOW (USD/m³), same structure as lcow_zsr_at_sl. ``simplified=True`` drops the
-    DI-water and non-acrylamide polymer (APS/MBA/TEMED) terms from the hydrogel line."""
+    DI-water and non-acrylamide polymer (APS/MBA/TEMED) terms from the hydrogel line.
+
+    ``complex_options`` (a ``ComplexOptions``) switches on the complex-fidelity cost
+    model: a design-dependent system BOM, a ZSR-blended salt price, and the annual
+    fan-replacement stream. It requires ``fin_area_ratio``, since B3 prices fin
+    aluminum per unit of added area."""
     if daily_yield_kg_per_m2 <= 0.0 or not math.isfinite(daily_yield_kg_per_m2):
         return FAIL_LCO
     if (
         salt_to_polymer_ratio <= 0.0 or not math.isfinite(salt_to_polymer_ratio)
     ):
         return FAIL_LCO
+    if complex_options is not None and fin_area_ratio is None:
+        raise ValueError("complex_options requires fin_area_ratio (B3 prices fin aluminum)")
 
     annual_water_yield_kg = float(cycles_per_day) * 365.0 * float(daily_yield_kg_per_m2)
+    if complex_options is not None and salt_price_usd_per_kg is None:
+        from solar_lumped.complex_model import zsr_blend_price_usd_per_kg
+        from solar_lumped.physics import FABRICATION_EQUILIBRIUM_RH
+
+        salt_price_usd_per_kg = zsr_blend_price_usd_per_kg(
+            complex_options.blend_weights, reference_rh=FABRICATION_EQUILIBRIUM_RH
+        )
+        if not math.isfinite(salt_price_usd_per_kg):
+            return FAIL_LCO
     sorbent_replacement = _sorbent_replacement_annual_usd(
         salt_name=salt_name,
         salt_to_polymer_ratio=salt_to_polymer_ratio,
@@ -204,10 +240,20 @@ def lcow_from_daily_yield(
         simplified=simplified,
     )
 
+    c_system = complex_system_cost_usd(complex_options, fin_area_ratio=fin_area_ratio or 0.0)
+    annual_fan_replacement = 0.0
+    if complex_options is not None:
+        from solar_lumped.complex_model import forced_cooling_annual_replacement_usd_per_m2
+
+        annual_fan_replacement = forced_cooling_annual_replacement_usd_per_m2(
+            complex_options.condenser_air_speed_m_s
+        )
+
     annual_cost_usd = (
-        econ.capital_recovery_factor() * econ.total_investment_factor * C_DEVICE_USD
+        econ.capital_recovery_factor() * econ.total_investment_factor * c_system
         + sorbent_replacement
-        + econ.maintenance_cost_fraction * C_DEVICE_USD
+        + econ.maintenance_cost_fraction * c_system
+        + annual_fan_replacement
     )
     if not math.isfinite(annual_cost_usd):
         return FAIL_LCO
@@ -305,7 +351,7 @@ def lcow_cost_breakdown_from_daily_yield(
 
     segments: list[tuple[str, float]] = []
     maintenance_annual = 0.0
-    for name, line_cost in DEVICE_BOM_USD_PER_M2:
+    for name, line_cost in SYSTEM_BOM_USD_PER_M2:
         segments.append((f"CAPEX: {name}", _lcow_seg(crf * inv * line_cost)))
         maintenance_annual += maint_frac * line_cost
     segments.append(("Maintenance", _lcow_seg(maintenance_annual)))
@@ -365,7 +411,7 @@ def npv_from_daily_yield(
     cycles_per_day: float = 1.0,
     salt_price_usd_per_kg: float | None = None,
 ) -> NpvResult | None:
-    """NPV and payback period (USD/m2 of device footprint) for one site."""
+    """NPV and payback period (USD/m2 of system footprint) for one site."""
     if daily_yield_kg_per_m2 <= 0.0 or not math.isfinite(daily_yield_kg_per_m2):
         return None
     if (
@@ -383,15 +429,15 @@ def npv_from_daily_yield(
         econ=econ,
         salt_price_usd_per_kg=salt_price_usd_per_kg,
     )
-    capex = econ.total_investment_factor * C_DEVICE_USD
-    annual_opex = sorbent_replacement + econ.maintenance_cost_fraction * C_DEVICE_USD
+    capex = econ.total_investment_factor * C_SYSTEM_USD
+    annual_opex = sorbent_replacement + econ.maintenance_cost_fraction * C_SYSTEM_USD
     annual_revenue = gross_annual_water_m3 * float(water_price_usd_per_m3)
     annual_net_cash_flow = annual_revenue - annual_opex
 
     if not math.isfinite(annual_net_cash_flow):
         return None
 
-    lifetime_years = float(econ.device_lifetime_years)
+    lifetime_years = float(econ.system_lifetime_years)
     i = econ.discount_rate
     pvaf = lifetime_years if i <= 0.0 else (1.0 - (1.0 + i) ** (-lifetime_years)) / i
     npv = -capex + annual_net_cash_flow * pvaf

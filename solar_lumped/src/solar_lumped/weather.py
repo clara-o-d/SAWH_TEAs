@@ -23,6 +23,7 @@ from solar_lumped.physics import (
     H_AMB_W_M2_K,
     c_w_from_water_in_gel_l_m2,
     equilibrium_c_w_from_dvs_at_rh,
+    wind_to_h_amb_w_m2_k,
 )
 
 # Wilson et al. (2025) Methods baseline scenario (docs/parameters.xlsx Physics
@@ -189,182 +190,6 @@ def fetch_year_weather(
 
 # --- Real-weather day statistics (solar/temperature/RH day summaries) ---
 
-STEPS_PER_HOUR = 4
-STEPS_PER_DAY = 24 * STEPS_PER_HOUR
-
-
-def representative_mean_day_df(
-    df: pd.DataFrame,
-    *,
-    reference_day: date | None = None,
-) -> pd.DataFrame:
-    """One synthetic calendar day of mean slot values; native 15-min resolution when
-    available, else hourly means expanded to 96 slots."""
-    if df.empty:
-        raise ValueError("Cannot build representative mean day from empty weather data.")
-
-    ref = reference_day or date(2024, 1, 1)
-    base = pd.Timestamp(ref)
-    if df.index.tz is not None:
-        base = base.tz_localize(df.index.tz)
-
-    median_delta_min = float(df.index.to_series().diff().dropna().dt.total_seconds().median() / 60.0)
-    if median_delta_min <= 20.0:
-        rh = representative_kinetics_rh_from_minutely_15(df)
-        temp = representative_kinetics_temperature_from_minutely_15(df)
-        solar = representative_kinetics_solar_from_minutely_15(df)
-        wind = representative_kinetics_wind_from_minutely_15(df)
-        freq = "15min"
-    else:
-        rh_h = representative_hourly_rh_from_hourly(df)
-        temp_h = representative_hourly_temperature_from_hourly(df)
-        solar_h = representative_hourly_solar_from_hourly(df)
-        wind_h = representative_hourly_wind_from_hourly(df)
-        rh = _expand_hourly_to_15min(rh_h)
-        temp = _expand_hourly_to_15min(temp_h)
-        solar = _expand_hourly_to_15min(solar_h)
-        wind = _expand_hourly_to_15min(wind_h)
-        freq = "15min"
-
-    index = pd.date_range(base, periods=STEPS_PER_DAY, freq=freq)
-    out = pd.DataFrame(
-        {
-            "relative_humidity_2m": [r * 100.0 for r in rh],
-            "temperature_2m": temp,
-            "shortwave_radiation": solar,
-            "wind_speed_10m": wind,
-        },
-        index=index,
-    )
-    out.index.name = "time"
-    if "latitude" in df.columns:
-        out["latitude"] = float(df["latitude"].iloc[0])
-    if "longitude" in df.columns:
-        out["longitude"] = float(df["longitude"].iloc[0])
-    return out
-
-
-def _grouped_mean_fill(series: pd.Series, key: np.ndarray | pd.Index, n: int) -> tuple[float, ...]:
-    """Per-key mean of *series* (grouped by *key*), filled for 0..n-1 with the overall mean."""
-    grouped = series.groupby(key).mean()
-    fallback = float(grouped.mean()) if len(grouped) else 0.0
-    return tuple(float(grouped.get(k, fallback)) for k in range(n))
-
-
-def _mean_by_slot(df: pd.DataFrame, col: str) -> tuple[float, ...]:
-    slot = df.index.hour * STEPS_PER_HOUR + df.index.minute // 15  # 15-min slot 0..95
-    return _grouped_mean_fill(df[col], slot, STEPS_PER_DAY)
-
-
-def representative_kinetics_rh_from_minutely_15(df: pd.DataFrame) -> tuple[float, ...]:
-    """Mean relative humidity (fraction 0–1) for each 15-min slot 0..95 within a day."""
-    if "relative_humidity_2m" not in df.columns:
-        raise KeyError("DataFrame must contain column 'relative_humidity_2m'")
-    rh_pct = _mean_by_slot(df, "relative_humidity_2m")
-    return tuple(r / 100.0 for r in rh_pct)
-
-
-def representative_kinetics_temperature_from_minutely_15(df: pd.DataFrame) -> tuple[float, ...]:
-    """Mean 2 m air temperature (deg C) for each 15-min slot 0..95 within a day."""
-    col = "temperature_2m"
-    if col not in df.columns:
-        raise KeyError(f"DataFrame must contain column {col!r}")
-    return _mean_by_slot(df, col)
-
-
-def representative_kinetics_solar_from_minutely_15(df: pd.DataFrame) -> tuple[float, ...]:
-    """Mean shortwave GHI (W/m²) for each 15-min slot 0..95 within a day."""
-    col = "shortwave_radiation"
-    if col not in df.columns:
-        raise KeyError(f"DataFrame must contain column {col!r}")
-    solar = _mean_by_slot(df, col)
-    return tuple(max(0.0, s) for s in solar)
-
-
-def representative_kinetics_wind_from_minutely_15(df: pd.DataFrame) -> tuple[float, ...]:
-    """Mean 10 m wind speed (m/s) for each 15-min slot 0..95 within a day."""
-    col = "wind_speed_10m"
-    if col not in df.columns:
-        return (0.5,) * STEPS_PER_DAY
-    return _mean_by_slot(df, col)
-
-
-def representative_hourly_rh_from_hourly(df: pd.DataFrame) -> tuple[float, ...]:
-    """Mean relative humidity (fraction 0–1) for each hour-of-day 0..23."""
-    if "relative_humidity_2m" not in df.columns:
-        raise KeyError("DataFrame must contain column 'relative_humidity_2m'")
-    return _grouped_mean_fill(df["relative_humidity_2m"] / 100.0, df.index.hour, 24)
-
-
-def representative_hourly_temperature_from_hourly(df: pd.DataFrame) -> tuple[float, ...]:
-    """Mean 2 m air temperature (deg C) for each hour-of-day 0..23."""
-    col = "temperature_2m"
-    if col not in df.columns:
-        raise KeyError(f"DataFrame must contain column {col!r}")
-    return _grouped_mean_fill(df[col], df.index.hour, 24)
-
-
-def representative_hourly_solar_from_hourly(df: pd.DataFrame) -> tuple[float, ...]:
-    """Mean shortwave GHI (W/m²) for each hour-of-day 0..23."""
-    col = "shortwave_radiation"
-    if col not in df.columns:
-        raise KeyError(f"DataFrame must contain column {col!r}")
-    return tuple(max(0.0, s) for s in _grouped_mean_fill(df[col], df.index.hour, 24))
-
-
-def representative_hourly_wind_from_hourly(df: pd.DataFrame) -> tuple[float, ...]:
-    """Mean 10 m wind speed (m/s) for each hour-of-day 0..23."""
-    col = "wind_speed_10m"
-    if col not in df.columns:
-        return (0.5,) * 24
-    return _grouped_mean_fill(df[col], df.index.hour, 24)
-
-
-def _expand_hourly_to_15min(hourly: tuple[float, ...]) -> tuple[float, ...]:
-    out: list[float] = []
-    for value in hourly:
-        out.extend([value] * STEPS_PER_HOUR)
-    return tuple(out[:STEPS_PER_DAY])
-
-
-def site_row_from_hourly(df: pd.DataFrame) -> dict[str, float]:
-    """Mean daily diurnal extrema for SAWH site diagnostics."""
-    rh_high, rh_low = diurnal_rh_from_hourly(df)
-    out: dict[str, float] = {"rh_high_frac": rh_high, "rh_low_frac": rh_low}
-    if "temperature_2m" in df.columns:
-        t_high, t_low = diurnal_temperature_from_hourly(df)
-        out["temperature_high_c"] = t_high
-        out["temperature_low_c"] = t_low
-    if "shortwave_radiation" in df.columns:
-        out["solar_irradiance_w_per_m2"] = mean_daily_max_irradiance_from_hourly(df)
-    return out
-
-
-def diurnal_rh_from_hourly(df: pd.DataFrame) -> tuple[float, float]:
-    """Mean of daily max RH and mean of daily min RH (fractions 0-1)."""
-    return _diurnal_extrema(df, "relative_humidity_2m", scale=1.0 / 100.0)
-
-
-def _diurnal_extrema(df: pd.DataFrame, col: str, scale: float = 1.0) -> tuple[float, float]:
-    """Return ``(mean_daily_max * scale, mean_daily_min * scale)`` for *col*."""
-    if col not in df.columns:
-        raise KeyError(f"DataFrame must contain column {col!r}")
-    r = df[col].resample("D")
-    return (float(r.max().mean() * scale), float(r.min().mean() * scale))
-
-
-def diurnal_temperature_from_hourly(df: pd.DataFrame) -> tuple[float, float]:
-    """Mean of daily max and min 2 m air temperature (deg C)."""
-    return _diurnal_extrema(df, "temperature_2m")
-
-
-def mean_daily_max_irradiance_from_hourly(df: pd.DataFrame) -> float:
-    """Mean of daily peak shortwave GHI irradiance (W/m²)."""
-    col = "shortwave_radiation"
-    if col not in df.columns:
-        raise KeyError(f"DataFrame must contain column {col!r}")
-    return float(df[col].resample("D").max().mean())
-
 
 def day_weather_stats(day_df: pd.DataFrame) -> dict[str, float]:
     """Mean and peak weather for one calendar day of raw Open-Meteo data."""
@@ -475,7 +300,7 @@ SOLAR_NIGHT_THRESHOLD_W_M2 = 5.0
 # from the site's horizontal irradiance (GHI), and ``tilt_deg`` enters the model
 # *only* through the Hollands tilted-plate Nusselt correlation for the two air
 # gaps (physics.py::hollands_vapor_gap_h_conv_w_m2_k). That makes tilt a pure
-# internal-natural-convection knob: tilting the device changes gap convection but
+# internal-natural-convection knob: tilting the system changes gap convection but
 # not the solar energy it collects, which is backwards for a solar collector.
 #
 # Enabling POA (``profile_from_day_df(..., poa_tilt_deg=...)``) transposes GHI
@@ -582,7 +407,7 @@ class PhaseProfile:
     solar_w_m2: tuple[float, ...]
     h_amb_w_m2_k: tuple[float, ...]
     dt_s: float = PHASE_DT_S
-    # Decouples condenser cooling from the absorber/glass h_amb (Wilson's Atacama device
+    # Decouples condenser cooling from the absorber/glass h_amb (Wilson's Atacama system
     # fan-forces ~0.5 m/s over the condenser, Fig. S2). None → use h_amb.
     h_amb_cond_w_m2_k: tuple[float, ...] | None = None
 
@@ -603,6 +428,9 @@ def profile_from_day_df(
     poa_tilt_deg: float | None = None,
     poa_surface_azimuth_deg: float | None = None,
     poa_albedo: float = POA_DEFAULT_ALBEDO,
+    seal_offset_h: float = 0.0,
+    open_offset_h: float = 0.0,
+    condenser_air_speed_m_s: float = 0.0,
 ) -> DailyWeatherProfile:
     """Split one calendar day into absorption (night) + desorption (day), each running its
     true real-time duration at PHASE_DT_S resolution rather than a fixed 12 h/12 h split.
@@ -612,6 +440,16 @@ def profile_from_day_df(
     GHI, so ``tilt_deg`` drives solar gain as well as gap natural convection. Requires the
     ``latitude``/``longitude`` columns Open-Meteo responses already carry. The day/night
     split itself stays keyed on GHI, so which samples land in which phase is unchanged.
+
+    Complex mode (A1) shifts that split: ``seal_offset_h`` moves the moment the system is
+    sealed and desorption begins relative to GHI sunrise, and ``open_offset_h`` moves the
+    moment it re-opens relative to GHI sunset (both in hours; positive delays). Sealing
+    late keeps harvesting the pre-dawn RH peak but leaves fewer solar hours to desorb --
+    the trade-off A1 exists to expose. Both zero (default) is the unshifted GHI split.
+
+    Complex mode (B4) also sets ``condenser_air_speed_m_s``, which fills the profile's
+    ``h_amb_cond_w_m2_k`` channel so the condenser is cooled by forced air independent of
+    ambient wind, rather than sharing the absorber's h_amb.
     """
     deltas = day_df.index.to_series().diff().dropna().dt.total_seconds()
     native_dt_s = float(deltas.median()) if len(deltas) else PHASE_DT_S
@@ -633,8 +471,12 @@ def profile_from_day_df(
                 albedo=poa_albedo,
             )
         )
-    night = day_df[solar < SOLAR_NIGHT_THRESHOLD_W_M2]
-    day = day_df[solar >= SOLAR_NIGHT_THRESHOLD_W_M2]
+    if seal_offset_h or open_offset_h:
+        is_day = _shifted_desorption_mask(day_df, solar, seal_offset_h, open_offset_h)
+    else:
+        is_day = solar >= SOLAR_NIGHT_THRESHOLD_W_M2
+    night = day_df[~is_day]
+    day = day_df[is_day]
     if len(night) < 4:
         night = day_df.nsmallest(max(STEPS_PER_PHASE, len(day_df) // 2), "shortwave_radiation")
     if len(day) < 4:
@@ -643,8 +485,48 @@ def profile_from_day_df(
     day = _rotate_chronological(day, pivot_hour=0.0)
     return DailyWeatherProfile(
         absorption=_resample_phase(night, _steps_for(len(night), native_dt_s)),
-        desorption=_resample_phase(day, _steps_for(len(day), native_dt_s)),
+        desorption=_resample_phase(
+            day,
+            _steps_for(len(day), native_dt_s),
+            condenser_air_speed_m_s=condenser_air_speed_m_s,
+        ),
     )
+
+
+def _shifted_desorption_mask(
+    day_df: pd.DataFrame,
+    solar: pd.Series,
+    seal_offset_h: float,
+    open_offset_h: float,
+) -> np.ndarray:
+    """Desorption-phase mask with the seal/open boundaries shifted off GHI sunrise/sunset.
+
+    The unshifted phase is every sample at or above ``SOLAR_NIGHT_THRESHOLD_W_M2``; its
+    first and last samples are taken as sunrise and sunset. Offsets move those two edges
+    independently along the clock, so desorption can start before dawn (negative
+    ``seal_offset_h``, sealing the system early) or run past dusk (positive
+    ``open_offset_h``, holding it shut into the evening).
+
+    Both edges are clamped to keep at least one sample in each phase: a design that
+    starves absorption or desorption entirely should score badly on yield, not crash the
+    integrator with an empty slice.
+    """
+    lit = np.asarray(solar >= SOLAR_NIGHT_THRESHOLD_W_M2)
+    if not lit.any() or lit.all():
+        return lit
+    hour = np.asarray(day_df.index.hour + day_df.index.minute / 60.0, dtype=float)
+    lit_hours = hour[lit]
+    sunrise, sunset = float(lit_hours.min()), float(lit_hours.max())
+    start = sunrise + float(seal_offset_h)
+    end = sunset + float(open_offset_h)
+    if end <= start:  # offsets crossed over; keep a minimal desorption window
+        end = start + 1.0
+    mask = (hour >= start) & (hour <= end)
+    if not mask.any():
+        mask = lit
+    elif mask.all():
+        mask = mask & (hour < float(hour.max()))
+    return mask
 
 
 def _rotate_chronological(df: pd.DataFrame, *, pivot_hour: float) -> pd.DataFrame:
@@ -662,7 +544,12 @@ def _steps_for(n_rows: int, native_dt_s: float) -> int:
     return max(4, int(round(n_rows * native_dt_s / PHASE_DT_S)))
 
 
-def _resample_phase(df: pd.DataFrame, n: int = STEPS_PER_PHASE) -> PhaseProfile:
+def _resample_phase(
+    df: pd.DataFrame,
+    n: int = STEPS_PER_PHASE,
+    *,
+    condenser_air_speed_m_s: float = 0.0,
+) -> PhaseProfile:
     if len(df) == 0:
         raise ValueError("Empty weather slice for phase profile.")
     # "poa_w_m2" is present only when profile_from_day_df ran with POA enabled; it
@@ -685,11 +572,19 @@ def _resample_phase(df: pd.DataFrame, n: int = STEPS_PER_PHASE) -> PhaseProfile:
         solar = np.interp(x_tgt, x_src, solar_src.astype(float).values)
     solar = np.maximum(0.0, solar)
     h_amb = (FIXED_H_AMB_W_M2_K,) * n  # ambient convection coefficient -- fixed, not wind-derived
+    # B4: forced condenser air decouples condenser cooling from the absorber's h_amb.
+    # Wilson's own fans hold ~0.5 m/s regardless of ambient wind (Note S2), so this is a
+    # floor, not a replacement -- a windy site still gets the better of the two.
+    h_amb_cond = None
+    if condenser_air_speed_m_s > 0.0:
+        forced = wind_to_h_amb_w_m2_k(condenser_air_speed_m_s)
+        h_amb_cond = (max(forced, FIXED_H_AMB_W_M2_K),) * n
     return PhaseProfile(
         temperature_c=tuple(float(x) for x in temp),
         relative_humidity=tuple(float(x) for x in rh),
         solar_w_m2=tuple(float(x) for x in solar),
         h_amb_w_m2_k=h_amb,
+        h_amb_cond_w_m2_k=h_amb_cond,
     )
 
 
@@ -765,47 +660,55 @@ def _single_day_df(
     return df.loc[mask].copy()
 
 
-def representative_mean_day_profile(
+def real_day_profile(
     lat: float,
     lon: float,
-    year: int,
+    day: date,
     *,
     cache_dir: str | None = None,
+    poa_tilt_deg: float | None = None,
 ) -> DailyWeatherProfile:
-    """Fetch one calendar year and return a single mean diurnal profile."""
-    df = fetch_year_weather(lat, lon, year, cache_dir=cache_dir)
-    mean_day = representative_mean_day_df(df, reference_day=date(year, 6, 15))
-    return profile_from_day_df(mean_day)
+    """One real calendar day's weather at a site -- no averaging of any kind.
 
-
-def real_weather_days(
-    lat: float,
-    lon: float,
-    year: int,
-    *,
-    cache_dir: str | None = None,
-    stride: int = 1,
-    df: pd.DataFrame | None = None,
-) -> list[tuple[date, DailyWeatherProfile]]:
-    """Build per-day profiles for a full year from minutely_15 (or hourly fallback)."""
-    if df is None:
-        df = fetch_year_weather(lat, lon, year, cache_dir=cache_dir)
-
-    return [(day_key, prof) for day_key, prof, _ in real_weather_days_from_df(df, stride=stride)]
+    Single-day CPU runs use a real day rather than a synthetic mean one: mean days
+    smear out the diurnal extremes that actually drive uptake and desorption.
+    """
+    df = fetch_year_weather(lat, lon, day.year, cache_dir=cache_dir)
+    day_df = _single_day_df(df, day)
+    if day_df.empty:
+        raise ValueError(f"No weather data for {day.isoformat()} at ({lat:.4f}, {lon:.4f}).")
+    return profile_from_day_df(day_df, poa_tilt_deg=poa_tilt_deg)
 
 
 def real_weather_days_from_df(
     df: pd.DataFrame,
     *,
     stride: int = 1,
+    seal_offset_h: float = 0.0,
+    open_offset_h: float = 0.0,
+    condenser_air_speed_m_s: float = 0.0,
+    poa_tilt_deg: float | None = None,
 ) -> list[tuple[date, DailyWeatherProfile, pd.DataFrame]]:
-    """Build per-day profiles from a pre-fetched year of Open-Meteo data."""
+    """Build per-day profiles from a pre-fetched year of Open-Meteo data.
+
+    The keyword arguments are complex mode's profile-level design variables (A1
+    schedule shift, B4 forced condenser air, and opt-in POA transposition so tilt
+    drives solar gain). They make the profile set design-dependent, so a caller
+    sweeping designs must rebuild per design point rather than fetching once --
+    see ``sawh_bayesopt.sites.profiles_for_design``.
+    """
     days_out: list[tuple[date, DailyWeatherProfile, pd.DataFrame]] = []
     for idx, (day_key, group) in enumerate(df.groupby(df.index.date)):
         if stride > 1 and idx % stride != 0:
             continue
         try:
-            prof = profile_from_day_df(group)
+            prof = profile_from_day_df(
+                group,
+                seal_offset_h=seal_offset_h,
+                open_offset_h=open_offset_h,
+                condenser_air_speed_m_s=condenser_air_speed_m_s,
+                poa_tilt_deg=poa_tilt_deg,
+            )
             days_out.append((day_key, prof, group))
         except (ValueError, KeyError):
             continue
@@ -865,9 +768,7 @@ ATACAMA_AMB_CSV = _WEATHER_DATA_DIR / "Atacama_amb.csv"
 ATACAMA_SOLAR_CSV = _WEATHER_DATA_DIR / "Atacama_solar_kW_m2.csv"
 
 # 24 h timeline origin: 18:00 (6 pm) on absorption night, matching paper figure.
-CYCLE_ORIGIN_HOUR = 18.0
 ABSORPTION_HOURS = 12.0
-DESORPTION_HOURS = 12.0
 
 # Atacama field protocol (Methods): install at 8 a.m., ~8 h desorption in sun.
 ATACAMA_INSTALL_HOUR_FROM_ORIGIN = 14.0  # 18:00 + 14 h = 08:00
@@ -879,9 +780,11 @@ ATACAMA_FIELD_DESORPTION_HOURS = 8.0 - ATACAMA_DESORPTION_START_OFFSET_H
 ATACAMA_FIELD_DESORPTION_STEPS = int(
     round(ATACAMA_FIELD_DESORPTION_HOURS * 3600.0 / PHASE_DT_S)
 )
-# Wilson Fig. S2: fan-forced condenser cooling ≈ 0.5 m/s → h ≈ 10 W/m²K, decoupled
-# from the variable ambient wind that drives the absorber/glass h_amb schedule.
-ATACAMA_CONDENSER_FAN_H_AMB_W_M2_K = 10.0
+# The device carries 5 dc fans (≈0.5 m/s) on the condenser backing, but Note S4 states
+# that test-day wind ≫ 0.5 m/s, "so the inclusion of active cooling is negligible for
+# environmental testing presented in this work" -- their model runs one h_amb for the
+# whole device. Decoupling the condenser at h=10 while the absorber sits at h=1 kept the
+# condenser artificially cold all morning and inflated the yield by ~40%.
 
 
 def atacama_field_profile() -> DailyWeatherProfile:
@@ -896,15 +799,6 @@ def atacama_field_profile() -> DailyWeatherProfile:
     )
 
 
-def atacama_figure_profile() -> DailyWeatherProfile:
-    """Fig. 4 symmetric 12 h + 12 h replay (legacy)."""
-    return _build_atacama_profile(
-        desorption_start_h=ABSORPTION_HOURS,
-        desorption_hours=DESORPTION_HOURS,
-        desorption_steps=STEPS_PER_PHASE,
-    )
-
-
 def _build_atacama_profile(
     *,
     desorption_start_h: float,
@@ -916,6 +810,10 @@ def _build_atacama_profile(
     h_amb_fig, amb_c = _load_figure_csv(ATACAMA_AMB_CSV)
     h_s, solar_kw = _load_figure_csv(ATACAMA_SOLAR_CSV)
 
+    # Absorption is 18:00–06:00, NOT the 12 h ending at the 8 a.m. install: the Methods
+    # quote 11 °C / 38% RH as the phase averages, and this window gives 11.5 °C / 38.3%
+    # where 20:09–08:09 gives 8.3 °C / 42.1%. The stage stays outside through the
+    # 06:00–08:09 gap and would keep absorbing, but the paper's 12 h stops at 06:00.
     abs_h = _phase_hour_grid(0.0, ABSORPTION_HOURS, STEPS_PER_PHASE)
     des_h = _phase_hour_grid(desorption_start_h, desorption_hours, desorption_steps)
     # Fig. 4 ambient curve is digitized on hours from 8 a.m. install (0–8 h).
@@ -929,7 +827,6 @@ def _build_atacama_profile(
 
     abs_hamb = tuple(_atacama_h_amb_w_m2_k(float(h)) for h in abs_h)
     des_hamb = tuple(_atacama_h_amb_w_m2_k(float(h)) for h in des_h)
-    des_hcond = (ATACAMA_CONDENSER_FAN_H_AMB_W_M2_K,) * desorption_steps
 
     return DailyWeatherProfile(
         absorption=PhaseProfile(
@@ -944,7 +841,6 @@ def _build_atacama_profile(
             relative_humidity=tuple(float(x) for x in des_rh),
             solar_w_m2=tuple(max(0.0, float(x)) for x in des_solar),
             h_amb_w_m2_k=des_hamb,
-            h_amb_cond_w_m2_k=des_hcond,
             dt_s=PHASE_DT_S,
         ),
     )

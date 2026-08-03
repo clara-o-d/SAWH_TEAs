@@ -10,7 +10,7 @@ from sawh_bayesopt.design_space import (
     from_unit_cube,
     is_gap_degenerate,
     latin_hypercube_design,
-    to_device_config_kwargs,
+    to_system_config_kwargs,
     to_unit_cube,
 )
 
@@ -21,9 +21,9 @@ def test_var_order_matches_bounds_fields():
         assert hasattr(bounds, name)
 
 
-def test_to_device_config_kwargs_maps_in_order():
+def test_to_system_config_kwargs_maps_in_order():
     x = np.arange(len(VAR_ORDER), dtype=float)
-    kwargs = to_device_config_kwargs(x)
+    kwargs = to_system_config_kwargs(x)
     # Every case (including the default, "case2") now gets an explicit
     # "thermal" override -- see design_space.py::CASE_EPS_IR.
     assert list(kwargs.keys()) == [*VAR_ORDER, "thermal"]
@@ -52,7 +52,7 @@ def test_unit_cube_bounds_map_to_endpoints():
 
 
 def test_is_gap_degenerate_true_when_gap_too_small():
-    x = to_device_config_kwargs_to_array(
+    x = to_system_config_kwargs_to_array(
         {
             "hydrogel_thickness_m": 0.005,
             "vapor_gap_m": 0.005 + VAPOR_GAP_TRANSPORT_MIN_M - 0.001,  # < margin
@@ -66,7 +66,7 @@ def test_is_gap_degenerate_true_when_gap_too_small():
 
 
 def test_is_gap_degenerate_false_when_gap_ample():
-    x = to_device_config_kwargs_to_array(
+    x = to_system_config_kwargs_to_array(
         {
             "hydrogel_thickness_m": 0.004,
             "vapor_gap_m": 0.040,
@@ -79,7 +79,7 @@ def test_is_gap_degenerate_false_when_gap_ample():
     assert not is_gap_degenerate(x)
 
 
-def to_device_config_kwargs_to_array(kwargs: dict[str, float]) -> np.ndarray:
+def to_system_config_kwargs_to_array(kwargs: dict[str, float]) -> np.ndarray:
     return np.array([kwargs[name] for name in VAR_ORDER], dtype=float)
 
 

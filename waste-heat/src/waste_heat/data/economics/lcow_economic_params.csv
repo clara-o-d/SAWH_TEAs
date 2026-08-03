@@ -5,17 +5,17 @@ hydrogel_thickness_max_m,0.010,Upper bound on optimized hydrogel thickness (m)
 hydrogel_density_kg_m3,1250.2,Dry composite density (kg/m³)
 water_density_kg_per_l,1.0,Produced water density at condenser (kg/L)
 l_per_m3,1000.0,Liters per cubic meter
-device_bom_vacuum_pump,3500.0,Vacuum pump (28)
-device_bom_chambers,1050.0,Chambers (22A 22B) with door assemblies (38)
-device_bom_valves,275.0,Three-way valve (32) + check valve (30)
-device_bom_condenser,850.0,Condenser (24)
-device_bom_coolant_source,325.0,Coolant source (26)
-device_bom_water_pump,165.0,Water pump (34)
-device_bom_controller_sensors,800.0,Controller (16) + sensors (36)
-device_bom_purge_pump,400.0,Purge pump (234)
-device_bom_structural,1350.0,Structural housing manifolds plumbing fasteners
+system_bom_vacuum_pump,3500.0,Vacuum pump (28)
+system_bom_chambers,1050.0,Chambers (22A 22B) with door assemblies (38)
+system_bom_valves,275.0,Three-way valve (32) + check valve (30)
+system_bom_condenser,850.0,Condenser (24)
+system_bom_coolant_source,325.0,Coolant source (26)
+system_bom_water_pump,165.0,Water pump (34)
+system_bom_controller_sensors,800.0,Controller (16) + sensors (36)
+system_bom_purge_pump,400.0,Purge pump (234)
+system_bom_structural,1350.0,Structural housing manifolds plumbing fasteners
 discount_rate,0.03,Capital discount rate
-device_lifetime_years,20,Passive SAWH device lifetime (years)
+system_lifetime_years,20,Passive SAWH system lifetime (years)
 total_investment_factor,1.0,Multiplier on installed CAPEX
 maintenance_cost_fraction,0.05,Annual O&M as fraction of CAPEX
 utilization_factor,0.99,Effective annual operating fraction (LCOW denominator)

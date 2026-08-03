@@ -14,7 +14,7 @@ and the batched/padded/masked cross-length versions of both),
 [`validate_rhs.py`](validate_rhs.py) (pointwise RHS cross-check, both phases),
 [`validate_desorption_integration_tsit5.py`](validate_desorption_integration_tsit5.py)
 (single-phase integration + yield comparison),
-[`validate_monthly_pipeline.py`](validate_monthly_pipeline.py) (full monthly +
+[`validate_single_day_pipeline.py`](validate_single_day_pipeline.py) (full monthly +
 Aitken pipeline vs. CPU and vs. the paper's reference values),
 [`validate_batched_pipeline.py`](validate_batched_pipeline.py) (cross-length
 batching + fixed-round-count Aitken vs. the serial pipeline),
@@ -118,7 +118,7 @@ error)** pointwise, no iterative solve to introduce discretization differences.
 Delta^2 steady-state search (`find_cyclic_state_jax`, a thin Python loop calling
 the jitted daily-cycle fn twice per round -- same algorithm as
 `ode_system.py::find_cyclic_state`, ~3-6 rounds, including its period-2-orbit
-stall-detection fallback). `validate_monthly_pipeline.py` runs this at the real
+stall-detection fallback). `validate_single_day_pipeline.py` (then monthly, now one real day) ran this at the
 monthly resolution (12 monthly mean-day profiles, live 2024 Atacama weather) and
 compares against the CPU pipeline on identical profiles/config:
 
@@ -345,7 +345,7 @@ what the adaptive stepper actually computes). **Not yet re-measured on the GPU**
 Everything above validates the physics/integration/batching *machinery*; none of
 it is a runnable replacement for `scripts/grid_param_sweep.py`. `run_gpu_sweep.py`
 is that -- it imports `grid_param_sweep.py` directly (CLI patterns, weather
-fetch, `combo_grid`/`build_device_config`, `_CSV_COLUMNS`/`_append_row`) so its
+fetch, `combo_grid`/`build_system_config`, `_CSV_COLUMNS`/`_append_row`) so its
 output is schema-identical to the CPU sweep's, and batches one site's full combo
 x month cross product (up to 135 x 12 = 1,620 instances) into a single compiled
 call via `build_batch_arrays`/`make_batched_daily_cycle_fn`/

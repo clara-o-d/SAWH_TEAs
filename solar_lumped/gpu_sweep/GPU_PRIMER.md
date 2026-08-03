@@ -7,9 +7,9 @@ knowledge assumed.
 
 ## The problem, in one sentence
 
-The device-parameter sweep (`solar_lumped/scripts/grid_param_sweep.py`) needs to
+The system-parameter sweep (`solar_lumped/scripts/grid_param_sweep.py`) needs to
 run the same small physics simulation ~2.27 million times (1405 sites x 135
-device-parameter combos x 12 months x ~2 simulated days per steady-state search),
+system-parameter combos x 12 months x ~2 simulated days per steady-state search),
 and doing that on a regular computer (a CPU) is slow enough that it's currently
 running as a multi-day job spread across a shared university cluster.
 
@@ -82,7 +82,7 @@ provide.
    using diffrax, and checked the whole day's water-yield output against the
    original code -- agreement to ~0.01%.
 4. **Actually ran things in a batch** -- proved that 12+ different simulations
-   (different months, different device settings) can be combined into *one*
+   (different months, different system settings) can be combined into *one*
    compiled program and run together, rather than one at a time. This is the part
    that would give the real speedup on a GPU.
 5. **All of this ran on a Mac CPU**, since there's no GPU in this environment.

@@ -1,4 +1,4 @@
-"""Two-bed waste-heat SAWH simulation with direct waste-heat coupling (no HTF loop): device
+"""Two-bed waste-heat SAWH simulation with direct waste-heat coupling (no HTF loop): system
 configuration, feedback control, coupled two-bed dynamics, SciPy ODE integration,
 water-inventory and detailed-plot time series, and annual-yield aggregation."""
 
@@ -52,7 +52,6 @@ from waste_heat.physics import (
     mass_state_size,
     rh_outside_desorber,
     water_in_gel_l_m2,
-    water_kg_m2_bed,
 )
 from waste_heat.weather import HalfCycleProfile
 
@@ -66,7 +65,7 @@ class ControllerParams:
 
 
 @dataclass(frozen=True, slots=True)
-class DeviceConfig:
+class SystemConfig:
     salt_name: str = DEFAULT_SALT_NAME
     salt_to_polymer_ratio: float = SALT_TO_POLYMER_RATIO
     hydrogel_thickness_m: float = H0_M
@@ -92,7 +91,7 @@ class DeviceConfig:
         return self.thermal_params().condenser_thermal_mass_j_m2_k
 
     @classmethod
-    def datacenter_baseline(cls, **overrides: object) -> DeviceConfig:
+    def datacenter_baseline(cls, **overrides: object) -> SystemConfig:
         return cls(**overrides)  # type: ignore[arg-type]
 
 @dataclass
@@ -147,7 +146,7 @@ class CoupledRates:
 def _parse_mass_state(
     state: np.ndarray,
     *,
-    config: DeviceConfig,
+    config: SystemConfig,
 ) -> tuple[float, float, float, float]:
     return float(state[0]), float(state[1]), float(state[2]), float(state[3])
 
@@ -159,7 +158,7 @@ def evaluate_coupled_rates(
     t_d_c: float,
     t_cond_c: float,
     env: ThermalEnvironment,
-    config: DeviceConfig,
+    config: SystemConfig,
     controls: ControlOutputs,
 ) -> CoupledRates:
     """Rates for half-cycle: contactor A adsorbs, contactor B desorbs."""
@@ -229,7 +228,7 @@ def controls_for_state(
     t_d_c: float,
     t_cond_c: float,
     env: ThermalEnvironment,
-    config: DeviceConfig,
+    config: SystemConfig,
     integral_ads_kg_m2: float,
     integral_des_kg_m2: float,
 ) -> ControlOutputs:
@@ -301,7 +300,7 @@ def _env_at(profile: HalfCycleProfile, i: int) -> ThermalEnvironment:
 
 
 def _pack_y0(
-    config: DeviceConfig,
+    config: SystemConfig,
     *,
     loading_a: float,
     loading_d: float,
@@ -314,7 +313,7 @@ def _pack_y0(
     return np.array([loading_a, h_a, loading_d, h_d, t_a, t_d, t_cond], dtype=float)
 
 
-def _clip_mass_state(y: np.ndarray, config: DeviceConfig) -> np.ndarray:
+def _clip_mass_state(y: np.ndarray, config: SystemConfig) -> np.ndarray:
     out = y.copy()
     h_min = config.hydrogel_thickness_m
     out[1] = max(float(out[1]), h_min)
@@ -326,7 +325,7 @@ def _clip_mass_state(y: np.ndarray, config: DeviceConfig) -> np.ndarray:
     return out
 
 
-def _unpack_half_result(y_stack: np.ndarray, config: DeviceConfig) -> dict:
+def _unpack_half_result(y_stack: np.ndarray, config: SystemConfig) -> dict:
     return {
         "q_a": y_stack[:, 0],
         "h_a": y_stack[:, 1],
@@ -336,18 +335,9 @@ def _unpack_half_result(y_stack: np.ndarray, config: DeviceConfig) -> dict:
         "t_d_c": y_stack[:, 5],
         "t_cond_c": y_stack[:, 6],
     }
-    return {
-        "q_a": y_stack[:, 0],
-        "q_d": y_stack[:, 1],
-        "h_a": None,
-        "h_d": None,
-        "t_a_c": y_stack[:, 2],
-        "t_d_c": y_stack[:, 3],
-        "t_cond_c": y_stack[:, 4],
-    }
 
 
-def _half_cycle_complete(y: np.ndarray, config: DeviceConfig) -> bool:
+def _half_cycle_complete(y: np.ndarray, config: SystemConfig) -> bool:
     n_mass = mass_state_size(config)
     rh = rh_outside_desorber(float(y[n_mass + 1]), float(y[n_mass + 2]))
     return rh <= config.rh_desorber_switch
@@ -363,7 +353,7 @@ def _record_half_cycle_state(
     t_s: float,
     y: np.ndarray,
     env: ThermalEnvironment,
-    config: DeviceConfig,
+    config: SystemConfig,
     ctrl: ControllerState,
     times: list[float],
     ys: list[np.ndarray],
@@ -409,7 +399,7 @@ def _integrate_desorption_kg_m2(times: list[float], m_des_series: list[float]) -
 
 def run_half_cycle(
     profile: HalfCycleProfile,
-    config: DeviceConfig,
+    config: SystemConfig,
     *,
     loading_a0: float,
     loading_d0: float,
@@ -583,7 +573,7 @@ def run_half_cycle(
 
 def swap_roles(
     res: HalfCycleResult,
-    config: DeviceConfig,
+    config: SystemConfig,
 ) -> tuple[float, float, float | None, float | None, float, float, float]:
     """After half-cycle: bed that adsorbed now desorbs (swap loading, H, and T)."""
     loading_a = float(res.q_d[-1])
@@ -596,18 +586,18 @@ def swap_roles(
     return loading_a, loading_d, h_a, h_d, t_a, t_d, t_cond
 
 
-def _state_to_vec(state: CycleState, config: DeviceConfig) -> np.ndarray:
+def _state_to_vec(state: CycleState, config: SystemConfig) -> np.ndarray:
     la, ld, ha, hd, ta, td, tc = state
     return np.array([la, ld, ha, hd, ta, td, tc], dtype=float)
 
 
-def _vec_to_state(vec: np.ndarray, config: DeviceConfig) -> CycleState:
+def _vec_to_state(vec: np.ndarray, config: SystemConfig) -> CycleState:
     la, ld, ha, hd, ta, td, tc = (float(v) for v in vec)
     return la, ld, ha, hd, ta, td, tc
 
 
 def _initial_state(
-    config: DeviceConfig,
+    config: SystemConfig,
     *,
     loading_a0: float | None,
     loading_d0: float | None,
@@ -630,7 +620,7 @@ def _initial_state(
 
 def _run_one_cycle(
     profile: HalfCycleProfile,
-    config: DeviceConfig,
+    config: SystemConfig,
     state: CycleState,
 ) -> tuple[CycleResult, CycleState]:
     la, ld, ha, hd, ta, td, tc = state
@@ -665,7 +655,7 @@ def _run_one_cycle(
 
 def find_cyclic_state(
     profile: HalfCycleProfile,
-    config: DeviceConfig,
+    config: SystemConfig,
     *,
     initial_state: CycleState | None = None,
     tol: float = 1e-6,
@@ -676,7 +666,7 @@ def find_cyclic_state(
 ) -> CycleState:
     """Steady periodic post-cycle state for an indefinitely repeated profile, via restarted
     vector Aitken Δ² extrapolation (~3-6 rounds) instead of the 100+ cycles plain iteration
-    can need. Same algorithm as find_cyclic_state, over this device's 7-field cycle state.
+    can need. Same algorithm as find_cyclic_state, over this system's 7-field cycle state.
 
     Pairs with a stable period-2 orbit instead of a fixed point plateau ``rel_step``; that is
     detected as ``stall_rounds`` rounds without a ``stall_ratio`` shrink and answered by
@@ -745,7 +735,7 @@ def find_cyclic_state(
 
 def run_cycle(
     profile: HalfCycleProfile,
-    config: DeviceConfig,
+    config: SystemConfig,
     *,
     loading_a0: float | None = None,
     loading_d0: float | None = None,
@@ -774,7 +764,7 @@ def run_cycle(
 
 def run_daily_operation(
     profile: HalfCycleProfile,
-    config: DeviceConfig,
+    config: SystemConfig,
     *,
     n_cycles: int | None = None,
     loading_a0: float | None = None,
@@ -833,8 +823,6 @@ def run_daily_operation(
     return total_water, eta, results
 
 
-def loading_kg_m2(loading: float, config: DeviceConfig, *, h_m: float | None = None) -> float:
-    return water_kg_m2_bed(loading, config=config, h_m=h_m)
 MassTransferLimit = Literal["absorption", "desorption", "balanced"]
 TrackedPhase = Literal["absorption", "desorption"]
 
@@ -900,7 +888,7 @@ def _env_at_time(t_s: float, profile: HalfCycleProfile | None) -> ThermalEnviron
 def _tracked_half_series(
     half: HalfCycleResult,
     *,
-    config: DeviceConfig,
+    config: SystemConfig,
     profile: HalfCycleProfile | None,
     tracked_phase: TrackedPhase,
     half_label: Literal["A", "B"],
@@ -1052,7 +1040,7 @@ def _concat_water_series(chunks: list[WaterInventorySeries], *, skip_first: int)
 def water_inventory_series(
     cycle: CycleResult,
     *,
-    config: DeviceConfig,
+    config: SystemConfig,
     profile: HalfCycleProfile | None = None,
     cycle_index: int = 0,
 ) -> WaterInventorySeries:
@@ -1138,7 +1126,7 @@ def _append_water_cycle(base: WaterInventorySeries, nxt: WaterInventorySeries) -
 def water_inventory_daily_series(
     cycles: list[CycleResult],
     *,
-    config: DeviceConfig,
+    config: SystemConfig,
     profile: HalfCycleProfile | None = None,
 ) -> WaterInventorySeries:
     if not cycles:
@@ -1160,7 +1148,7 @@ def water_inventory_daily_series(
     return out
 
 
-def write_water_inventory_csv(path: Path, series: WaterInventorySeries, *, config: DeviceConfig) -> None:
+def write_water_inventory_csv(path: Path, series: WaterInventorySeries, *, config: SystemConfig) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     col = inventory_column(config)
     fields = [
@@ -1220,7 +1208,7 @@ def plot_water_inventory(
     path: Path,
     series: WaterInventorySeries,
     *,
-    config: DeviceConfig,
+    config: SystemConfig,
     title: str | None = None,
     half_cycle_markers: bool = True,
 ) -> None:
@@ -1346,7 +1334,7 @@ def _concat_detailed_series(chunks: list[DetailedSeries], *, skip_first: int) ->
 def detailed_series(
     cycle: CycleResult,
     *,
-    config: DeviceConfig,
+    config: SystemConfig,
     profile: HalfCycleProfile | None = None,
     cycle_index: int = 0,
 ) -> DetailedSeries:
@@ -1409,7 +1397,7 @@ def _append_detailed_cycle(base: DetailedSeries, nxt: DetailedSeries) -> Detaile
 def detailed_daily_series(
     cycles: list[CycleResult],
     *,
-    config: DeviceConfig,
+    config: SystemConfig,
     profile: HalfCycleProfile | None = None,
 ) -> DetailedSeries:
     if not cycles:
@@ -1571,7 +1559,7 @@ class SimulationResult:
 
 def simulate_daily(
     profile: HalfCycleProfile,
-    config: DeviceConfig,
+    config: SystemConfig,
     *,
     n_cycles: int | None = None,
 ) -> SimulationResult:

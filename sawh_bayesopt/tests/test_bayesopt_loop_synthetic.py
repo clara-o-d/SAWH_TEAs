@@ -24,6 +24,11 @@ def _fake_evaluate_batch(
     combine_rule="mean",
     resolution="annual",
     case="case1",
+    # Accepted and ignored: these are real-evaluator plumbing (complex fidelity and
+    # its per-design weather frames) that the synthetic bowl has no use for.
+    complex_mode=False,
+    site_frames=None,
+    backend="jax",
 ):
     results = []
     for x in xs:
@@ -95,6 +100,11 @@ def _fake_evaluate_batch_with_infeasible_region(
     combine_rule="mean",
     resolution="annual",
     case="case1",
+    # Accepted and ignored: these are real-evaluator plumbing (complex fidelity and
+    # its per-design weather frames) that the synthetic bowl has no use for.
+    complex_mode=False,
+    site_frames=None,
+    backend="jax",
 ):
     """Same quadratic-bowl objective, but the whole region where the first
     design variable exceeds its midpoint is infeasible (penalty y) -- exactly

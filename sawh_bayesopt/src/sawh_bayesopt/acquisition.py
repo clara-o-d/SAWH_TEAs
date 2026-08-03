@@ -10,7 +10,7 @@ import numpy as np
 from scipy.optimize import differential_evolution
 from scipy.stats import norm
 
-from sawh_bayesopt.design_space import VAR_ORDER, from_unit_cube
+from sawh_bayesopt.design_space import from_unit_cube
 from sawh_bayesopt.surrogate import SurrogateState, append_observations, fit, predict
 
 
@@ -55,7 +55,7 @@ def propose_next(
     33-67% of DE calls hitting maxiter regardless of ei_xi -- tol=1e-8 demanded 10,000x
     tighter population uniformity than scipy's default on a flat EI landscape. Cheap, since
     a DE generation costs one GP predict() vs. the ~160s/round of JAX physics."""
-    bounds_unit = [(0.0, 1.0)] * len(VAR_ORDER)
+    bounds_unit = [(0.0, 1.0)] * len(state.bounds.names())
     y_best = state.y_best
     result = differential_evolution(
         _neg_ei_unit_cube,
@@ -105,7 +105,9 @@ def propose_batch(
     for i in range(batch_size):
         x_next = propose_next(scratch, xi=xi, seed=seed + i, maxiter=maxiter, popsize=popsize, record=record)
         mu, _ = predict(scratch, x_next)
-        scratch = append_observations(scratch, x_next.reshape(1, len(VAR_ORDER)), np.array([mu]))
+        scratch = append_observations(
+            scratch, x_next.reshape(1, len(scratch.bounds.names())), np.array([mu])
+        )
         fit(scratch)
         proposals.append(x_next)
     return proposals

@@ -1,6 +1,6 @@
 # Waste-heat cycle lumped SAWH (no HTF loop)
 
-Physics-based forward simulation of a **waste-heat-driven, two-bed** sorbent atmospheric water harvesting device (AirJoule-style latent energy and water harvesting), following [`docs/governing_eq.tex`](docs/governing_eq.tex).
+Physics-based forward simulation of a **waste-heat-driven, two-bed** sorbent atmospheric water harvesting system (AirJoule-style latent energy and water harvesting), following [`docs/governing_eq.tex`](docs/governing_eq.tex).
 
 This variant removes the pumped heat-transfer-fluid (HTF) loop present in the
 sibling `waste-heat/cycle_lumped` package: the desorbing contactor couples

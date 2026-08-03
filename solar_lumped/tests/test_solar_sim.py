@@ -15,7 +15,7 @@ from solar_lumped.economics import (
 )
 from solar_lumped.economics import LCOEconomicParams
 from solar_lumped.physics import thermal_residual_norm
-from solar_lumped.physics import DeviceThermalParams
+from solar_lumped.physics import SystemThermalParams
 from solar_lumped.physics import concentration_ratio_absorption, dc_w_dt
 from solar_lumped.physics import equilibrium_c_w_at_rh
 from solar_lumped.physics import (
@@ -32,13 +32,13 @@ from solar_lumped.physics import (
     U_GEL_W_M2_K,
     u_gel_w_m2_k,
 )
-from solar_lumped.simulation import DeviceConfig
+from solar_lumped.simulation import SystemConfig
 from solar_lumped.simulation import run_daily_cycle
 from solar_lumped.weather import baseline_profile
 
 
-def test_table_s3_device_defaults():
-    cfg = DeviceConfig.comsol_table_s3()
+def test_table_s3_system_defaults():
+    cfg = SystemConfig.comsol_table_s3()
 
     assert cfg.hydrogel_thickness_m == H0_M
     assert cfg.vapor_gap_m == L_G_M
@@ -57,7 +57,7 @@ def test_table_s3_device_defaults():
 
 
 def test_algebraic_balances_small_residual():
-    params = DeviceThermalParams()
+    params = SystemThermalParams()
     norm = thermal_residual_norm(
         t_cond_c=25.0,
         t_amb_c=25.0,
@@ -65,16 +65,18 @@ def test_algebraic_balances_small_residual():
         m_des_kg_s_m2=1e-5,
         h_amb=10.0,
         params=params,
-        h_m=DeviceConfig.baseline().hydrogel_thickness_m,
+        h_m=SystemConfig.baseline().hydrogel_thickness_m,
     )
     assert norm < 1e-2
 
 
 def test_absorption_increases_c_w():
-    config = DeviceConfig()
+    config = SystemConfig()
     mass = config.mass_params()
     h0 = config.hydrogel_thickness_m
-    c0 = 5000.0
+    # Unsaturated gel: c0=40000 sits at ~0.38 brine salt fraction, below XI_SAT_LICL=0.458,
+    # so this tests the real Conde a_w rather than the saturation plateau.
+    c0 = 40000.0
     dc = dc_w_dt(
         c0,
         t_gel_c=25.0,
@@ -91,7 +93,7 @@ def test_pam_licl_brine_aw_inverts_at_rh():
         water_activity_from_c_w,
     )
 
-    config = DeviceConfig()
+    config = SystemConfig()
     mass = config.mass_params()
     h0 = config.hydrogel_thickness_m
     rh = 0.38
@@ -120,8 +122,8 @@ def test_pam_licl_brine_aw_inverts_at_rh():
 def test_water_inventory_series_baseline():
     from solar_lumped.simulation import water_inventory_series
 
-    y, _, abs_res, des_res = run_daily_cycle(baseline_profile(), DeviceConfig.baseline())
-    series = water_inventory_series(abs_res, des_res, config=DeviceConfig.baseline())
+    y, _, abs_res, des_res = run_daily_cycle(baseline_profile(), SystemConfig.baseline())
+    series = water_inventory_series(abs_res, des_res, config=SystemConfig.baseline())
     assert len(series.time_s) == len(series.water_l_m2) == len(series.phase)
     assert len(series.collected_water_l_m2) == len(series.time_s)
     assert series.water_l_m2[0] > 0.0
@@ -132,7 +134,7 @@ def test_water_inventory_series_baseline():
 
 
 def test_baseline_simulation_runs():
-    y, eta, _, _ = run_daily_cycle(baseline_profile(), DeviceConfig.baseline())
+    y, eta, _, _ = run_daily_cycle(baseline_profile(), SystemConfig.baseline())
     assert y >= 0.0
     assert math.isfinite(eta)
 
@@ -141,8 +143,8 @@ def test_desorption_flux_matches_inventory_loss():
     from solar_lumped.physics import m_des_kg_s_m2_from_state
     from solar_lumped.physics import WATER_MOLAR_MASS_KG_MOL
 
-    h0 = DeviceConfig.baseline().hydrogel_thickness_m
-    y, _, abs_r, des_r = run_daily_cycle(baseline_profile(), DeviceConfig.baseline())
+    h0 = SystemConfig.baseline().hydrogel_thickness_m
+    y, _, abs_r, des_r = run_daily_cycle(baseline_profile(), SystemConfig.baseline())
 
     # Wilson's yield = integral(-dc_w/dt * H0 * MW) dt ≈ (c_w_des_start − c_w_des_end) * H0 * MW.
     # This uses H0 (reference thickness), not the swollen H at start of desorption.
@@ -157,7 +159,7 @@ def test_desorption_flux_matches_inventory_loss():
 
 
 def test_baseline_yield_from_desorption_flux():
-    config = DeviceConfig.baseline(g_conv_m_s=WILSON_TABLE_S3_G_CHAMBER_M_S)
+    config = SystemConfig.baseline(g_conv_m_s=WILSON_TABLE_S3_G_CHAMBER_M_S)
     y, _, _, des = run_daily_cycle(baseline_profile(), config)
     assert y == des.water_collected_kg_m2
     assert y >= 0.0
@@ -167,7 +169,7 @@ def test_baseline_yield_from_desorption_flux():
 
 def test_lcow_breakdown_sums():
     econ = LCOEconomicParams()
-    cfg = DeviceConfig()
+    cfg = SystemConfig()
     y = 0.5
     bd = lcow_cost_breakdown_from_daily_yield(
         y,
@@ -192,7 +194,7 @@ def test_atacama_replay_runs():
     from solar_lumped.weather import replay_profile
 
     profile = replay_profile("atacama-replay")
-    config = DeviceConfig.atacama_field()
+    config = SystemConfig.atacama_field()
     y, eta, _, _ = run_daily_cycle(profile, config)
     assert y >= 0.0
     assert math.isfinite(eta)
@@ -209,7 +211,7 @@ def test_cycled_initial_uses_post_desorption_state():
     from solar_lumped.weather import replay_profile
 
     profile = replay_profile("atacama-replay")
-    config = DeviceConfig.atacama_field()
+    config = SystemConfig.atacama_field()
     h0 = config.hydrogel_thickness_m
     _, _, abs_res, _ = run_daily_cycle(
         profile, config, cyclic_initial=True, cyclic_warmup_cycles=2
@@ -227,7 +229,7 @@ def test_baseline_starts_at_fabrication_equilibrium():
     )
     from solar_lumped.weather import baseline_initial_c_w
 
-    config = DeviceConfig.baseline()
+    config = SystemConfig.baseline()
     h0 = config.hydrogel_thickness_m
     c_w0 = baseline_initial_c_w(h_m=h0)
     _, _, abs_res, _ = run_daily_cycle(
@@ -260,7 +262,7 @@ def test_fig_s1_replay_matches_note_s1d():
     assert profile.desorption.solar_w_m2[0] == 800.0
     assert profile.absorption.relative_humidity[0] == 0.5
 
-    config = DeviceConfig.comsol_table_s3(g_conv_m_s=WILSON_TABLE_S3_G_CHAMBER_M_S)
+    config = SystemConfig.comsol_table_s3(g_conv_m_s=WILSON_TABLE_S3_G_CHAMBER_M_S)
     c_w0 = fig_s1_initial_c_w(h_m=config.hydrogel_thickness_m)
     y, eta, abs_res, des_res = run_daily_cycle(
         profile, config, c_w_initial=c_w0

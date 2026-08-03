@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import csv
 from dataclasses import dataclass, replace
+from datetime import date
 from pathlib import Path
 
 _REPO = Path(__file__).resolve().parents[2]
@@ -18,7 +19,7 @@ from solar_lumped.economics import (
     lcow_from_daily_yield,
 )
 from solar_lumped.economics import LCOEconomicParams
-from solar_lumped.simulation import DeviceConfig
+from solar_lumped.simulation import SystemConfig
 from solar_lumped.simulation import run_daily_cycle
 from solar_lumped.simulation import (
     detailed_series,
@@ -33,7 +34,7 @@ from solar_lumped.simulation import (
 from solar_lumped.weather import (
     baseline_initial_c_w,
     baseline_profile,
-    representative_mean_day_profile,
+    real_day_profile,
     replay_profile,
 )
 from solar_lumped.physics import TILT_DEG
@@ -54,11 +55,11 @@ from solar_lumped.physics import c_w_from_water_in_gel_l_m2
 from solar_lumped.weather import fig_s1_initial_c_w
 
 
-def _initial_loading_from_water_l_m2(water_l_m2: float, config: DeviceConfig) -> float:
+def _initial_loading_from_water_l_m2(water_l_m2: float, config: SystemConfig) -> float:
     return c_w_from_water_in_gel_l_m2(water_l_m2, config.hydrogel_thickness_m)
 
 
-def _config_overrides(config: DeviceConfig) -> dict:
+def _config_overrides(config: SystemConfig) -> dict:
     out = {
         "salt_name": config.salt_name,
         "salt_to_polymer_ratio": config.salt_to_polymer_ratio,
@@ -76,12 +77,12 @@ def _config_overrides(config: DeviceConfig) -> dict:
 
 
 def _apply_physics_overrides(
-    config: DeviceConfig,
+    config: SystemConfig,
     *,
     h_des_j_per_kg: float | None = None,
     salt_formula_weight_g_mol: float | None = None,
     salt_weight_factor: float | None = None,
-) -> DeviceConfig:
+) -> SystemConfig:
     updates: dict[str, object] = {}
     if salt_formula_weight_g_mol is not None:
         updates["salt_formula_weight_g_mol"] = salt_formula_weight_g_mol
@@ -97,7 +98,7 @@ def _apply_physics_overrides(
     return replace(config, **updates)
 
 
-def build_device_config(
+def build_system_config(
     *,
     salt: str = "LiCl",
     salt_loading: float = 4.0,
@@ -107,10 +108,10 @@ def build_device_config(
     tilt_deg: float = 30.0,
     fin_area_ratio: float = 7.1,
     g_conv_m_s: float | None = None,
-) -> DeviceConfig:
-    """Construct a ``DeviceConfig`` (shared by CLI and chamber-kinetics callers).
+) -> SystemConfig:
+    """Construct a ``SystemConfig`` (shared by CLI and chamber-kinetics callers).
 
-    Sorption/brine state uses ``DeviceConfig``'s default dry-basis composite density
+    Sorption/brine state uses ``SystemConfig``'s default dry-basis composite density
     (DVS isotherm); gel thermal mass in the ODE uses ``RHO_COMPOSITE_KG_M3``.
     """
     get_salt(salt)
@@ -125,17 +126,17 @@ def build_device_config(
     }
     if g_conv_m_s is not None:
         kwargs["g_conv_m_s"] = g_conv_m_s
-    return DeviceConfig(**kwargs)  # type: ignore[arg-type]
+    return SystemConfig(**kwargs)  # type: ignore[arg-type]
 
 
-def _build_config(args: argparse.Namespace) -> DeviceConfig:
+def _build_config(args: argparse.Namespace) -> SystemConfig:
     fin_ratio = args.fin_area_ratio
     if fin_ratio is None:
         fin_ratio = 5.0 if args.weather_mode == "atacama-replay" else 7.1
     tilt = args.tilt_deg
     if tilt is None:
         tilt = 25.0 if args.weather_mode == "atacama-replay" else TILT_DEG
-    return build_device_config(
+    return build_system_config(
         salt=args.salt,
         salt_loading=args.salt_loading,
         hydrogel_thickness_mm=args.hydrogel_thickness_mm,
@@ -148,7 +149,7 @@ def _build_config(args: argparse.Namespace) -> DeviceConfig:
 
 @dataclass(frozen=True, slots=True)
 class HydrogelChamberParams:
-    """Open-chamber hydrogel kinetics (Díaz-Marín Eqs. 5 + 8); no SAWH device."""
+    """Open-chamber hydrogel kinetics (Díaz-Marín Eqs. 5 + 8); no SAWH system."""
 
     salt_name: str
     salt_to_polymer_ratio: float
@@ -459,6 +460,13 @@ def register_solar_sim_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument("--lat", type=float, default=None)
     p.add_argument("--lon", type=float, default=None)
     p.add_argument("--year", type=int, default=2024)
+    p.add_argument(
+        "--day",
+        type=date.fromisoformat,
+        default=None,
+        help="Calendar day to simulate for --weather-mode real (YYYY-MM-DD). "
+        "Defaults to 15 June of --year.",
+    )
     p.add_argument("--cache-dir", type=str, default=str(_REPO / ".weather_cache"))
     p.add_argument("--salt", type=str, default="LiCl")
     p.add_argument("--salt-loading", type=float, default=4.0)
@@ -469,7 +477,7 @@ def register_solar_sim_arguments(p: argparse.ArgumentParser) -> None:
         "--tilt-deg",
         type=float,
         default=None,
-        help="Device tilt (default: 25 for atacama-replay, 30 (Wilson baseline) otherwise)",
+        help="System tilt (default: 25 for atacama-replay, 30 (Wilson baseline) otherwise)",
     )
     p.add_argument(
         "--fin-area-ratio",
@@ -495,6 +503,10 @@ def resolve_solar_sim_arguments(args: argparse.Namespace, parser: argparse.Argum
     if args.weather_mode == "real":
         if args.lat is None or args.lon is None:
             parser.error("--weather-mode real requires --lat and --lon")
+        if args.day is None:
+            args.day = date(args.year, 6, 15)
+        elif args.day.year != args.year:
+            parser.error(f"--day {args.day.isoformat()} is not in --year {args.year}")
     elif args.weather_mode not in ("baseline", "fig-s1-replay"):
         args.lat = args.lat if args.lat is not None else (
             -23.65 if "atacama" in args.weather_mode else 42.36
@@ -511,7 +523,7 @@ def default_solar_sim_args() -> argparse.Namespace:
     return p.parse_args([])
 
 
-def output_tag(args: argparse.Namespace, config: DeviceConfig) -> str:
+def output_tag(args: argparse.Namespace, config: SystemConfig) -> str:
     tag = args.weather_mode
     if args.lat is not None:
         tag += f"_lat{args.lat:.4f}_lon{args.lon:.4f}_{args.year}"
@@ -521,7 +533,7 @@ def output_tag(args: argparse.Namespace, config: DeviceConfig) -> str:
 @dataclass(frozen=True, slots=True)
 class SolarSimResult:
     weather_mode: str
-    config: DeviceConfig
+    config: SystemConfig
     econ: LCOEconomicParams
     profile: object
     daily_yield_kg_per_m2: float
@@ -552,11 +564,11 @@ def run_solar_simulation(
     config = _build_config(args)
     overrides = _config_overrides(config)
     if args.weather_mode == "atacama-replay":
-        config = DeviceConfig.atacama_field(**overrides)
+        config = SystemConfig.atacama_field(**overrides)
     elif args.weather_mode == "baseline":
-        config = DeviceConfig.baseline(**overrides)
+        config = SystemConfig.baseline(**overrides)
     elif args.weather_mode == "fig-s1-replay":
-        config = DeviceConfig.comsol_table_s3(
+        config = SystemConfig.comsol_table_s3(
             **overrides,
             tilt_deg=config.tilt_deg,
             fin_area_ratio=config.fin_area_ratio,
@@ -591,16 +603,17 @@ def run_solar_simulation(
         inventory_note = f" ({n_warmup} warmup day(s) + 1 reporting day)"
 
     if args.weather_mode == "real":
-        profile = representative_mean_day_profile(
+        profile = real_day_profile(
             args.lat,
             args.lon,
-            args.year,
+            args.day,
             cache_dir=args.cache_dir,
         )
+        day_str = args.day.isoformat()
         inventory_note = (
-            " (cycled initial state; mean diurnal weather; Aitken-converged steady state)"
+            f" (cycled initial state; real weather for {day_str}; Aitken-converged steady state)"
             if use_cycled
-            else f" (mean diurnal weather for {args.year})"
+            else f" (real weather for {day_str})"
         )
     elif args.weather_mode == "baseline":
         profile = baseline_profile(**(baseline_profile_kwargs or {}))
@@ -679,7 +692,7 @@ def main() -> None:
     p.add_argument(
         "--detailed",
         action="store_true",
-        help="Write CSV and plot device temperatures (absorber, glass, condenser, gel) "
+        help="Write CSV and plot system temperatures (absorber, glass, condenser, gel) "
         "and weather variables over the full daily cycle",
     )
     p.add_argument(
@@ -789,7 +802,7 @@ def main() -> None:
                 detailed_plot = _REPO / "outputs" / "detailed" / f"diagnostics_{tag}.png"
 
             write_detailed_csv(detailed_csv, detailed)
-            plot_title = f"Device and weather — {args.weather_mode}{inventory_note}"
+            plot_title = f"System and weather — {args.weather_mode}{inventory_note}"
             plot_detailed_diagnostics(detailed_plot, detailed, title=plot_title)
             print(f"\nWrote {detailed_csv}")
             print(f"Wrote {detailed_plot}")

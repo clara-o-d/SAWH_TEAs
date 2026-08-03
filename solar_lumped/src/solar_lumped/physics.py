@@ -1,4 +1,4 @@
-"""Device physics: geometry/material constants, brine/salt thermodynamics, heat-transfer
+"""System physics: geometry/material constants, brine/salt thermodynamics, heat-transfer
 correlations, thermal balances, mass transfer, and the PAM-salt hydrogel sorbent model."""
 
 from __future__ import annotations
@@ -18,10 +18,10 @@ from solar_lumped._parameters_xlsx import physics_value as _pv
 from solar_lumped.utils import find_root_bracketed, load_two_column_csv
 
 if TYPE_CHECKING:
-    from solar_lumped.simulation import DeviceConfig
+    from solar_lumped.simulation import SystemConfig
 
 
-# --- Table S3 / Note S1 device parameters (Wilson & Díaz-Marín *Device* 2025) ---
+# --- Table S3 / Note S1 system parameters (Wilson & Díaz-Marín *Device* 2025) ---
 # All values load from docs/parameters.xlsx (Physics sheet).
 
 # Geometry
@@ -57,11 +57,11 @@ EPS_AL: float = _pv("Condenser (Al) emissivity (eps_Al)")
 EPS_ABS: float = _pv("Absorber emissivity (eps_abs)")
 TAU_GLASS: float = _pv("Glass transmittance (tau_glass)")
 # This package's Case 2 ("selective surface") base-case IR emissivities -- see
-# DeviceConfig.thermal_params() in simulation.py, which is where these are applied.
+# SystemConfig.thermal_params() in simulation.py, which is where these are applied.
 EPS_ABS_IR_CASE2: float = _pv("Absorber IR emissivity (eps_abs_ir)")
 EPS_GLASS_IR_CASE2: float = _pv("Glass IR emissivity (eps_glass_ir)")
 
-# Device orientation / condenser fins
+# System orientation / condenser fins
 TILT_DEG: float = _pv("Tilt angle (theta)")
 FIN_AREA_RATIO: float = _pv("Condenser fin area ratio (A_r)")  # A_r
 
@@ -90,9 +90,34 @@ CONDENSER_THERMAL_MASS_J_M2_K: float = RHO_AL_KG_M3 * CP_AL_J_KG_K * L_C_M
 T_CRIT_H2O_K: float = 647.096
 P_CRIT_H2O_PA: float = 22.064e6
 
-# Valid brine salt mass-fraction ranges (Conde § Density)
-XI_MAX_LICL: float = 0.56
-XI_MAX_CACL2: float = 0.60
+# Saturation (solubility) brine salt mass fraction: the most concentrated the liquid can
+# get. Past it the excess salt is precipitated solid, so a_w is pinned here rather than
+# following the correlation into its supersaturated tail. Derived from solubility in grams
+# per litre of water, so xi = s / (s + 1000): LiCl 845 g/L -> 45.8 wt%, CaCl2 745 g/L ->
+# 42.7 wt%. Both sit inside Conde's stated validity range (§ Density: LiCl 0.56, CaCl2
+# 0.60), so the correlation is never evaluated outside its own domain.
+SOLUBILITY_G_PER_L: dict[str, float] = {
+    "LiCl": 845.0,
+    "CaCl2": 745.0,
+    "NaCl": 360.0,
+    "MgCl2": 546.0,
+}
+
+
+def saturation_brine_salt_fraction(salt_name: str) -> float:
+    """Saturation brine salt mass fraction from solubility in g per litre of water."""
+    try:
+        s = SOLUBILITY_G_PER_L[salt_name]
+    except KeyError:
+        raise KeyError(
+            f"No solubility for {salt_name!r}; add it to SOLUBILITY_G_PER_L "
+            "(its deliquescence RH is derived from it)."
+        ) from None
+    return s / (s + 1000.0)
+
+
+XI_SAT_LICL: float = saturation_brine_salt_fraction("LiCl")
+XI_SAT_CACL2: float = saturation_brine_salt_fraction("CaCl2")
 
 _BRACKET_LO: float = 0.01
 _BRACKET_HI: float = 0.75
@@ -112,7 +137,7 @@ class VaporPressureParams:
     pi7: float
     pi8: float
     pi9: float
-    xi_max: float
+    xi_sat: float
 
 
 LICL_VAPOR_PRESSURE = VaporPressureParams(
@@ -126,7 +151,7 @@ LICL_VAPOR_PRESSURE = VaporPressureParams(
     pi7=-4.75,
     pi8=-0.40,
     pi9=0.03,
-    xi_max=XI_MAX_LICL,
+    xi_sat=XI_SAT_LICL,
 )
 
 CACL2_VAPOR_PRESSURE = VaporPressureParams(
@@ -140,7 +165,7 @@ CACL2_VAPOR_PRESSURE = VaporPressureParams(
     pi7=-5.20,
     pi8=-0.40,
     pi9=0.018,
-    xi_max=XI_MAX_CACL2,
+    xi_sat=XI_SAT_CACL2,
 )
 
 # Saul–Wagner (Appendix A, Table 12)
@@ -168,8 +193,12 @@ def vapor_pressure_ratio(
         return 1.0
     if xi >= 1.0:
         return float("nan")
-    if xi > params.xi_max:
-        return float("nan")
+    # Past saturation the excess salt is precipitated, not dissolved: the liquid stays at
+    # its saturated composition, so a_w is pinned there rather than undefined. Returning
+    # nan instead made dc_w_dt clamp to 0, freezing a dry gel exactly when deliquescence
+    # should drive the strongest uptake. Mirrored by jax_physics.vapor_pressure_ratio_licl
+    # (_XI_SAT_LICL) -- keep the two in step or CPU and GPU diverge above saturation.
+    xi = min(xi, params.xi_sat)
     theta = (float(temperature_c) + 273.15) / T_CRIT_H2O_K  # θ = T / T_c,H2O
     pi_25 = (
         1.0
@@ -209,7 +238,7 @@ def equilibrium_salt_mass_fraction(
     def residual(xi: float) -> float:
         return rh - vapor_pressure_ratio(xi, temperature_c, params)
 
-    hi = min(_BRACKET_HI, params.xi_max)
+    hi = min(_BRACKET_HI, params.xi_sat)
     return find_root_bracketed(residual, _BRACKET_LO, hi)
 
 
@@ -313,8 +342,29 @@ def wind_to_h_amb_w_m2_k(wind_speed_m_s: float, *, base: float = H_AMB_W_M2_K) -
     return base * (0.5 + w) / 1.0
 
 
-def condenser_h_conv_w_m2_k(h_amb: float, *, fin_area_ratio: float = FIN_AREA_RATIO) -> float:
-    return fin_area_ratio * h_amb
+def condenser_h_conv_w_m2_k(
+    h_amb: float,
+    *,
+    fin_area_ratio: float = FIN_AREA_RATIO,
+    fin_thickness_m: float | None = None,
+    fin_height_m: float | None = None,
+) -> float:
+    """Condenser-side convection coefficient referenced to the base plate area.
+
+    Wilson assumes an ideally efficient fin, i.e. ``A_r * h_amb``, which is what
+    both fin geometry arguments being ``None`` (the default) reproduces. Complex
+    mode (B3) supplies the geometry and derates the added area by the straight-fin
+    efficiency, so fin area stops paying off linearly forever.
+    """
+    if fin_thickness_m is None or fin_height_m is None:
+        return fin_area_ratio * h_amb
+    from solar_lumped.complex_model import fin_efficiency
+
+    eta_f = fin_efficiency(
+        h_amb, fin_thickness_m=fin_thickness_m, fin_height_m=fin_height_m
+    )
+    # Only the finned area (A_r - 1) is derated; the exposed base plate is not.
+    return h_amb * (1.0 + eta_f * max(fin_area_ratio - 1.0, 0.0))
 
 
 # --- Salt catalog and PAM-LiCl water-activity models for Wilson Eq. 5 ---
@@ -378,7 +428,8 @@ def _load_salt_catalog() -> dict[str, SaltProperties]:
             h_des_j_per_kg=float(h_des),
             rho_solution_kg_m3=float(row["rho_solution_kg_m3"]),
             default_sl=float(row["default_sl"]),
-            rh_min=float(row["rh_min"]),
+            # Derived from solubility, not tabulated -- see deliquescence_rh().
+            rh_min=deliquescence_rh(name),
             rh_max=float(row["rh_max"]),
         )
     return out
@@ -594,36 +645,6 @@ def pam_licl_gravimetric_uptake_g_g(
     return mass_water / m_dry
 
 
-def composite_component_mass_densities_kg_m3(
-    c_w: float,
-    c_s: float,
-    *,
-    formula_weight_g_mol: float,
-    salt_to_polymer_ratio: float,
-) -> tuple[float, float, float]:
-    """Water, salt, and polymer mass densities (kg/m³ gel) from molar state."""
-    mass_water = max(0.0, c_w) * WATER_MOLAR_MASS_KG_MOL
-    mass_salt = max(0.0, c_s) * formula_weight_g_mol / 1000.0
-    mass_polymer = mass_salt / max(salt_to_polymer_ratio, 1e-9)
-    return mass_water, mass_salt, mass_polymer
-
-
-def brine_salt_fraction_from_composite(
-    composite_salt_fraction: float,
-    *,
-    salt_to_polymer_ratio: float,
-) -> float:
-    """Map composite salt fraction (polymer in denominator) to LiCl brine fraction."""
-    f_c = float(composite_salt_fraction)
-    if not math.isfinite(f_c):
-        return float("nan")
-    spr = max(salt_to_polymer_ratio, 1e-9)
-    denom = 1.0 - f_c / spr
-    if denom <= 1e-12:
-        return 1.0
-    return max(0.0, min(1.0, f_c / denom))
-
-
 def licl_water_activity_at_brine_fraction(
     brine_salt_fraction: float,
     temperature_c: float,
@@ -642,27 +663,6 @@ def licl_equilibrium_brine_salt_fraction(
     return equilibrium_salt_mass_fraction_licl(relative_humidity, t_corr)
 
 
-def pam_licl_composite_salt_fraction(
-    c_w: float,
-    *,
-    c_s: float,
-    h_m: float,
-    h0_ref_m: float,
-    formula_weight_g_mol: float,
-    salt_to_polymer_ratio: float,
-) -> float:
-    """Salt mass fraction in wet PAM-LiCl: m_s / (m_w + m_s + m_p) on a footprint basis."""
-    del h_m  # inventory referenced to H₀ (see pam_licl_gravimetric_uptake_g_g)
-    salt_mol_m2 = c_s * h0_ref_m
-    mass_salt = salt_mol_m2 * formula_weight_g_mol / 1000.0
-    mass_polymer = mass_salt / max(salt_to_polymer_ratio, 1e-9)
-    mass_water = max(0.0, c_w) * h0_ref_m * WATER_MOLAR_MASS_KG_MOL
-    total = mass_water + mass_salt + mass_polymer
-    if total <= 0.0:
-        return 1.0
-    return mass_salt / total
-
-
 def water_activity_from_c_w(
     c_w: float,
     *,
@@ -675,13 +675,31 @@ def water_activity_from_c_w(
     h_m: float | None = None,
     h0_ref_m: float | None = None,
     salt_weight_factor: float = 1.0,
+    blend_weights: tuple[float, ...] | None = None,
 ) -> float:
-    """Brine a_w,s in Eq. 5 (Wilson Device); activity of water in the salt solution."""
+    """Brine a_w,s in Eq. 5 (Wilson Device); activity of water in the salt solution.
+
+    With ``blend_weights`` (complex mode, B8) the brine is a ZSR mixture and a_w
+    comes from inverting the mixing rule at the current salt mass fraction,
+    instead of a single salt's closed-form isotherm.
+    """
     del ions_per_formula, salt_to_polymer_ratio, h_m  # h_m unused; inventory is on H₀ basis
     if c_w <= 0.0 or c_s <= 0.0:
         return 1.0
     h_ref = h0_ref_m if h0_ref_m is not None else H0_M
     mw_eff = formula_weight_g_mol * salt_weight_factor
+
+    if blend_weights is not None:
+        from solar_lumped.complex_model import zsr_water_activity_at_brine_fraction
+
+        mass_water = max(0.0, c_w) * h_ref * WATER_MOLAR_MASS_KG_MOL
+        mass_salt = c_s * h_ref * mw_eff / 1000.0
+        total = mass_salt + mass_water
+        if total <= 0.0:
+            return float("nan")
+        aw = zsr_water_activity_at_brine_fraction(blend_weights, mass_salt / total, temperature_c)
+        return aw if math.isfinite(aw) else float("nan")
+
     if salt_name == "LiCl":
         # Brine salt mass fraction m_s / (m_s + m_w) -- LiCl solution a_w,s (Eq. 5).
         salt_mol_m2 = c_s * h_ref
@@ -716,6 +734,7 @@ def equilibrium_c_w_at_rh(
     salt_to_polymer_ratio: float = SALT_TO_POLYMER_RATIO_DEFAULT,
     h_m: float | None = None,
     h0_ref_m: float | None = None,
+    blend_weights: tuple[float, ...] | None = None,
 ) -> float:
     """Invert a_w(RH) to c_w at reference hydrogel thickness H₀."""
     del ions_per_formula
@@ -727,7 +746,15 @@ def equilibrium_c_w_at_rh(
     h_ref = h0_ref_m if h0_ref_m is not None else H0_M
     del h_m  # inventory referenced to H₀ (see pam_licl_gravimetric_uptake_g_g)
 
-    if salt_name == "LiCl":
+    if blend_weights is not None:
+        # ZSR is posed a_w -> composition, so the forward direction is the direct
+        # evaluation here -- no root solve needed on this path.
+        from solar_lumped.complex_model import zsr_brine_state
+
+        f_b, _ions, _mw = zsr_brine_state(blend_weights, rh, temperature_c)
+        if not math.isfinite(f_b):
+            return C_W_MIN_MOL_M3
+    elif salt_name == "LiCl":
         f_b = licl_equilibrium_brine_salt_fraction(rh, temperature_c)
     else:
         f_b = equilibrate_salt_mf(salt_name, rh, temperature_c)
@@ -790,10 +817,43 @@ def fabrication_c_w_initial(
     hydrogel_thickness_m: float,
     hydrogel_density_kg_m3: float = DRY_COMPOSITE_DENSITY_KG_M3,
     formula_weight_g_mol: float | None = None,
+    blend_weights: tuple[float, ...] | None = None,
+    use_dvs_cap: bool = True,
 ) -> float:
-    """Initial gel water state after fabrication at ~20% RH ambient."""
+    """Initial gel water state after fabrication at ~20% RH ambient.
+
+    A ZSR blend (complex mode, B8) never takes the PAM-LiCl DVS branch: that
+    isotherm was measured on the LiCl composite and says nothing about a mixed
+    brine. It also casts at the blend's own clamped fabrication RH, since CaCl2 and
+    MgCl2 have no brine at 20% RH and would otherwise start the gel bone dry --
+    which silently zeroed a blend's whole year.
+    """
     h0 = hydrogel_thickness_m
-    if salt_name == "LiCl":
+    if blend_weights is not None:
+        from solar_lumped.complex_model import (
+            clamp_reference_rh,
+            zsr_effective_formula_weight_g_mol,
+        )
+
+        fw = (
+            formula_weight_g_mol
+            if formula_weight_g_mol is not None
+            else zsr_effective_formula_weight_g_mol(
+                blend_weights, reference_rh=FABRICATION_EQUILIBRIUM_RH
+            )
+        )
+        return equilibrium_c_w_at_rh(
+            clamp_reference_rh(blend_weights, FABRICATION_EQUILIBRIUM_RH),
+            c_s=salt_molarity_from_composite(salt_to_polymer_ratio, hydrogel_density_kg_m3, fw),
+            ions_per_formula=2,  # unused on this path; ZSR carries effective ions
+            salt_name=salt_name,
+            formula_weight_g_mol=fw,
+            salt_to_polymer_ratio=salt_to_polymer_ratio,
+            h_m=h0,
+            h0_ref_m=h0,
+            blend_weights=blend_weights,
+        )
+    if salt_name == "LiCl" and use_dvs_cap:
         return equilibrium_c_w_from_dvs_at_rh(
             FABRICATION_EQUILIBRIUM_RH,
             h_m=h0,
@@ -807,8 +867,11 @@ def fabrication_c_w_initial(
         hydrogel_density_kg_m3,
         fw,
     )
+    # Same clamp as the blend branch, for the same reason: CaCl2 (DRH 0.35) and
+    # MgCl2 (0.33) have no brine at Wilson's 20% RH casting condition, and leaving
+    # it unclamped starts the gel dry and silently zeroes the year.
     return equilibrium_c_w_at_rh(
-        FABRICATION_EQUILIBRIUM_RH,
+        min(max(FABRICATION_EQUILIBRIUM_RH, s.rh_min), s.rh_max),
         c_s=c_s,
         ions_per_formula=s.ions_per_formula,
         salt_name=salt_name,
@@ -898,29 +961,55 @@ def equilibrate_salt_mf(
     return float(_isotherm_by_salt[rec.name](relative_humidity, temperature_c))
 
 
+def _water_activity_at_brine_fraction_by_name(
+    salt_name: str,
+    brine_salt_fraction: float,
+    temperature_c: float,
+) -> float:
+    """Forward isotherm dispatch keyed on the salt name only.
+
+    Deliberately does not call ``get_salt``: the catalog loader derives each salt's
+    deliquescence RH through here, and looking the record up would re-enter the loader.
+    """
+    f = float(brine_salt_fraction)
+    if not (0.0 <= f < 1.0) or not math.isfinite(f):
+        return float("nan")
+    if salt_name == "NaCl":
+        return _aw_polynomial(f, _NACL_AW_COEFFS)
+    if salt_name == "MgCl2":
+        return _aw_polynomial(f, _MGCL2_AW_COEFFS)
+    if salt_name == "LiCl":
+        if temperature_c > 150.0:
+            return float("nan")
+        return water_activity_licl(f, min(temperature_c, 150.0))
+    if salt_name == "CaCl2":
+        if temperature_c > 100.0:
+            return float("nan")
+        return vapor_pressure_ratio(f, temperature_c, CACL2_VAPOR_PRESSURE)
+    return float("nan")
+
+
+def deliquescence_rh(salt_name: str) -> float:
+    """Deliquescence RH: the brine water activity at saturation.
+
+    Derived, not tabulated -- it is the same number as ``SaltProperties.rh_min`` and the
+    lower end of the salt's usable RH window. Below it no brine exists at equilibrium, so
+    the salt stays solid and cannot take up water.
+    """
+    return _water_activity_at_brine_fraction_by_name(
+        salt_name, saturation_brine_salt_fraction(salt_name), 25.0
+    )
+
+
 def water_activity_at_brine_fraction(
     salt_name: str,
     brine_salt_fraction: float,
     temperature_c: float = 25.0,
 ) -> float:
     """Forward isotherm: brine water activity at salt mass fraction and temperature."""
-    rec = get_salt(salt_name)
-    f = float(brine_salt_fraction)
-    if not (0.0 <= f < 1.0) or not math.isfinite(f):
-        return float("nan")
-    if rec.name == "NaCl":
-        return _aw_polynomial(f, _NACL_AW_COEFFS)
-    if rec.name == "MgCl2":
-        return _aw_polynomial(f, _MGCL2_AW_COEFFS)
-    if rec.name == "LiCl":
-        if temperature_c > 150.0:
-            return float("nan")
-        return water_activity_licl(f, min(temperature_c, 150.0))
-    if rec.name == "CaCl2":
-        if temperature_c > 100.0:
-            return float("nan")
-        return vapor_pressure_ratio(f, temperature_c, CACL2_VAPOR_PRESSURE)
-    return float("nan")
+    return _water_activity_at_brine_fraction_by_name(
+        get_salt(salt_name).name, brine_salt_fraction, temperature_c
+    )
 
 
 # --- Wilson et al. 2025 Eqs. 1, 3, 4 — steady absorber, glass, and gel temperatures ---
@@ -933,10 +1022,13 @@ class ThermalState:
     t_glass_c: float
     h_conv_g: float
     m_des_kg_s_m2: float
+    # Complex mode (B2) only: outer pane temperature of a 2-pane stack. None for
+    # the single-pane / uncovered system, where t_glass_c is the whole story.
+    t_glass_outer_c: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
-class DeviceThermalParams:
+class SystemThermalParams:
     insulation_gap_m: float = L_INS_M
     vapor_gap_m: float = L_G_M
     eps_abs: float = EPS_ABS
@@ -944,12 +1036,19 @@ class DeviceThermalParams:
     eps_gel: float = EPS_GEL
     eps_al: float = EPS_AL
     # Real absorber/glass IR emissivities for the modified Eqs. 3/4 radiative terms.
-    # Both None (default) reproduces Wilson exactly; set both together -- see _residuals.
-    eps_abs_ir: float | None = None
-    eps_glass_ir: float | None = None
+    # Case 2 (selective surface) is the default; pass both as 1.0 (or None) for
+    # Case 1's original Wilson blackbody/cavity approximation -- see _residuals.
+    eps_abs_ir: float | None = EPS_ABS_IR_CASE2
+    eps_glass_ir: float | None = EPS_GLASS_IR_CASE2
     tilt_deg: float = TILT_DEG
     h_des_j_per_kg: float = H_DES_J_PER_KG
     has_glass: bool = True
+    # Complex mode (B2). n_glazing_panes=1 (default) is Wilson's single cover and
+    # leaves _residuals a 3-unknown solve; 2 adds an outer pane as a real 4th
+    # unknown; 0 is the uncovered system (equivalent to has_glass=False).
+    n_glazing_panes: int = 1
+    # An evacuated inter-pane gap suppresses conduction but not radiation.
+    evacuated_gap: bool = False
 
 
 def _residuals(
@@ -959,11 +1058,14 @@ def _residuals(
     q_solar_w_m2: float,
     m_des_kg_s_m2: float,
     h_amb: float,
-    params: DeviceThermalParams,
+    params: SystemThermalParams,
     vapor_gap_effective_m: float,
     h_m: float,
 ) -> np.ndarray:
     t_gel, t_abs, t_glass = float(x[0]), float(x[1]), float(x[2])
+    # Complex mode (B2): a second pane carries its own temperature as a 4th unknown.
+    two_pane = params.has_glass and params.n_glazing_panes >= 2
+    t_glass_outer = float(x[3]) if two_pane else t_glass
     u_gel = u_gel_w_m2_k(h_m)
     h_conv_g = hollands_vapor_gap_h_conv_w_m2_k(
         vapor_gap_effective_m, t_gel, t_cond_c, tilt_deg=params.tilt_deg
@@ -1004,16 +1106,29 @@ def _residuals(
         r3 = t_glass - t_amb_c
     else:
         gap_m = params.insulation_gap_m
-        q_cond_ag = 0.0 if gap_m <= 0.0 else K_AIR_W_M_K / gap_m * (t_abs - t_glass)
+        # An evacuated cover assembly (B2) kills gas conduction across every
+        # glazing gap but leaves radiation untouched -- that asymmetry is exactly
+        # why it buys anything, and why it only pays off with a low-eps absorber.
+        cond_coeff = 0.0 if (gap_m <= 0.0 or params.evacuated_gap) else K_AIR_W_M_K / gap_m
+        q_cond_ag = cond_coeff * (t_abs - t_glass)
         q_rad_ag = radiative_exchange_w_m2(t_abs, t_glass, emissivity=eps_ag)
-        q_rad_ga = radiative_exchange_w_m2(t_glass, t_amb_c, emissivity=eps_ga)
-        r3 = q_cond_ag + q_rad_ag - h_amb * (t_glass - t_amb_c) - q_rad_ga
         r4 = (
             params.eps_abs * params.tau_glass * q_solar_w_m2
             - q_cond_ag
             - q_rad_ag
             - u_gel * (t_abs - t_gel)
         )
+        if two_pane:
+            # Inner pane exchanges with the outer pane, which alone sees ambient.
+            eps_pane_pane = parallel_plate_emissivity(eps_ga, eps_ga)
+            q_cond_io = cond_coeff * (t_glass - t_glass_outer)
+            q_rad_io = radiative_exchange_w_m2(t_glass, t_glass_outer, emissivity=eps_pane_pane)
+            q_rad_oa = radiative_exchange_w_m2(t_glass_outer, t_amb_c, emissivity=eps_ga)
+            r3 = q_cond_ag + q_rad_ag - q_cond_io - q_rad_io
+            r5 = q_cond_io + q_rad_io - h_amb * (t_glass_outer - t_amb_c) - q_rad_oa
+            return np.array([r1, r3, r4, r5], dtype=float)
+        q_rad_ga = radiative_exchange_w_m2(t_glass, t_amb_c, emissivity=eps_ga)
+        r3 = q_cond_ag + q_rad_ag - h_amb * (t_glass - t_amb_c) - q_rad_ga
 
     return np.array([r1, r3, r4], dtype=float)
 
@@ -1025,7 +1140,7 @@ def solve_steady_thermal(
     q_solar_w_m2: float,
     m_des_kg_s_m2: float,
     h_amb: float,
-    params: DeviceThermalParams,
+    params: SystemThermalParams,
     h_m: float,
     t_guess: tuple[float, float, float] | None = None,
     vapor_gap_m: float | None = None,
@@ -1046,19 +1161,28 @@ def solve_steady_thermal(
             clamp_temperature_c(t_guess[2]),
         )
 
+    # A 2-pane stack (B2) adds the outer pane as a 4th unknown; it starts a little
+    # cooler than the inner pane, which is the physically correct ordering.
+    two_pane = params.has_glass and params.n_glazing_panes >= 2
+    x0 = [t_gel0, t_abs0, t_glass0]
+    if two_pane:
+        x0.append(clamp_temperature_c(0.5 * (t_glass0 + t_amb_c)))
+
     sol = root(
         _residuals,
-        x0=np.array([t_gel0, t_abs0, t_glass0]),
+        x0=np.array(x0),
         args=(t_cond_c, t_amb_c, q_solar_w_m2, m_des_kg_s_m2, h_amb, params, gap_m, h_m),
         method="hybr",
         tol=1e-8,
     )
     if not sol.success:
         t_gel, t_abs, t_glass = t_gel0, t_abs0, t_glass0
+        t_glass_outer = x0[3] if two_pane else None
     else:
         t_gel = clamp_temperature_c(float(sol.x[0]))
         t_abs = clamp_temperature_c(float(sol.x[1]))
         t_glass = clamp_temperature_c(float(sol.x[2]))
+        t_glass_outer = clamp_temperature_c(float(sol.x[3])) if two_pane else None
 
     h_conv_g = hollands_vapor_gap_h_conv_w_m2_k(
         gap_m, t_gel, t_cond_c, tilt_deg=params.tilt_deg
@@ -1069,6 +1193,7 @@ def solve_steady_thermal(
         t_glass_c=t_glass,
         h_conv_g=h_conv_g,
         m_des_kg_s_m2=m_des_kg_s_m2,
+        t_glass_outer_c=t_glass_outer,
     )
 
 
@@ -1079,7 +1204,7 @@ def thermal_residual_norm(
     q_solar_w_m2: float,
     m_des_kg_s_m2: float,
     h_amb: float,
-    params: DeviceThermalParams,
+    params: SystemThermalParams,
     h_m: float = H0_M,
 ) -> float:
     gap_m = max(params.vapor_gap_m - h_m, 0.0)
@@ -1093,8 +1218,11 @@ def thermal_residual_norm(
         h_m=h_m,
         vapor_gap_m=gap_m,
     )
+    x = [state.t_gel_c, state.t_abs_c, state.t_glass_c]
+    if state.t_glass_outer_c is not None:
+        x.append(state.t_glass_outer_c)
     r = _residuals(
-        np.array([state.t_gel_c, state.t_abs_c, state.t_glass_c]),
+        np.array(x),
         t_cond_c,
         t_amb_c,
         q_solar_w_m2,
@@ -1132,8 +1260,13 @@ def _absorption_effective_water_activity(
         h_m=h_m,
         h0_ref_m=params.h0_ref_m,
         salt_weight_factor=params.salt_weight_factor,
+        blend_weights=params.blend_weights,
     )
-    if params.salt_name != "LiCl":
+    # The DVS cap is a measurement of *PAM-LiCl* specifically (Note S2): it applies
+    # only to the pure-LiCl composite, never to a ZSR blend (whose polymer-bound
+    # uptake was never characterized), and complex mode disables it outright via
+    # use_dvs_cap so the whole simplex rests on one brine model.
+    if params.salt_name != "LiCl" or params.blend_weights is not None or not params.use_dvs_cap:
         return aw_brine
     u = pam_licl_gravimetric_uptake_g_g(
         c_w,
@@ -1185,6 +1318,7 @@ def _mass_transfer_driving_force(
         h_m=h_m,
         h0_ref_m=params.h0_ref_m,
         salt_weight_factor=params.salt_weight_factor,
+        blend_weights=params.blend_weights,
     )
     if not math.isfinite(aw):
         return 0.0
@@ -1204,6 +1338,15 @@ class MassTransferParams:
     formula_weight_g_mol: float = 42.394
     salt_to_polymer_ratio: float = SALT_TO_POLYMER_RATIO_DEFAULT
     salt_weight_factor: float = 1.0
+    # Complex mode (B8): ZSR molality weights over complex_model.ZSR_SALTS. None
+    # (default) keeps the single-salt path, so gpu_sweep and every existing caller
+    # are untouched.
+    blend_weights: tuple[float, ...] | None = None
+    # The PAM-LiCl DVS cap (Note S2) is a measurement of the LiCl composite only.
+    # Complex mode switches it off so the brine model is self-consistent across the
+    # whole blend simplex -- otherwise the pure-LiCl corner sits on a cliff that a
+    # GP would chase for a modeling reason rather than a physical one.
+    use_dvs_cap: bool = True
 
 
 def mass_transfer_g_m_s(
@@ -1334,10 +1477,6 @@ def m_des_kg_s_m2_from_dc_w(
     return -dc_w_dt_val * WATER_MOLAR_MASS_KG_MOL * h0_ref_m
 
 
-def _materials_dir() -> Path:
-    return Path(__file__).resolve().parent / "data" / "materials"
-
-
 # --- Sorbent interface: PAM-salt hydrogel; PhaseResult.c_w stores mol/m³. ---
 
 
@@ -1350,7 +1489,7 @@ def evaluate_mass_rates(
     rh: float,
     phase: str,
     mass: MassTransferParams,
-    config: DeviceConfig,
+    config: SystemConfig,
     vapor_gap_m: float,
 ) -> tuple[float, float, float]:
     """Return (dloading/dt, dH/dt, m_des_kg_s_m2)."""
@@ -1406,24 +1545,29 @@ def evaluate_mass_rates(
     return dc, dh, m_des
 
 
-def inventory_label(config: DeviceConfig) -> str:
+def inventory_label(config: SystemConfig) -> str:
     return "gel"
 
 
-def inventory_ylabel(config: DeviceConfig) -> str:
+def inventory_ylabel(config: SystemConfig) -> str:
     return "Water in gel (L/m²)"
 
 
-def inventory_prefix(config: DeviceConfig) -> str:
+def inventory_prefix(config: SystemConfig) -> str:
     return "water_in_gel"
 
 
-def initial_loading(config: DeviceConfig) -> float:
+def initial_loading(config: SystemConfig) -> float:
+    # Route the resolved blend (None for single-salt, including complex mode's
+    # single-salt corners) so fabrication state and transport agree on the brine.
+    mass = config.mass_params()
     return fabrication_c_w_initial(
-        salt_name=config.salt_name,
+        salt_name=mass.salt_name,
         salt_to_polymer_ratio=config.salt_to_polymer_ratio,
         hydrogel_thickness_m=config.hydrogel_thickness_m,
         hydrogel_density_kg_m3=config.hydrogel_density_kg_m3,
+        blend_weights=mass.blend_weights,
+        use_dvs_cap=mass.use_dvs_cap,
     )
 
 
@@ -1448,10 +1592,10 @@ def c_w_from_water_in_gel_l_m2(water_l_m2: float, h_m: float) -> float:
     return max(0.0, water_l_m2) / (h_m * WATER_MOLAR_MASS_KG_MOL)
 
 
-def water_in_sorbent_l_m2(loading: float, h_m: float, *, config: DeviceConfig) -> float:
+def water_in_sorbent_l_m2(loading: float, h_m: float, *, config: SystemConfig) -> float:
     return water_in_gel_l_m2(loading, h_m, h0_ref_m=config.hydrogel_thickness_m)
 
 
-def clip_loading(loading: float, *, config: DeviceConfig) -> float:
+def clip_loading(loading: float, *, config: SystemConfig) -> float:
     return max(C_W_MIN_MOL_M3, min(C_W_MAX_MOL_M3, loading))
 

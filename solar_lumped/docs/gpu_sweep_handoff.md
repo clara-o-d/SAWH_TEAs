@@ -1,4 +1,4 @@
-# GPU-parallelized device-parameter sweep: handoff + status
+# GPU-parallelized system-parameter sweep: handoff + status
 
 This started as a scoping doc for building a GPU-accelerated alternative to the
 CPU sweep (`sherlock_param_sweep.tex`/`session_summary.md`). **That build is now
@@ -12,13 +12,13 @@ architecture decision live in [`../gpu_sweep/FINDINGS.md`](../gpu_sweep/FINDINGS
 ## What the sweep computes
 
 `solar_lumped` is a lumped-parameter simulation of a solar-driven atmospheric
-water harvesting (SAWH) device — the Wilson model, absorption/desorption
+water harvesting (SAWH) system — the Wilson model, absorption/desorption
 half-cycles, a hydrogel bed loaded with a hygroscopic salt (LiCl only). The
 physics right-hand-side is a small system of ODEs integrated over one simulated
 day, repeated until the day-to-day state converges to a steady periodic cycle.
 
 The sweep: **for every land grid point on Earth, evaluate every combination of 4
-device design parameters, and report water yield + thermal efficiency.**
+system design parameters, and report water yield + thermal efficiency.**
 
 - **Grid**: 1,405 land sites (3° lat/lon spacing, Natural Earth land polygons).
   `solar_lumped/src/solar_lumped/weather/land_grid.py`'s `grid_land_points()`.
@@ -128,14 +128,14 @@ $$0 = \varepsilon_{abs}\tau_{glass}Q_{solar} - \frac{k_{air}}{L_c}(T_{abs}-T_{gl
 `eps_abs`/`tau_glass` keep sweeping the existing 135-combo grid for Case 2 (0.05
 and 0.95 in the table above are just the existing baseline defaults, shown for
 context, not new fixed values); `eps_abs_ir`/`eps_glass_ir` are **new fixed
-constants**, not swept. Case 3 fixes all four as the theoretical ideal-device
+constants**, not swept. Case 3 fixes all four as the theoretical ideal-system
 limit. This is a strict generalization of Case 1, not a breaking change:
 $\varepsilon_{abs,IR}=\varepsilon_{glass,IR}=1$ reduces the formula to Case 1's
 exact blackbody behavior ($\varepsilon_{a\text{-}g}=1$, glass emits at 1).
 
 ### What was changed (already done, validated, committed)
 
-- `src/solar_lumped/physics/device_balances.py`: `DeviceThermalParams` gained
+- `src/solar_lumped/physics/device_balances.py`: `SystemThermalParams` gained
   `eps_abs_ir`/`eps_glass_ir` (default `None` each — both `None` reproduces Case
   1 exactly). `_residuals` branches on whether both are set.
 - `gpu_sweep/jax_physics.py`: `ThermalParams` gained the same two fields
@@ -179,7 +179,7 @@ idealized values there, not the usual swept lists.) Both array scripts default
 to `--array=0-39%8` like Case 1's — tune to your actual `serc` GPU quota.
 
 Before trusting a full Case 2/3 run: re-run the smoke test and spot-check a few
-rows against the CPU `grid_param_sweep.py`/`build_device_config(...,
+rows against the CPU `grid_param_sweep.py`/`build_system_config(...,
 eps_abs_ir=..., eps_glass_ir=...)` path for the same sites/combos, the same way
 Case 1's full run was checked (`FINDINGS.md` Result 12) — the physics-level
 validation above confirms the *equations* are right, not that the full

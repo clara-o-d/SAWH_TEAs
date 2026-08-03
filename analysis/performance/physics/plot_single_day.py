@@ -25,7 +25,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
 import numpy as np  # noqa: E402
 
-from solar_lumped.device import (  # noqa: E402
+from solar_lumped.system import (  # noqa: E402
     register_cyclic_warmup_arguments,
     register_solar_sim_arguments,
     resolve_solar_sim_arguments,

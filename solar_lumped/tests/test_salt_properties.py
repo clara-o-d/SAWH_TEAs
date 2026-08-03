@@ -16,7 +16,7 @@ from solar_lumped.physics import (
     salt_molarity_from_composite,
     water_activity_from_c_w,
 )
-from solar_lumped.simulation import DeviceConfig
+from solar_lumped.simulation import SystemConfig
 
 
 def test_chamber_pour_volume_ml_pam_licl_2gg():
@@ -63,7 +63,7 @@ def test_chamber_c_s_constant_density_unchanged_for_4gg():
 
 
 def test_nacl_water_activity_uses_brine_not_mole_fraction():
-    config = DeviceConfig(salt_name="NaCl")
+    config = SystemConfig(salt_name="NaCl")
     mass = config.mass_params()
     aw = water_activity_from_c_w(
         8000.0,
@@ -82,8 +82,8 @@ def test_nacl_water_activity_uses_brine_not_mole_fraction():
 
 
 def test_fabrication_ic_differs_by_salt():
-    licl = DeviceConfig(salt_name="LiCl")
-    nacl = DeviceConfig(salt_name="NaCl")
+    licl = SystemConfig(salt_name="LiCl")
+    nacl = SystemConfig(salt_name="NaCl")
     cw_licl = fabrication_c_w_initial(
         salt_name=licl.salt_name,
         salt_to_polymer_ratio=licl.salt_to_polymer_ratio,
@@ -109,7 +109,7 @@ def test_desorption_water_activity_decreases_with_gel_temp():
 def test_gravimetric_uptake_component_basis_matches_dvs_density():
     from solar_lumped.physics import pam_licl_gravimetric_uptake_g_g
 
-    config = DeviceConfig.baseline()
+    config = SystemConfig.baseline()
     mass = config.mass_params()
     c_w = 8000.0
     h0 = config.hydrogel_thickness_m
@@ -129,7 +129,7 @@ def test_gravimetric_uptake_component_basis_matches_dvs_density():
 def test_salt_weight_factor_scales_gravimetric_uptake():
     from solar_lumped.physics import pam_licl_gravimetric_uptake_g_g
 
-    config = DeviceConfig.baseline()
+    config = SystemConfig.baseline()
     mass = config.mass_params()
     c_w = 8000.0
     h0 = config.hydrogel_thickness_m

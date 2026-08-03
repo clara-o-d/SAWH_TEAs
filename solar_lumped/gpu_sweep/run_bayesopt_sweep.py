@@ -66,7 +66,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--year", type=int, default=2024)
     p.add_argument("--cache-dir", type=str, default=str(_REPO / ".weather_cache"))
 
-    # Fixed (non-optimized) device constants -- same role as run_gpu_sweep.py's
+    # Fixed (non-optimized) system constants -- same role as run_gpu_sweep.py's
     # matching flags, just not swept here.
     p.add_argument("--salt", type=str, default="LiCl")
     p.add_argument("--salt-loading", type=float, default=4.0, help="salt_to_polymer_ratio, held fixed.")
@@ -166,7 +166,6 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, bounds: DesignBou
         ei_xi=args.ei_xi,
         stall_rel_tol=args.stall_rel_tol,
         stall_rounds=args.stall_rounds,
-        resolution="annual",
         weather_cache_dir=args.cache_dir,
         case=args.case,
         de_maxiter=args.de_maxiter,
