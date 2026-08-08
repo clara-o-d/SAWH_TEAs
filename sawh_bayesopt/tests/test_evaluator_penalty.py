@@ -112,6 +112,21 @@ def test_evaluate_batch_combined_lcow_uses_finite_penalty_not_fail_lco(
     assert result.combined_lcow < 1e29  # nowhere near solar_lumped's raw FAIL_LCO (1e30)
 
 
+def test_evaluate_batch_propagates_bugs_instead_of_penalizing(monkeypatch, tmp_path, one_site, econ):
+    """A NameError in the physics is broken code, not an infeasible design. Laundering it
+    into the 1e4 penalty is how a missing import in jax_physics.py produced a sweep of
+    penalties that read as a completed run (see evaluator._BUG_EXCEPTIONS)."""
+    fake = _FakeJaxDailyCycle(raises=NameError("name '_M_DES_BRACKET_MAX' is not defined"))
+    monkeypatch.setattr(evaluator, "_load_jax_daily_cycle", lambda: fake)
+
+    cache = EvalCache(tmp_path / "cache.jsonl")
+    with pytest.raises(NameError, match="_M_DES_BRACKET_MAX"):
+        evaluator.evaluate_batch(
+            [_one_x()], cache=cache, sites=one_site,
+            site_profiles={"dummy": _DUMMY_PROFILES}, econ=econ, combine_rule="mean",
+        )
+
+
 def test_evaluate_batch_penalizes_missing_weather(tmp_path, one_site, econ):
     from solar_lumped.economics import FAIL_LCO
 

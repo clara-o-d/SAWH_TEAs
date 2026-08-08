@@ -27,7 +27,7 @@ _SRC = _REPO / "src"
 _SCRIPTS = _REPO / "scripts"
 _BAYESOPT_REPO = _REPO.parent / "sawh_bayesopt"
 _BAYESOPT_SRC = _BAYESOPT_REPO / "src"
-_BAYESOPT_DIAG = _BAYESOPT_REPO / "scripts" / "diagnostics"
+_BAYESOPT_DIAG = _REPO.parent / "analysis" / "performance" / "optimization" / "diagnostics_bo"
 for p in (_SRC, _SCRIPTS, _BAYESOPT_SRC, _BAYESOPT_DIAG):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
@@ -39,7 +39,7 @@ from run_gpu_sweep import _site_list  # noqa: E402
 
 import gp_diagnostics  # noqa: E402
 from sawh_bayesopt.bayesopt import BayesOptConfig, run_bayesopt  # noqa: E402
-from sawh_bayesopt.design_space import CASE_EPS_IR, DesignBounds  # noqa: E402
+from sawh_bayesopt.design_space import CASE_EPS_IR, COMPLEX_VAR_ORDER, DesignBounds  # noqa: E402
 from sawh_bayesopt.reporting import (  # noqa: E402
     write_convergence_plot,
     write_de_diagnostics,
@@ -73,6 +73,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--insulation-gap-mm", type=float, default=5.0, help="insulation_gap_m, held fixed.")
     p.add_argument("--tilt-deg", type=float, default=gps.TILT_DEG, help="tilt_deg, held fixed.")
     p.add_argument("--case", choices=tuple(CASE_EPS_IR), default="case2")
+    p.add_argument(
+        "--complex", action="store_true",
+        help="Optimize the 13-dim complex-fidelity space (A1/B1/B2/B3/B4/B8) instead of 3 "
+             "dims in a 6-dim box. Ignores --tilt-deg/--insulation-gap-mm/--salt-loading, "
+             "which become optimized dims rather than fixed constants -- see _bounds().",
+    )
 
     # Same 3 combo variables the brute-force sweep grids over -- min/max of
     # these lists become the BayesOpt box bounds instead of 5 discrete values.
@@ -108,16 +114,39 @@ _FIXED_DIM_EPS = 1e-9
 
 def _bounds(args: argparse.Namespace) -> DesignBounds:
     """Box bounds for the 3 optimized dims from the sweep's combo lists (min/max, mm -> m);
-    the other 3 collapse to a tiny span around the fixed CLI value (see _FIXED_DIM_EPS)."""
+    the other 3 collapse to a tiny span around the fixed CLI value (see _FIXED_DIM_EPS).
+
+    ``--complex`` instead frees all 13 dims at their design_space defaults, ignoring
+    --tilt-deg/--insulation-gap-mm/--salt-loading. Two reasons, one physical and one
+    numerical:
+
+      * The 3-dim box exists to mirror run_gpu_sweep.py's brute-force grid so the two
+        are comparable. Complex mode has no brute-force counterpart to match, and
+        holding insulation and salt loading at that sweep's constants while optimizing
+        7 exotic glazing/blend/schedule dims optimizes the wrong system. tilt in
+        particular only becomes a real lever once complex mode's POA transposition is
+        on -- before that it enters only through the Hollands cos(theta).
+      * A _FIXED_DIM_EPS dim is worse than absent. to_unit_cube divides by the span, so
+        a 1e-9-wide axis still spreads its samples across the full [0, 1] cube while
+        having zero effect on LCOW. The GP spends an ARD length scale on pure noise
+        (and pins it at the upper bound), the LHS spends spread there, and DE spends a
+        search dimension there. At 13 dims that waste is no longer affordable.
+    """
+    if args.complex:
+        return DesignBounds(
+            hydrogel_thickness_m=(min(args.hydrogel_thickness_mm) / 1000.0, max(args.hydrogel_thickness_mm) / 1000.0),
+            vapor_gap_m=(min(args.vapor_gap_mm) / 1000.0, max(args.vapor_gap_mm) / 1000.0),
+            fin_area_ratio=(min(args.fin_area_ratio), max(args.fin_area_ratio)),
+            complex_mode=True,
+        )
     salt_ratio = args.salt_loading
     insulation_m = args.insulation_gap_mm / 1000.0
-    tilt = args.tilt_deg
     return DesignBounds(
         hydrogel_thickness_m=(min(args.hydrogel_thickness_mm) / 1000.0, max(args.hydrogel_thickness_mm) / 1000.0),
         vapor_gap_m=(min(args.vapor_gap_mm) / 1000.0, max(args.vapor_gap_mm) / 1000.0),
         insulation_gap_m=(insulation_m, insulation_m + _FIXED_DIM_EPS),
         fin_area_ratio=(min(args.fin_area_ratio), max(args.fin_area_ratio)),
-        tilt_deg=(tilt, tilt + _FIXED_DIM_EPS),
+        tilt_deg=(args.tilt_deg, args.tilt_deg + _FIXED_DIM_EPS),
         salt_to_polymer_ratio=(salt_ratio, salt_ratio + _FIXED_DIM_EPS),
     )
 
@@ -157,6 +186,7 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, bounds: DesignBou
 
     cfg = BayesOptConfig(
         bounds=bounds,
+        complex_mode=args.complex,
         sites=(site,),
         combine_rule="mean",
         n_init=args.n_init,
@@ -183,23 +213,35 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, bounds: DesignBou
     elapsed = time.perf_counter() - t0
 
     best = result.best
+    # Every optimized dim by name, so complex mode's 7 extra dims land in summary.csv
+    # instead of only living in the per-site report.json.
+    best_by_name = dict(zip(bounds.names(), best.design_vector))
     row.update({
-        "hydrogel_thickness_mm": best.design_vector[0] * 1000.0,
-        "vapor_gap_mm": best.design_vector[1] * 1000.0,
-        "fin_area_ratio": best.design_vector[3],
-        "insulation_gap_mm": args.insulation_gap_mm,
-        "tilt_deg": args.tilt_deg,
+        "hydrogel_thickness_mm": best_by_name["hydrogel_thickness_m"] * 1000.0,
+        "vapor_gap_mm": best_by_name["vapor_gap_m"] * 1000.0,
+        "fin_area_ratio": best_by_name["fin_area_ratio"],
+        # Read off the winning design, not the CLI: under --complex these three are
+        # optimized dims, and in simple mode a degenerate-span dim reproduces the CLI
+        # value to 1e-9 anyway.
+        "insulation_gap_mm": best_by_name["insulation_gap_m"] * 1000.0,
+        "tilt_deg": best_by_name["tilt_deg"],
+        **{name: best_by_name[name] for name in COMPLEX_VAR_ORDER if name in best_by_name},
         "salt": args.salt,
-        "salt_loading": args.salt_loading,
+        "salt_loading": best_by_name["salt_to_polymer_ratio"],
         "case": args.case,
         "warmup_method": "aitken-gpu-fixed-round", "resolution": "annual",
         "best_combined_lcow_usd_m3": f"{best.combined_lcow:.6f}",
         "n_evals": len(result.history),
+        # A site where nothing was feasible reports the 1e4 penalty as its "optimum",
+        # which reads like a real (terrible) number in a merged summary.csv. Carrying the
+        # count makes that visible without opening 1405 report.json files -- it is how
+        # the jax_physics NameError masqueraded as a completed sweep.
+        "n_feasible": sum(1 for r in result.history if r.is_feasible),
         "stopped_reason": result.stopped_reason,
         "wall_time_s": f"{elapsed:.1f}",
     })
 
-    write_history_csv(result.history, run_dir / "history.csv")
+    write_history_csv(result.history, run_dir / "history.csv", var_order=bounds.names())
     write_convergence_plot(result.history, run_dir / "convergence.png")
     save_state(result.surrogate, run_dir / "gp_state.joblib")
     write_de_diagnostics(result.de_diagnostics, run_dir / "diagnostics" / "de_diagnostics.json")
@@ -215,10 +257,25 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, bounds: DesignBou
         row["improvement_vs_baseline_frac"] = report["improvement_vs_baseline_frac"]
         row["flagged_as_surrogate_artifact"] = verification.flagged_as_surrogate_artifact
         row["max_neighbor_improvement_frac"] = f"{verification.max_neighbor_improvement_frac:.6f}"
-        if verification.flagged_as_surrogate_artifact:
+        # write_final_report recommends the best of (loop optimum, verified neighbors), so
+        # take its answer rather than leaving summary.csv on a design report.json rejected.
+        row["recommended_from"] = report["recommended_from"]
+        if report["recommended_from"] == "verification_neighbor":
+            rec = report["recommended_design"]
+            row.update({
+                "hydrogel_thickness_mm": rec["hydrogel_thickness_m"] * 1000.0,
+                "vapor_gap_mm": rec["vapor_gap_m"] * 1000.0,
+                "insulation_gap_mm": rec["insulation_gap_m"] * 1000.0,
+                "fin_area_ratio": rec["fin_area_ratio"],
+                "tilt_deg": rec["tilt_deg"],
+                "salt_loading": rec["salt_to_polymer_ratio"],
+                **{name: rec[name] for name in COMPLEX_VAR_ORDER if name in rec},
+                "best_combined_lcow_usd_m3": f"{report['recommended_combined_lcow_usd_per_m3']:.6f}",
+            })
             print(
-                f"  ({lat:+.4f}, {lon:+.4f}): WARNING a perturbed neighbor beat the reported optimum by "
-                f"{verification.max_neighbor_improvement_frac:.2%} -- possible surrogate artifact.", flush=True,
+                f"  ({lat:+.4f}, {lon:+.4f}): a verified neighbor beat the loop optimum by "
+                f"{verification.max_neighbor_improvement_frac:.2%} -- recommending the neighbor.",
+                flush=True,
             )
     except Exception as exc:  # noqa: BLE001
         row["verify_error"] = f"verify_optimum/write_final_report: {exc!r}"
@@ -240,9 +297,12 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, bounds: DesignBou
     except Exception as exc:  # noqa: BLE001
         row["diagnostics_error"] = f"gp_diagnostics: {exc!r}"
 
+    # Reads the row, not result.best, so the log line cannot disagree with summary.csv
+    # when verification promoted a neighbor (it falls back to the loop optimum when
+    # verification errored and never updated the row).
     print(
         f"  ({lat:+.4f}, {lon:+.4f}): {len(result.history)} eval(s), stopped={result.stopped_reason}, "
-        f"best_lcow={best.combined_lcow:.4f} USD/m3, {elapsed:.1f}s", flush=True,
+        f"best_lcow={float(row['best_combined_lcow_usd_m3']):.4f} USD/m3, {elapsed:.1f}s", flush=True,
     )
     return row
 

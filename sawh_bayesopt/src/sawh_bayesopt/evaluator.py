@@ -45,6 +45,14 @@ PENALTY_LCOW_USD_PER_M3: float = 1.0e4
 # (FINDINGS.md Result 7), and run_gpu_sweep.py's own default.
 JAX_AITKEN_MAX_ROUNDS: int = 8
 
+# Broken code, not a bad design. The two solver calls below catch Exception so one
+# unphysical design can't kill a 130-evaluation batch -- but that same catch turns a typo
+# in the physics into "every design is infeasible", and the run then reports the 1e4
+# penalty as a completed optimization. That is exactly how a missing _M_DES_BRACKET_MAX
+# import in jax_physics.py produced a full sweep of penalties that looked like a
+# successful run. These never mean "infeasible", so they propagate and stop the run.
+_BUG_EXCEPTIONS = (NameError, AttributeError, ImportError, IndentationError)
+
 # .../sawh_bayesopt/src/sawh_bayesopt/evaluator.py -> .../SAWH_TEAs
 _SAWH_TEAS_ROOT = Path(__file__).resolve().parents[3]
 _GPU_SWEEP_DIR = _SAWH_TEAS_ROOT / "solar_lumped" / "gpu_sweep"
@@ -226,6 +234,8 @@ def _run_jax_year(
             h_initial=np.array([c.hydrogel_thickness_m for c in instance_configs]),
             aitken_max_rounds=JAX_AITKEN_MAX_ROUNDS,
         )
+    except _BUG_EXCEPTIONS:
+        raise
     except Exception as exc:  # noqa: BLE001 -- the batched jax/diffrax call can raise
         return {}, {}, str(exc).split("\n", 1)[0][:240]
 
@@ -334,6 +344,8 @@ def _run_cpu_year(
                 yields.append(y)
                 etas.append(eta)
                 c_w, h = float(des_res.c_w[-1]), float(des_res.H[-1])
+        except _BUG_EXCEPTIONS:
+            raise
         except Exception as exc:  # noqa: BLE001 -- one bad design must not kill the batch
             return {}, {}, str(exc).split("\n", 1)[0][:240]
         yield_by_pair[pair] = float(np.mean(yields))

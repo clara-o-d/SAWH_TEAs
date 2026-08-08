@@ -4,7 +4,7 @@ function diaz_marin_figure3()
 %   Self-contained: computes Eq. 5 model curves in MATLAB and overlays
 %   digitized reference CSVs. No Python export required.
 %
-%   Outputs (TIFF, 600 dpi) under diaz-marin-et-al._re-creation/outputs/figure3/:
+%   Outputs (TIFF, 600 dpi) under diaz_marin/outputs/figure3/:
 %     figure3.tif, figure3b.tif, figure3c.tif, figure3e.tif
 
 setup_recreation();

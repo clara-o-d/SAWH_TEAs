@@ -191,16 +191,27 @@ def write_final_report(
     baseline_result = evaluate_baseline(cfg, run_dir)
     sweep_ref = _best_sweep_reference()
 
+    # Verification's perturbed neighbors are full true-model evaluations, not surrogate
+    # predictions, so a neighbor that came back better is not an artifact to warn about --
+    # it is the better design, already paid for. Recommending the loop's point anyway
+    # discards it (a 13-dim run with a few hundred points is sparse enough that a +/-10%
+    # perturbation beating the incumbent is routine, not pathological).
+    recommended = min(
+        [result.best, *verification.neighbor_results], key=lambda r: r.combined_lcow
+    )
+    from_verification = recommended is not result.best
+
     baseline_lcow = baseline_result.combined_lcow
     if math.isfinite(baseline_lcow) and baseline_lcow not in (0.0,):
-        improvement = (baseline_lcow - result.best.combined_lcow) / baseline_lcow
+        improvement = (baseline_lcow - recommended.combined_lcow) / baseline_lcow
     else:
         improvement = None
 
     report = {
         "case": cfg.case,
-        "recommended_design": dict(zip(cfg.bounds.names(), result.best.design_vector)),
-        "recommended_combined_lcow_usd_per_m3": result.best.combined_lcow,
+        "recommended_design": dict(zip(cfg.bounds.names(), recommended.design_vector)),
+        "recommended_combined_lcow_usd_per_m3": recommended.combined_lcow,
+        "recommended_from": "verification_neighbor" if from_verification else "bayesopt_loop",
         "recommended_per_site": {
             r.site_name: {
                 "lcow_usd_per_m3": r.lcow,
@@ -209,7 +220,7 @@ def write_final_report(
                 "eta_thermal": r.eta_thermal,
                 "failure_reason": r.failure_reason,
             }
-            for r in result.best.site_results
+            for r in recommended.site_results
         },
         "verification": {
             "true_combined_lcow_usd_per_m3": verification.best_true_combined_lcow,

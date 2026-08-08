@@ -10,7 +10,7 @@ Atacama Desert field test, May 8–9, 2024:
   - Average solar flux 517 W/m² during desorption
   - Final water yield 0.62 L/m²/day, thermal efficiency 9.3%
 
-Panel C: Predicted system temperatures (absorber, glass, condenser, ambient)
+Panel C: Predicted system temperatures (absorber, glass, condenser)
          vs time during the 8-h desorption phase.
 Panel D: Predicted cumulative water output vs time; single measured endpoint
          (0.62 L/m²) from paper shown as a star marker.
@@ -46,7 +46,6 @@ from solar_lumped.plotting import (
     figure_size_inches,
     plot_defaults_slides,
     print_figure,
-    ref_marker_kwargs,
     scaled_fontsize,
     style_axes,
 )
@@ -324,9 +323,8 @@ def simulate_atacama() -> dict:
 
 _FIG4_STYLE = {
     "absorber":  {"color": "#c0392b", "linestyle": "-",  "label": "absorber (model)"},
-    "glass":     {"color": "#e67e22", "linestyle": "--", "label": "glass (model)"},
+    "glass":     {"color": "#e67e22", "linestyle": "-",  "label": "glass (model)"},
     "condenser": {"color": "#2980b9", "linestyle": "-",  "label": "condenser (model)"},
-    "ambient":   {"color": "#7f8c8d", "linestyle": ":",  "label": r"$T_\mathrm{amb}$ (measured)"},
     "water":     {"color": "#1abc9c", "linestyle": "-",  "label": "water output (model)"},
 }
 
@@ -381,7 +379,7 @@ def _overlay_ref(
     mask = ~(np.isnan(x) | np.isnan(y))
     if not mask.any():
         return False
-    ax.scatter(x[mask], y[mask], label=label, **ref_marker_kwargs(color=color))
+    ax.plot(x[mask], y[mask], color=color, linestyle="--", label=label, zorder=6)
     return True
 
 
@@ -395,7 +393,6 @@ def plot_figure4(data: dict) -> Path:
     ax_C.plot(time_h, data["t_abs"],   **_FIG4_STYLE["absorber"])
     ax_C.plot(time_h, data["t_glass"], **_FIG4_STYLE["glass"])
     ax_C.plot(time_h, data["t_cond"],  **_FIG4_STYLE["condenser"])
-    ax_C.plot(time_h, data["t_amb"],   **_FIG4_STYLE["ambient"])
 
     ref_C = False
     ref_C |= _overlay_ref(
@@ -462,7 +459,7 @@ def plot_figure4(data: dict) -> Path:
         "Wilson et al. (2025) Figure 4 — Atacama Desert field test (May 2024)\n"
         rf"Our yield = {yield_val:.3f} L/m² (Wilson model {band_mid:.2f}, measured 0.62 L/m²),"
         rf"  $\eta_{{\mathrm{{th}}}}$ = {eta_pct:.1f}% (measured 9.3%);"
-        r"  open circles = digitized paper data",
+        r"  dashed = digitized paper data",
         fontsize=scaled_fontsize("axes.labelsize", 0.7), y=1.02,
     )
     fig.tight_layout()

@@ -2,15 +2,15 @@ function wilson_figure2()
 %WILSON_FIGURE2  Wilson et al. (2025) Fig. 2 panels B–F.
 %
 %   Requires sweep model CSVs from Python:
-%     python wilson-et-al._re-creation/scripts/figure2_generate.py
-%     python scripts/export_recreation_matlab_data.py --figures wilson2
+%     python wilson/scripts/figure2_generate.py
+%     python analysis/performance/physics/paper_recreation/export_matlab_data.py --figures wilson2
 
 setup_recreation();
 paths = recreation_paths();
 modelDir = fullfile(paths.wilsonMatlab, 'figure2');
 refDir = fullfile(paths.wilsonRef, 'figure2');
 assert(isfolder(modelDir), ...
-    'Missing model data. Run figure2_generate.py then export_recreation_matlab_data.py --figures wilson2');
+    'Missing model data. Run figure2_generate.py then export_matlab_data.py --figures wilson2');
 
 outDir = fullfile(paths.wilsonDir, 'outputs', 'figure2');
 if ~isfolder(outDir)

@@ -1,0 +1,102 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage[margin=1in]{geometry}
+\usepackage{hyperref}
+
+\title{Methodology for Estimating Global Distributed Desalination Costs}
+\author{Paraphrased from Kocher \& Menon, \emph{Energy Environ. Sci.}, 2023, 16, 4983--4993}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section{Levelized Cost of Water for Coastal Desalination}
+
+The baseline cost of producing freshwater via seawater reverse osmosis (RO) at
+the coast is taken as approximately \$1 per m$^3$. This figure is derived from
+data on operating RO plants and includes both capital expenditure (CAPEX) and
+operating expenditure (OPEX), where OPEX incorporates the levelized cost of
+electricity (LCOE) needed to drive the RO process, as well as the cost of
+disposing of the resulting brine (typically via ocean discharge).
+
+\section{Extending the Cost to Inland (Distributed) Locations}
+
+Because desalination facilities are sited at the coast but a majority of the
+global population lives inland, the analysis adds the cost of conveying the
+treated water from the nearest coastline to each inland location. The nearest
+coastal point for any given location is identified using a high-resolution
+global coastline dataset (the Global Self-Consistent Hierarchical
+High-Resolution Geography, or GSHHG, as implemented in MATLAB's mapping
+toolbox).
+
+The transport cost itself is levelized over the operating lifetime of the
+conveyance infrastructure (a mix of pipes, canals, and tunnels), combining the
+relevant capital and operating expenditures, so that it can be expressed on
+the same \$ per m$^3$ basis as the desalination cost and added directly to it.
+
+\subsection{Vertical and Horizontal Transport Costs}
+
+Transport costs are broken into a vertical component (pumping water uphill in
+elevation) and a horizontal component (moving water laterally overland),
+based on a literature review of water conveyance economics. The baseline
+(unit) costs adopted are:
+
+\begin{align}
+c_{\text{vert}} &\approx 5 \times 10^{-4}\ \$/\text{m}^3\text{ per m of vertical rise} \\
+c_{\text{horiz}} &\approx 6 \times 10^{-4}\ \$/\text{m}^3\text{ per km of horizontal distance (canal basis)}
+\end{align}
+
+The horizontal figure above corresponds to open canals. Because real-world
+conveyance often uses a mix of canals, tunnels (reported as roughly twice as
+costly as canals), and pipes (reported as roughly 3.7$\times$ the cost of
+canals), the study assumes an equal-weighted blend of the three
+transport modes. This yields an effective horizontal transport cost of
+
+\begin{equation}
+c_{\text{horiz,eff}} \approx 13.58 \times 10^{-4}\ \$/\text{m}^3\text{ per km}.
+\end{equation}
+
+This blended assumption is motivated by real infrastructure examples (e.g.,
+the Colorado River Aqueduct in the United States), which combine multiple
+conveyance types over their length.
+
+\subsection{Total Delivered Cost}
+
+For a given inland location, the total levelized cost of delivered water is
+therefore the sum of the coastal RO production cost and the levelized
+transport cost associated with the vertical and horizontal distance to the
+nearest coast:
+
+\begin{equation}
+\text{LCOW}_{\text{delivered}} = \text{LCOW}_{\text{RO}} \;+\; c_{\text{vert}} \cdot \Delta z \;+\; c_{\text{horiz,eff}} \cdot d
+\end{equation}
+
+where $\Delta z$ is the vertical elevation change (m) and $d$ is the
+horizontal distance (km) from the nearest coastline to the location of
+interest.
+
+\subsection{Sensitivity to Transport Cost Uncertainty}
+
+Because conveyance costs reported in the literature vary considerably, the
+authors also test a high-cost scenario in which both the vertical and
+horizontal unit transport costs are increased by an order of magnitude
+(i.e., $5\times10^{-3}$ \$/m$^3$ per m vertical and
+$13.58\times10^{-3}$ \$/m$^3$ per km horizontal). This scenario is used to
+identify how much more expensive transport would need to be before
+distributed atmospheric water harvesting becomes cost-competitive in
+particular regions (e.g., remote arid locations such as the Sahara).
+
+\section{Application at Global Scale}
+
+To generate global cost maps, this delivered-cost calculation is repeated for
+every cell of a gridded representation of the Earth's surface, using each
+cell's distance and elevation relative to the nearest coast. The resulting
+grid of delivered desalination costs is then compared, cell by cell, against
+the levelized cost of atmospheric water harvesting technologies to determine
+which approach is cheaper at each location, and the results are further
+weighted by population and water-risk data to assess the fraction of the
+water-stressed global population each approach could serve most
+cost-effectively.
+
+\end{document}

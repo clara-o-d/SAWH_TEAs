@@ -152,6 +152,17 @@ def test_check_hyperparameter_convergence_flags_values_pinned_at_bounds():
     assert any("k1__k2__length_scale" in w and "upper bound" in w for w in warnings)
     assert any("k2__noise_level" in w and "lower bound" in w for w in warnings)
 
+    # The advice has to differ by hyperparameter, because fit() normalizes inputs to the
+    # unit cube: a length scale at 100 there means the dimension is flat, so widening the
+    # bound to 1000 changes nothing, and a WhiteKernel at its floor is just this
+    # evaluator being deterministic. Only constant_value is a genuinely tight bound.
+    (ls,) = [w for w in warnings if "length_scale" in w]
+    (noise,) = [w for w in warnings if "noise_level" in w]
+    (const,) = [w for w in warnings if "constant_value" in w]
+    assert "looks inactive" in ls and "consider widening" not in ls
+    assert "deterministic evaluator" in noise and "consider widening" not in noise
+    assert "consider widening the bound" in const
+
 
 def test_check_hyperparameter_convergence_silent_when_well_interior():
     kernel = ConstantKernel(1.0, (0.5, 2.0)) * RBF(1.0, (0.5, 2.0)) + WhiteKernel(1e-5, (1e-8, 1e-2))

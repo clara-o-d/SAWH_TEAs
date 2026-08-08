@@ -55,7 +55,6 @@ from solar_lumped.plotting import (  # noqa: E402
     panel_size_inches,
     plot_defaults_slides,
     print_figure,
-    ref_marker_kwargs,
     scaled_fontsize,
     style_axes,
 )
@@ -177,7 +176,7 @@ def _overlay_ref(
     mask = ~(np.isnan(x) | np.isnan(y))
     if not mask.any():
         return False
-    ax.scatter(x[mask], y[mask], label=label, **ref_marker_kwargs(color=color))
+    ax.plot(x[mask], y[mask], color=color, linestyle="--", label=label, zorder=6)
     return True
 
 
@@ -211,10 +210,7 @@ def plot_panel(
             ref_shown = True
 
     handles = [
-        plt.Line2D(
-            [0], [0], color=_RH_COLORS[p], linewidth=0.0, marker="o", markersize=6,
-            markerfacecolor="white", markeredgecolor=_RH_COLORS[p], markeredgewidth=1.5,
-        )
+        plt.Line2D([0], [0], color=_RH_COLORS[p], linestyle="--")
         for p in (30, 50, 70)
     ]
     labels = [f"20–{p}–20 % RH" for p in (30, 50, 70)]
@@ -242,7 +238,7 @@ def plot_figure5(
     fig.suptitle(
         "Díaz-Marín et al. (2024) Figure 5 — absorption–desorption kinetics\n"
         r"(black = hydrogel Eq. 5 + 8 via solar_lumped.system, $g_{chamber}=0.0095$ m/s; "
-        "circles = digitized model curves)",
+        "dashed = digitized model curves)",
         fontsize=scaled_fontsize("axes.labelsize", 0.75),
         y=1.01,
     )

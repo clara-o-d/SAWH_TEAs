@@ -167,11 +167,35 @@ def check_hyperparameter_convergence(gp: GaussianProcessRegressor, *, edge_tol: 
             dist_from_lo = (v - lo) / span
             dist_from_hi = (hi - v) / span
             suffix = "" if hp.n_elements == 1 else f"[{i}]"
-            if dist_from_lo < edge_tol:
+            if dist_from_lo < edge_tol and hp.name.endswith("noise_level"):
+                # The evaluator is a deterministic ODE solve, so the WhiteKernel has no
+                # real noise to find and parking at the floor is the correct answer, not a
+                # too-tight bound. Kept as a finding (it says "the GP is interpolating
+                # exactly"), but it needs no action.
+                warnings_out.append(
+                    f"{hp.name}{suffix}: fitted value {np.exp(v):.4g} is pinned at its lower "
+                    f"bound {np.exp(lo):.4g} -- expected for a deterministic evaluator; the "
+                    "GP is interpolating its observations rather than smoothing noise."
+                )
+            elif dist_from_lo < edge_tol:
                 warnings_out.append(
                     f"{hp.name}{suffix}: fitted value {np.exp(v):.4g} is within "
                     f"{dist_from_lo * 100:.2g}% of its lower bound {np.exp(lo):.4g} -- "
                     "the optimizer likely wants to go lower; consider widening the bound."
+                )
+            # Names are the composite kernel's, so ARD length scales arrive as
+            # "k1__k2__length_scale" -- match the suffix, not the bare name.
+            elif dist_from_hi < edge_tol and hp.name.endswith("length_scale"):
+                # Inputs are unit-cube normalized (see fit), so a length scale much past
+                # ~1 already means "flat across this axis" -- 100 and 1000 are the same
+                # model. Widening the bound changes nothing; the finding is that this
+                # dimension carries no signal, from a degenerate/near-zero-span bound,
+                # a genuinely inactive design variable, or too few points to identify
+                # 13 separate length scales.
+                warnings_out.append(
+                    f"{hp.name}{suffix}: fitted value {np.exp(v):.4g} is pinned at its upper "
+                    f"bound {np.exp(hi):.4g} -- on unit-cube inputs that means design "
+                    f"dimension {i} looks inactive, not that the bound is too tight."
                 )
             elif dist_from_hi < edge_tol:
                 warnings_out.append(

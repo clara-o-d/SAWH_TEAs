@@ -3,7 +3,7 @@ function run_all_recreation_figures()
 %
 %   Workflow:
 %     1. cd to solar_lumped in a terminal
-%     2. python scripts/export_recreation_matlab_data.py   (simulation-heavy figures)
+%     2. python analysis/performance/physics/paper_recreation/export_matlab_data.py   (simulation-heavy figures)
 %     3. In MATLAB:
 %          cd('<repo>/solar_lumped/matlab/recreation')
 %          run_all_recreation_figures
@@ -18,7 +18,7 @@ if isfolder(fullfile(recreation_paths().diazMatlab, 'figure5'))
     fprintf('=== Díaz-Marín Figure 5 ===\n');
     diaz_marin_figure5();
 else
-    fprintf('Skipping Díaz-Marín Figure 5 (run export_recreation_matlab_data.py --figures diaz5)\n');
+    fprintf('Skipping Díaz-Marín Figure 5 (run export_matlab_data.py --figures diaz5)\n');
 end
 
 if isfolder(fullfile(recreation_paths().wilsonMatlab, 'figure3'))

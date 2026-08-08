@@ -3,17 +3,17 @@ function diaz_marin_figure5()
 %
 %   Requires model kinetics CSVs exported from Python first:
 %     cd solar_lumped
-%     python scripts/export_recreation_matlab_data.py --figures diaz5
+%     python analysis/performance/physics/paper_recreation/export_matlab_data.py --figures diaz5
 %
-%   Model files: diaz-marin-et-al._re-creation/outputs/matlab/figure5/<panel>_<rh>.csv
-%   Reference:   diaz-marin-et-al._re-creation/reference/figure5/
+%   Model files: diaz_marin/outputs/matlab/figure5/<panel>_<rh>.csv
+%   Reference:   diaz_marin/reference/figure5/
 
 setup_recreation();
 paths = recreation_paths();
 refDir = fullfile(paths.diazRef, 'figure5');
 modelDir = fullfile(paths.diazMatlab, 'figure5');
 assert(isfolder(modelDir), ...
-    'Missing model data. Run: python scripts/export_recreation_matlab_data.py --figures diaz5');
+    'Missing model data. Run: python analysis/performance/physics/paper_recreation/export_matlab_data.py --figures diaz5');
 
 outDir = fullfile(paths.diazDir, 'outputs', 'figure5');
 if ~isfolder(outDir)
@@ -43,7 +43,7 @@ for i = 1:size(panels, 1)
 end
 sgtitle(fig, { ...
     'Díaz-Marín et al. (2024) Figure 5 — absorption–desorption kinetics', ...
-    'black = hydrogel Eq. 5 + 8; circles = digitized data'}, 'FontSize', 11);
+    'black = hydrogel Eq. 5 + 8; dashed = digitized data'}, 'FontSize', 11);
 export_recreation_figure(fig, fullfile(outDir, 'figure5'), alpha, [2, 2]);
 pause_for_figure(fig);
 if ishandle(fig), close(fig); end
@@ -79,17 +79,16 @@ for r = 1:numel(rhList)
     plot(ax, tMin, uptake, 'k-', 'LineWidth', modelLineWidth, 'HandleVisibility', 'off');
     csvName = sprintf('%s_%d.csv', panelKey, rh);
     if ~refShown
-        overlay_ref(ax, refDir, csvName, color, refLabel, refMarkerLineWidth);
+        overlay_ref(ax, refDir, csvName, color, refLabel, refMarkerLineWidth, true);
         refShown = true;
     else
-        overlay_ref(ax, refDir, csvName, color, '', refMarkerLineWidth);
+        overlay_ref(ax, refDir, csvName, color, '', refMarkerLineWidth, true);
     end
 end
 
 hRh = gobjects(numel(rhList), 1);
 for r = 1:numel(rhList)
-    hRh(r) = plot(ax, nan, nan, 'o', 'MarkerSize', 6, ...
-        'MarkerFaceColor', 'w', 'MarkerEdgeColor', rhColors{r, 2}, ...
+    hRh(r) = plot(ax, nan, nan, '--', 'Color', rhColors{r, 2}, ...
         'LineWidth', refMarkerLineWidth, 'DisplayName', sprintf('20–%d–20 %% RH', rhList(r)));
 end
 hModel = plot(ax, nan, nan, 'k-', 'LineWidth', modelLineWidth, 'DisplayName', 'model (Eq. 5 + 8)');

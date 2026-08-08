@@ -34,7 +34,7 @@ from pathlib import Path
 _DIAG_DIR = Path(__file__).resolve().parent
 if str(_DIAG_DIR) not in sys.path:
     sys.path.insert(0, str(_DIAG_DIR))
-_SRC = _DIAG_DIR.parent.parent / "src"
+_SRC = _DIAG_DIR.parents[3] / "sawh_bayesopt" / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 

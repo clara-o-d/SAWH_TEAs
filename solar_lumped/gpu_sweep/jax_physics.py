@@ -11,6 +11,9 @@ import jax
 import jax.numpy as jnp
 
 from solar_lumped._parameters_xlsx import physics_value as _pv
+# Same m_des clamp the CPU path brackets its bisection with, so the joint Newton solve
+# below can't wander outside the range solve_m_des_and_thermal would have searched.
+from solar_lumped.simulation import _M_DES_BRACKET_MAX
 
 jax.config.update("jax_enable_x64", True)
 

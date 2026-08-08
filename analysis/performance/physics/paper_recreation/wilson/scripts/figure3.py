@@ -290,7 +290,6 @@ def run_simulation(
 _COL_ABS = "#8b2000"      # dark brick red — absorber
 _COL_GLASS = "#b06000"    # brown/orange — glass
 _COL_COND = "#007090"     # teal/cyan — condenser
-_COL_AMB = "#2040b0"      # blue — ambient reference
 
 
 def _fill(ax, t, lo, hi, color):
@@ -336,6 +335,7 @@ def _overlay_ref(
     color: str,
     label: str | None = None,
     y_scale: float = 1.0,
+    dashed: bool = False,
 ) -> bool:
     loaded = _load_ref_csv(filename)
     if loaded is None:
@@ -344,7 +344,11 @@ def _overlay_ref(
     mask = ~(np.isnan(x) | np.isnan(y))
     if not mask.any():
         return False
-    ax.scatter(x[mask], y[mask] * y_scale, label=label, **ref_marker_kwargs(color=color))
+    if dashed:
+        ax.plot(x[mask], y[mask] * y_scale, color=color, linestyle="--",
+                label=label, zorder=6)
+    else:
+        ax.scatter(x[mask], y[mask] * y_scale, label=label, **ref_marker_kwargs(color=color))
     return True
 
 
@@ -364,8 +368,6 @@ def _plot_temp_panel(
     res_lo: dict,
     res_mid: dict,
     res_hi: dict,
-    t_grid_hr: np.ndarray,
-    temp_grid: np.ndarray,
     *,
     panel_title: str | None = None,
     legend_fontsize: float | None = None,
@@ -384,16 +386,13 @@ def _plot_temp_panel(
     _fill(ax, t, band_lo("t_glass"), band_hi("t_glass"), _COL_GLASS)
     ax.plot(t, res_mid["t_cond"], color=_COL_COND, label="condenser (model)")
     _fill(ax, t, band_lo("t_cond"), band_hi("t_cond"), _COL_COND)
-    ax.plot(t_grid_hr, temp_grid, color=_COL_AMB, linestyle="--",
-            label="ambient (measured)")
-
     ref = False
     ref |= _overlay_ref(
-        ax, "Cambridge_absorber.csv", color=_COL_ABS,
+        ax, "Cambridge_absorber.csv", color=_COL_ABS, dashed=True,
         label=_REF_LABEL if not ref else None,
     )
-    ref |= _overlay_ref(ax, "Cambridge_glass.csv", color=_COL_GLASS)
-    ref |= _overlay_ref(ax, "Cambridge_condenser.csv", color=_COL_COND)
+    ref |= _overlay_ref(ax, "Cambridge_glass.csv", color=_COL_GLASS, dashed=True)
+    ref |= _overlay_ref(ax, "Cambridge_condenser.csv", color=_COL_COND, dashed=True)
 
     _style_temp_axes(ax, legend_fontsize=legend_fontsize)
     if panel_title is not None:
@@ -412,7 +411,7 @@ def plot_figure3b(
     t = res_mid["time_hr"]
 
     _plot_temp_panel(
-        ax_B, res_lo, res_mid, res_hi, t_grid_hr, temp_grid, panel_title="B",
+        ax_B, res_lo, res_mid, res_hi, panel_title="B",
     )
 
     # ---- Panel C: cumulative water output ----
@@ -437,7 +436,8 @@ def plot_figure3b(
 
     fig.suptitle(
         "Wilson et al. (2025) Figure 3 — Cambridge field test\n"
-        r"(model lines; open circles = digitized paper data; band = $h_{amb}=10\pm2.5$ W/m²K)",
+        r"(solid = model; dashed line / open circles = digitized paper data;"
+        r" band = $h_{amb}=10\pm2.5$ W/m²K)",
         fontsize=scaled_fontsize("axes.labelsize", 0.75), y=1.02,
     )
     fig.tight_layout()
@@ -448,7 +448,7 @@ def plot_figure3b(
     print(f"Saved → {out_path}")
 
     fig_b, ax_b = plt.subplots(figsize=panel_size_inches())
-    _plot_temp_panel(ax_b, res_lo, res_mid, res_hi, t_grid_hr, temp_grid,
+    _plot_temp_panel(ax_b, res_lo, res_mid, res_hi,
                      legend_fontsize=scaled_fontsize("legend.fontsize", 0.85))
     out_b = _OUT_DIR / "figure3b.png"
     print_figure(fig_b, out_b)
