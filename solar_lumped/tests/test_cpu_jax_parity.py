@@ -43,7 +43,10 @@ def _jax_daily_yield(config: SystemConfig, profile, *, complex_mode: bool) -> fl
 
     system = jdc.build_system_arrays([config], complex_mode=complex_mode)
     dt, n_abs, n_des = jdc.year_padding([[profile]])
-    step = jdc.make_year_step_fn(system, dt, n_abs, n_des, complex_mode=complex_mode)
+    step = jdc.make_year_step_fn(
+        system, dt, n_abs, n_des, complex_mode=complex_mode,
+        condenser_tracks_ambient=config.condenser_tracks_ambient,
+    )
     weather = jdc.build_day_weather([profile], n_abs, n_des)
     water, _eta, _c_w, _h = step(
         np.array([initial_loading(config)]),
@@ -82,6 +85,24 @@ def test_simple_mode_backends_agree() -> None:
     cpu, _eta, _a, _d = run_daily_cycle(profile, config)
     jax_yield = _jax_daily_yield(config, profile, complex_mode=False)
     assert jax_yield == pytest.approx(cpu, rel=SIMPLE_PARITY_TOL)
+
+
+def test_condenser_ambient_mode_backends_agree() -> None:
+    """T_cond == T_amb must change the answer identically on both backends, not just
+    parse without error on one of them."""
+    profile = baseline_profile()
+    ode_config = SystemConfig.baseline()
+    ambient_config = SystemConfig.baseline(condenser_tracks_ambient=True)
+
+    cpu_ode, _eta, _a, ode_des = run_daily_cycle(profile, ode_config)
+    cpu_ambient, _eta, _a, ambient_des = run_daily_cycle(profile, ambient_config)
+    assert cpu_ambient != pytest.approx(cpu_ode, rel=SIMPLE_PARITY_TOL)
+    # baseline_profile() holds ambient temperature constant, so pinning is verifiable
+    # without re-deriving the ODE's time-to-index mapping.
+    assert np.all(ambient_des.t_cond_c == profile.desorption.temperature_c[0])
+
+    jax_ambient = _jax_daily_yield(ambient_config, profile, complex_mode=False)
+    assert jax_ambient == pytest.approx(cpu_ambient, rel=SIMPLE_PARITY_TOL)
 
 
 @pytest.mark.parametrize("name", sorted(COMPLEX_CASES))

@@ -29,10 +29,8 @@ from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
 _SRC = _REPO / "src"
-_SCRIPTS = _REPO / "scripts"
-for p in (_SRC, _SCRIPTS):
-    if str(p) not in sys.path:
-        sys.path.insert(0, str(p))
+if str(_SRC) not in sys.path:
+    sys.path.insert(0, str(_SRC))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 import numpy as np  # noqa: E402
@@ -76,6 +74,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--evacuated-gap", action="store_true", help="B2 evacuated glazing gap.")
     p.add_argument("--condenser-air-speed", type=float, default=0.0,
                    help="B4 forced condenser air speed (m/s); 0 is passive.")
+    p.add_argument(
+        "--condenser-ambient", action="store_true",
+        help="Pin T_cond == T_amb instead of solving Eq. 2's condenser ODE -- the "
+        "infinite-cooling-capacity limit, not a physical design.",
+    )
     p.add_argument("--blend-weights", type=float, nargs=3, default=None,
                    metavar=("LICL", "CACL2", "MGCL2"),
                    help="B8 ZSR molality weights, renormalized (default: pure LiCl).")
@@ -181,13 +184,18 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, client: WeatherCl
     ]
     if args.complex:
         configs = [dataclasses.replace(cfg, complex=_complex_options(args)) for cfg in configs]
+    if args.condenser_ambient:
+        configs = [dataclasses.replace(cfg, condenser_tracks_ambient=True) for cfg in configs]
 
     # Batch axis is the combo list; every combo walks the same year in lockstep, one
     # vmapped step per day, so days stay sequential and combos run in parallel.
     t0 = time.perf_counter()
     dt, n_abs_max, n_des_max = year_padding([days])
     system = build_system_arrays(configs, complex_mode=args.complex)
-    step_fn = make_year_step_fn(system, dt, n_abs_max, n_des_max, complex_mode=args.complex)
+    step_fn = make_year_step_fn(
+        system, dt, n_abs_max, n_des_max, complex_mode=args.complex,
+        condenser_tracks_ambient=args.condenser_ambient,
+    )
     day_weathers = [build_day_weather([d] * len(configs), n_abs_max, n_des_max) for d in days]
 
     mean_yield, mean_eta = run_year_batched(
@@ -212,6 +220,7 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, client: WeatherCl
                 "fin_area_ratio": combo.fin_area_ratio,
                 "vapor_gap_mm": combo.vapor_gap_mm,
                 "warmup_method": "aitken-gpu-fixed-round", "resolution": "annual",
+                "condenser_mode": "ambient" if args.condenser_ambient else "ode",
                 "mean_yield_kg_m2": f"{mean_yield[ci]:.6f}", "mean_eta_thermal": f"{mean_eta[ci]:.6f}",
                 "n_periods": len(days),
                 # Complex settings are recorded per row, not just in the invocation:

@@ -11,15 +11,10 @@ directly.
 Code: [`jax_physics.py`](jax_physics.py) (RHS port, both phases),
 [`jax_daily_cycle.py`](jax_daily_cycle.py) (daily-cycle integrator, Aitken loop,
 and the batched/padded/masked cross-length versions of both),
-[`validate_rhs.py`](validate_rhs.py) (pointwise RHS cross-check, both phases),
-[`validate_desorption_integration_tsit5.py`](validate_desorption_integration_tsit5.py)
+[`validate_rhs.py`](../../analysis/performance/optimization/validators/validate_rhs.py)
+(pointwise RHS cross-check, both phases),
+[`validate_desorption_integration_tsit5.py`](../../analysis/performance/optimization/validators/validate_desorption_integration_tsit5.py)
 (single-phase integration + yield comparison),
-[`validate_single_day_pipeline.py`](validate_single_day_pipeline.py) (full monthly +
-Aitken pipeline vs. CPU and vs. the paper's reference values),
-[`validate_batched_pipeline.py`](validate_batched_pipeline.py) (cross-length
-batching + fixed-round-count Aitken vs. the serial pipeline),
-[`benchmark_gpu_batch_size.py`](benchmark_gpu_batch_size.py) (batch-size scaling
-scan -- written for, but not yet run on, real GPU hardware),
 [`run_gpu_sweep.py`](run_gpu_sweep.py) (the actual GPU-driven sweep -- mirrors
 `scripts/grid_param_sweep.py`'s CLI/weather/combo-grid/CSV-schema, batches one
 site's full combo x month grid per compiled call; validated locally against real
@@ -28,6 +23,26 @@ you're new to
 JAX/GPU work generally, see [`GPU_PRIMER.md`](GPU_PRIMER.md) first; to actually
 run any of this on Sherlock's `serc` A100s, see
 [`SHERLOCK_GPU_RUNBOOK.md`](SHERLOCK_GPU_RUNBOOK.md).
+
+> **Changed since this was written.** The serial and first-generation batched
+> prototypes -- `make_daily_cycle_fn`, `find_cyclic_state_jax`,
+> `build_batch_arrays`, `make_batched_daily_cycle_fn` -- have been **deleted**,
+> along with the two parity validators that were their only callers
+> (`validate_single_day_pipeline.py`, `validate_batched_pipeline.py`). The last
+> two functions had been unrunnable (`NameError` on an undefined `complex_mode`)
+> and the scripts had broken imports, so none of it had run since the Aug 2026
+> reorg. The findings below still describe the real history.
+>
+> The surviving equivalents are `_make_single` / `make_year_step_fn`
+> (per-instance + compiled year step), `build_system_arrays` / `build_day_weather`
+> (padding and per-instance parameters), and `find_cyclic_state_batched` (Aitken).
+> CPU-vs-JAX parity is now covered by
+> [`tests/test_cpu_jax_parity.py`](../tests/test_cpu_jax_parity.py).
+>
+> `benchmark_gpu_batch_size.py` (next step 3 below) was **kept and rewritten** on
+> that surviving API -- it measures GPU capacity/throughput, which the parity test
+> does not, so it is still the tool for the open max-batch-size question. It now
+> runs for the first time (verified on CPU at small sizes).
 
 ## What was ported
 

@@ -496,16 +496,20 @@ def desorption_rhs(
     h_amb_cond=None,
     fin_thickness_m=None,
     fin_height_m=None,
+    condenser_tracks_ambient=False,
 ):
     """dy/dt for y = [c_w, H, T_cond]: the 3-state quasi_steady desorption ODE, matching
     evaluate_coupled_rates's desorption branch exactly (Eqs. 1-6 + Eq. 2).
 
     Complex mode adds B4's ``h_amb_cond`` (forced condenser air, decoupled from the
     absorber's ambient convection) and B3's fin geometry; both default to None,
-    which is Wilson's shared h_amb and ideal fin."""
+    which is Wilson's shared h_amb and ideal fin. ``condenser_tracks_ambient``
+    (static) is the idealized limit of infinite condenser cooling capacity: T_cond
+    is pinned to T_amb every step instead of evolving via Eq. 2, and y[2]'s
+    derivative is zeroed since that state is no longer read."""
     c_w, h_m_raw, t_cond = y[0], y[1], y[2]
     h_m = jnp.clip(h_m_raw, h0_ref_m, None)
-    t_cond_c = clamp_temperature_c(t_cond)
+    t_cond_c = t_amb_c if condenser_tracks_ambient else clamp_temperature_c(t_cond)
     gap_eff_m = jnp.clip(thermal.vapor_gap_m - h_m, 0.0, None)
     q_sol = jnp.clip(q_solar_w_m2, 0.0, None)
 
@@ -530,6 +534,10 @@ def desorption_rhs(
 
     dh_masked = jnp.where(h_m > h0_ref_m + 1e-12, dh, 0.0)
     dc_masked = jnp.minimum(dc, 0.0)
+    if condenser_tracks_ambient:
+        # Static flag, so this is a plain branch, not a traced select. y[2] stays in
+        # the state vector (jit/vmap need a fixed shape) but is frozen and unread.
+        dT_cond = jnp.zeros_like(dT_cond)
 
     return jnp.array([dc_masked, dh_masked, dT_cond]), (t_gel, t_abs, t_glass, m_des)
 

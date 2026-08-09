@@ -18,8 +18,6 @@ if TYPE_CHECKING:
 
 STEFAN_BOLTZMANN_W_M2_K4: float = 5.670374419e-8
 K_AIR_W_M_K: float = 0.0286
-MOLAR_MASS_WATER_KG_MOL: float = 0.018015
-R_UNIVERSAL_J_MOL_K: float = 8.314462618
 
 
 def parallel_plate_emissivity(eps_a: float, eps_b: float) -> float:
@@ -99,7 +97,6 @@ C_VAC_MIN_KG_S_PA_M2: float = 1.0e-10
 C_VAC_MAX_KG_S_PA_M2: float = 5.0e-6
 
 # Condenser (finned aluminum, Wilson-style)
-CONDENSER_GAP_M: float = VACUUM_GAP_M
 FIN_AREA_RATIO: float = 7.1
 CONDENSER_THICKNESS_M: float = 0.125 * 0.0254
 CONDENSER_RHO_KG_M3: float = 2700.0
@@ -134,7 +131,6 @@ TILT_DEG: float = 30.0
 HYDROGEL_MAX_DEPLETION_S: float = 600.0
 C_W_MIN_HYDROGEL: float = 100.0
 
-Q_MAX_KG_KG: float = 0.53  # MIL-100(Fe) tabulated maximum @ ~99 % RH
 WATER_MOLAR_MASS_KG_MOL: float = 0.018015
 GAS_CONSTANT_J_MOL_K: float = 8.314462618
 C_W_MAX_MOL_M3: float = 400000.0

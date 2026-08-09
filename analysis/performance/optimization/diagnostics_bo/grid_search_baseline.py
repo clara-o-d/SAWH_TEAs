@@ -5,7 +5,7 @@ hypercube corners -- close to a real BayesOpt evaluation budget, so neither side
 or given extra budget.
 
 Usage:
-    python3 scripts/diagnostics/grid_search_baseline.py \\
+    python3 ../analysis/performance/optimization/diagnostics_bo/grid_search_baseline.py \\
         --bayesopt-run-dir outputs/runs/<run_id> --run-id grid_baseline
 """
 

@@ -49,7 +49,7 @@ def propose_next(
     """Raw (denormalized) design vector maximizing constrained EI over the unit cube.
     ``record`` collects one success/nit/maxiter/-EI dict per DE call: an unconverged DE run
     is only an approximate EI maximizer, so apparent under-exploration may be the optimizer,
-    not the landscape (surfaced by scripts/diagnostics/gp_diagnostics.py).
+    not the landscape (surfaced by ../analysis/performance/optimization/diagnostics_bo/gp_diagnostics.py).
 
     The maxiter/popsize/tol of 1000/40/1e-6 replaced 200/20/1e-8 after hp_sweep_1 showed
     33-67% of DE calls hitting maxiter regardless of ei_xi -- tol=1e-8 demanded 10,000x

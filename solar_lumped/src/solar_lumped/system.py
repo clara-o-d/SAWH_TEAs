@@ -109,7 +109,8 @@ def build_system_config(
     fin_area_ratio: float = 7.1,
     g_conv_m_s: float | None = None,
 ) -> SystemConfig:
-    """Construct a ``SystemConfig`` (shared by CLI and chamber-kinetics callers).
+    """Construct a ``SystemConfig`` (shared by this CLI's ``_build_config`` and
+    ``analysis/performance/physics/run_annual.py``).
 
     Sorption/brine state uses ``SystemConfig``'s default dry-basis composite density
     (DVS isotherm); gel thermal mass in the ODE uses ``RHO_COMPOSITE_KG_M3``.

@@ -8,7 +8,7 @@ MSLL vs. a mean/std baseline, final kernel hyperparameters) and gp_slices.png (1
 mean ±95% CI through the incumbent, one subplot per variable, evaluated points overlaid).
 
 Usage:
-    python3 scripts/diagnostics/gp_diagnostics.py --run-dir outputs/runs/<run_id>
+    python3 ../analysis/performance/optimization/diagnostics_bo/gp_diagnostics.py --run-dir outputs/runs/<run_id>
 """
 
 from __future__ import annotations

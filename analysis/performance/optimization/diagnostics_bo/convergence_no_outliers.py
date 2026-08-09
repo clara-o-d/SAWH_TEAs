@@ -13,7 +13,7 @@ own <site>_feasible columns, not a statistical outlier heuristic, since we
 know exactly why these points are extreme) before plotting.
 
 Usage:
-    python3 scripts/diagnostics/convergence_no_outliers.py --run-dir outputs/runs/<run_id>
+    python3 ../analysis/performance/optimization/diagnostics_bo/convergence_no_outliers.py --run-dir outputs/runs/<run_id>
 """
 
 from __future__ import annotations

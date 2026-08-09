@@ -133,6 +133,8 @@ _CSV_COLUMNS: tuple[str, ...] = (
     "cx_evacuated_gap",
     "cx_condenser_air_speed_m_s",
     "cx_blend_weights",
+    # "ode" (default, Eq. 2) or "ambient" (T_cond == T_amb, infinite-cooling limit).
+    "condenser_mode",
 )
 
 

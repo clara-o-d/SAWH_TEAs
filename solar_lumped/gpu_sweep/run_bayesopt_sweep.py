@@ -24,11 +24,10 @@ from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
 _SRC = _REPO / "src"
-_SCRIPTS = _REPO / "scripts"
 _BAYESOPT_REPO = _REPO.parent / "sawh_bayesopt"
 _BAYESOPT_SRC = _BAYESOPT_REPO / "src"
 _BAYESOPT_DIAG = _REPO.parent / "analysis" / "performance" / "optimization" / "diagnostics_bo"
-for p in (_SRC, _SCRIPTS, _BAYESOPT_SRC, _BAYESOPT_DIAG):
+for p in (_SRC, _BAYESOPT_SRC, _BAYESOPT_DIAG):
     if str(p) not in sys.path:
         sys.path.insert(0, str(p))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -73,6 +72,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--insulation-gap-mm", type=float, default=5.0, help="insulation_gap_m, held fixed.")
     p.add_argument("--tilt-deg", type=float, default=gps.TILT_DEG, help="tilt_deg, held fixed.")
     p.add_argument("--case", choices=tuple(CASE_EPS_IR), default="case2")
+    p.add_argument(
+        "--condenser-ambient", action="store_true",
+        help="Pin T_cond == T_amb instead of solving the condenser ODE -- the "
+        "infinite-cooling-capacity limit, not a physical design.",
+    )
     p.add_argument(
         "--complex", action="store_true",
         help="Optimize the 13-dim complex-fidelity space (A1/B1/B2/B3/B4/B8) instead of 3 "
@@ -198,6 +202,7 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, bounds: DesignBou
         stall_rounds=args.stall_rounds,
         weather_cache_dir=args.cache_dir,
         case=args.case,
+        condenser_tracks_ambient=args.condenser_ambient,
         de_maxiter=args.de_maxiter,
         de_popsize=args.de_popsize,
     )
@@ -229,6 +234,7 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, bounds: DesignBou
         "salt": args.salt,
         "salt_loading": best_by_name["salt_to_polymer_ratio"],
         "case": args.case,
+        "condenser_mode": "ambient" if args.condenser_ambient else "ode",
         "warmup_method": "aitken-gpu-fixed-round", "resolution": "annual",
         "best_combined_lcow_usd_m3": f"{best.combined_lcow:.6f}",
         "n_evals": len(result.history),

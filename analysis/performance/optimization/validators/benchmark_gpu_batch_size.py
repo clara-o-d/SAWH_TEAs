@@ -10,7 +10,9 @@ handful of system configs up to each target batch size (repetition is fine for
 a throughput/memory test -- it doesn't need to be 189,675 *distinct* physical
 setups, just the same shapes and arithmetic intensity as the real grid).
 
-Usage: python3 gpu_sweep/benchmark_gpu_batch_size.py [--sizes 12 120 1200 12000 60000]
+Usage:
+    python3 analysis/performance/optimization/validators/benchmark_gpu_batch_size.py \
+        [--sizes 12 120 1200 12000 60000]
 """
 
 from __future__ import annotations
@@ -21,11 +23,14 @@ import sys
 import time
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
+# This benchmark lives under analysis/ but drives solar_lumped's JAX modules, so both
+# paths anchor to solar_lumped/ rather than to this file's parent --
+# .../SAWH_TEAs/analysis/performance/optimization/validators -> SAWH_TEAs.
+_REPO = Path(__file__).resolve().parents[4] / "solar_lumped"
 _SRC = _REPO / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(_REPO / "gpu_sweep"))
 
 import jax  # noqa: E402
 import numpy as np  # noqa: E402
@@ -36,7 +41,13 @@ from solar_lumped.simulation import SystemConfig  # noqa: E402
 from solar_lumped.weather import WeatherClient  # noqa: E402
 from solar_lumped.weather import real_weather_days_from_df  # noqa: E402
 
-from jax_daily_cycle import build_batch_arrays, find_cyclic_state_batched, make_batched_daily_cycle_fn  # noqa: E402
+from jax_daily_cycle import (  # noqa: E402
+    build_day_weather,
+    build_system_arrays,
+    find_cyclic_state_batched,
+    make_year_step_fn,
+    year_padding,
+)
 
 
 def _gpu_memory_used_mb() -> str:
@@ -100,8 +111,17 @@ def main() -> int:
         profiles, configs = build_tiled_batch(size, base_profiles, base_configs)
         try:
             t0 = time.perf_counter()
-            batch, dt, n_abs_max, n_des_max = build_batch_arrays(profiles, configs)
-            batched_fn = make_batched_daily_cycle_fn(batch, dt, n_abs_max, n_des_max)
+            # make_year_step_fn takes weather as a runtime argument (one compiled step
+            # reused for all 365 days). This scan measures one fixed day's batch, so the
+            # weather is bound once here and the closure gives find_cyclic_state_batched
+            # the (c_w, h) -> ... signature it expects.
+            dt, n_abs_max, n_des_max = year_padding([[p] for p in profiles])
+            system = build_system_arrays(configs)
+            step_fn = make_year_step_fn(system, dt, n_abs_max, n_des_max)
+            weather = build_day_weather(profiles, n_abs_max, n_des_max)
+
+            def batched_fn(cw, h, _step=step_fn, _weather=weather):
+                return _step(cw, h, _weather)
 
             cw0_arr = np.array([initial_loading(c) for c in configs])
             h0_arr = np.array([c.hydrogel_thickness_m for c in configs])

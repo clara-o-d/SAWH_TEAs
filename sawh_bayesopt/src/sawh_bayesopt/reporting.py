@@ -24,7 +24,7 @@ _SOLAR_LUMPED_SWEEP_DIR = _SAWH_TEAS_ROOT / "solar_lumped" / "outputs" / "parame
 
 def write_run_config(cfg: BayesOptConfig, path: str | Path) -> None:
     """Dump the BayesOptConfig actually used for a run to disk, so a later
-    diagnostics pass (scripts/diagnostics/) doesn't have to have the caller
+    diagnostics pass (../analysis/performance/optimization/diagnostics_bo/) doesn't have to have the caller
     re-type n_init/batch_size/seed/bounds from memory to replay a run's
     history in the same order it was originally evaluated."""
     path = Path(path)
@@ -48,7 +48,7 @@ def write_run_config(cfg: BayesOptConfig, path: str | Path) -> None:
 def write_de_diagnostics(de_diagnostics: list[dict], path: str | Path) -> None:
     """Dump every EI-proposal round's differential_evolution result summary
     (success/nit/maxiter -- see acquisition.propose_next's `record` param) so
-    scripts/diagnostics/gp_diagnostics.py can flag rounds where DE hit
+    ../analysis/performance/optimization/diagnostics_bo/gp_diagnostics.py can flag rounds where DE hit
     maxiter without its own convergence tolerance being satisfied, separately
     from the LCOW-GP calibration checks it already does."""
     path = Path(path)

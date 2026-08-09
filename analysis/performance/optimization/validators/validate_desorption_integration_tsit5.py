@@ -12,11 +12,14 @@ import time
 from datetime import date
 from pathlib import Path
 
-_REPO = Path(__file__).resolve().parent.parent
+# This validator lives under analysis/ but drives solar_lumped's own CPU and JAX
+# modules, so both paths are anchored to solar_lumped/ rather than to this file's
+# parent -- .../SAWH_TEAs/analysis/performance/optimization/validators -> SAWH_TEAs.
+_REPO = Path(__file__).resolve().parents[4] / "solar_lumped"
 _SRC = _REPO / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
-sys.path.insert(0, str(Path(__file__).resolve().parent))
+sys.path.insert(0, str(_REPO / "gpu_sweep"))
 
 import diffrax  # noqa: E402
 import jax  # noqa: E402

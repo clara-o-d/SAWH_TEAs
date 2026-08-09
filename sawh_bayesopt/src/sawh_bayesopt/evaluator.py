@@ -202,6 +202,7 @@ def _run_jax_year(
     *,
     initial_loading,
     complex_mode: bool = False,
+    condenser_tracks_ambient: bool = False,
 ) -> tuple[dict[tuple[int, int], float], dict[tuple[int, int], float], str | None]:
     """Run a full 365-day year for every (design, site) instance and reduce to mean daily
     yield/eta per pair. Returns (yield, eta, error); on a raised jax/diffrax call, error is
@@ -218,7 +219,8 @@ def _run_jax_year(
         dt, n_abs_max, n_des_max = jdc.year_padding(instance_profiles)
         system = jdc.build_system_arrays(instance_configs, complex_mode=complex_mode)
         step_fn = jdc.make_year_step_fn(
-            system, dt, n_abs_max, n_des_max, complex_mode=complex_mode
+            system, dt, n_abs_max, n_des_max, complex_mode=complex_mode,
+            condenser_tracks_ambient=condenser_tracks_ambient,
         )
 
         # Instances can disagree on year length (leap years, gaps in the weather record);
@@ -281,6 +283,7 @@ def evaluate_for_config(xs, *, cfg, cache, econ, site_profiles=None, site_frames
         combine_rule=cfg.combine_rule,
         case=cfg.case,
         complex_mode=cfg.complex_mode,
+        condenser_tracks_ambient=cfg.condenser_tracks_ambient,
         site_frames=site_frames,
         backend=cfg.backend,
     )
@@ -316,8 +319,11 @@ def _run_cpu_year(
     *,
     initial_loading,
     complex_mode: bool = False,
+    condenser_tracks_ambient: bool = False,
 ) -> tuple[dict[tuple[int, int], float], dict[tuple[int, int], float], str | None]:
-    """CPU equivalent of :func:`_run_jax_year`.
+    """CPU equivalent of :func:`_run_jax_year`. ``condenser_tracks_ambient`` is unused here
+    (already baked into each ``instance_configs`` entry) -- kept for signature parity with
+    :func:`_run_jax_year`, which needs it explicitly to build the JAX vector field.
 
     The JAX fast path is LiCl-hardcoded (``water_activity_licl_from_c_w``,
     ``_XI_MAX_LICL``) and knows nothing about glazing stacks or ZSR blends, so
@@ -363,6 +369,7 @@ def evaluate_batch(
     combine_rule: CombineRule = "mean",
     case: str = "case2",
     complex_mode: bool = False,
+    condenser_tracks_ambient: bool = False,
     site_frames: dict[str, object] | None = None,
     backend: Backend = "jax",
 ) -> list[DesignEvalResult]:
@@ -377,6 +384,8 @@ def evaluate_batch(
     # Complex results are not interchangeable with simple ones at the same design
     # vector, so the mode joins the cache key rather than silently colliding.
     key_case = f"{case}+complex" if complex_mode else case
+    if condenser_tracks_ambient:
+        key_case = f"{key_case}+ambient_cond"
     if backend != "jax":
         key_case = f"{key_case}+{backend}"
     keys = [design_vector_hash(x, sites=site_names, case=key_case) for x in xs]
@@ -394,7 +403,10 @@ def evaluate_batch(
 
     configs = {
         i: SystemConfig(
-            **design_space.to_system_config_kwargs(xs[i], case=case, complex_mode=complex_mode)
+            **design_space.to_system_config_kwargs(
+                xs[i], case=case, complex_mode=complex_mode,
+                condenser_tracks_ambient=condenser_tracks_ambient,
+            )
         )
         for i in to_run
     }
@@ -427,6 +439,7 @@ def evaluate_batch(
     yield_by_pair, eta_by_pair, batch_error = run_year(
         instance_profiles, instance_configs, owner,
         initial_loading=initial_loading, complex_mode=complex_mode,
+        condenser_tracks_ambient=condenser_tracks_ambient,
     )
     wall = time.perf_counter() - t0
 

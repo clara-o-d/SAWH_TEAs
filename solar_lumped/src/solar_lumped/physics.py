@@ -375,9 +375,6 @@ C_W_MAX_MOL_M3: float = _pv("Gel water concentration upper bound (c_w,max)")
 C_W_MIN_MOL_M3: float = _pv("Gel water concentration lower bound (c_w,min)")
 
 
-CANDIDATE_SALTS: tuple[str, ...] = ("LiCl", "NaCl", "CaCl2", "MgCl2")
-
-
 @dataclass(frozen=True, slots=True)
 class SaltProperties:
     name: str

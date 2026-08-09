@@ -15,7 +15,7 @@ matches or beats it, something about the surrogate/acquisition loop isn't
 adding value.
 
 Usage:
-    python3 scripts/diagnostics/baseline_random_search.py \\
+    python3 ../analysis/performance/optimization/diagnostics_bo/baseline_random_search.py \\
         --bayesopt-run-dir outputs/runs/<run_id> --run-id random_baseline
 """
 

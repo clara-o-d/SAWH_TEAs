@@ -26,7 +26,7 @@ Produces, in <run-dir>/diagnostics/:
           close to incumbent" (exploitation).
 
 Usage:
-    python3 scripts/diagnostics/loop_diagnostics.py --run-dir outputs/runs/<run_id>
+    python3 ../analysis/performance/optimization/diagnostics_bo/loop_diagnostics.py --run-dir outputs/runs/<run_id>
 """
 
 from __future__ import annotations

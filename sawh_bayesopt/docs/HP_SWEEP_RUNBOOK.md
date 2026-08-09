@@ -13,7 +13,7 @@ than staying fixed) to tell those two explanations apart.
 
 Before this sweep can run at all, two things needed fixing/adding, already
 done on this branch:
-- `scripts/diagnostics/gp_diagnostics.py` now also reports, per run, whether
+- `../analysis/performance/optimization/diagnostics_bo/gp_diagnostics.py` now also reports, per run, whether
   `acquisition.py`'s inner `differential_evolution` EI-maximization calls
   actually converged (`result.success`) or silently exhausted `maxiter`
   (`result.nit >= maxiter`) -- see its new `summarize_de_diagnostics()` and

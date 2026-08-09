@@ -53,6 +53,9 @@ class BayesOptConfig:
     # CPU ODE path. Must agree with ``bounds.complex_mode``; the JAX fast path is
     # LiCl-hardcoded and cannot represent glazing stacks or ZSR blends.
     complex_mode: bool = False
+    # False (default): solar_lumped's Eq. 2 condenser ODE. True: T_cond == T_amb, the
+    # infinite-cooling-capacity limit, in either fidelity mode.
+    condenser_tracks_ambient: bool = False
     # "jax" batches every (design, site) into one vmapped call -- the backend for
     # global sweeps. "cpu" is sequential and needs no GPU stack, which is what a
     # single-site study wants. Both support simple and complex fidelity.
@@ -124,6 +127,7 @@ def run_bayesopt(cfg: BayesOptConfig, run_dir: str | Path) -> BayesOptResult:
             combine_rule=cfg.combine_rule,
             case=cfg.case,
             complex_mode=cfg.complex_mode,
+            condenser_tracks_ambient=cfg.condenser_tracks_ambient,
             site_frames=site_frames,
             backend=cfg.backend,
         )

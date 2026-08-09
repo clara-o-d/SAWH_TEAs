@@ -3,7 +3,7 @@
 grid_search_baseline.py's output into one best-so-far convergence plot.
 
 Usage (after running both baselines against the same --bayesopt-run-dir):
-    python3 scripts/diagnostics/three_way_convergence.py \\
+    python3 ../analysis/performance/optimization/diagnostics_bo/three_way_convergence.py \\
         --bayesopt-run-dir outputs/runs/<run_id> \\
         --random-run-dir outputs/runs/random_baseline \\
         --grid-run-dir outputs/runs/grid_baseline \\

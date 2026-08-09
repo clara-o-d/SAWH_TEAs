@@ -94,6 +94,11 @@ class SystemConfig:
     # Wilson model, which is what gpu_sweep's JAX path and every existing script keep
     # doing -- see solar_lumped/complex_model.py.
     complex: ComplexOptions | None = None
+    # False (default): T_cond is a third ODE state (Eq. 2), radiatively/convectively
+    # coupled to the gel and ambient. True: the idealized limit of a condenser with
+    # infinite cooling capacity, T_cond == T_amb at every instant -- an upper bound
+    # on desorption driving force, not a physical design.
+    condenser_tracks_ambient: bool = False
 
     def desorption_surface_ic_c(self) -> tuple[float, float, float, float] | None:
         """Configured (T_gel, T_abs, T_glass, T_cond) at desorption start, if any."""
@@ -635,15 +640,17 @@ def _integrate_desorption(
             t_amb = t_cond0
             t_guess0 = (t_amb, t_amb, t_amb)
     t_guess: tuple[float, float, float] | None = t_guess0
+    ambient_condenser = config.condenser_tracks_ambient
 
     def rhs(t: float, y: np.ndarray) -> np.ndarray:
         nonlocal t_guess
         i = _profile_index(t, dt, n)
         h_m = max(float(y[1]), h_min)
+        t_cond_c = profile.temperature_c[i] if ambient_condenser else float(y[2])
         rates = evaluate_coupled_rates(
             c_w=float(y[0]),
             h_m=h_m,
-            t_cond_c=float(y[2]),
+            t_cond_c=t_cond_c,
             t_amb_c=profile.temperature_c[i],
             rh=profile.relative_humidity[i],
             q_solar_w_m2=profile.solar_w_m2[i],
@@ -667,12 +674,19 @@ def _integrate_desorption(
         dc = min(0.0, rates.dc_w_dt)
         dh = min(0.0, dh)
         t_guess = _thermal_guess(rates.thermal)
+        if ambient_condenser:
+            return np.array([dc, dh])
         return np.array([dc, dh, rates.dT_cond_dt])
 
+    y0 = (
+        np.array([c_w0, max(h0, h_min)])
+        if ambient_condenser
+        else np.array([c_w0, max(h0, h_min), t_cond0])
+    )
     sol = solve_ivp(
         rhs,
         t_span,
-        y0=np.array([c_w0, max(h0, h_min), t_cond0]),
+        y0=y0,
         method="Radau",
         t_eval=t_eval,
         max_step=dt,
@@ -690,10 +704,11 @@ def _integrate_desorption(
     guess: tuple[float, float, float] | None = t_guess0
     for k in range(len(sol.t)):
         i = _profile_index(float(sol.t[k]), dt, n)
+        t_cond_c = profile.temperature_c[i] if ambient_condenser else float(sol.y[2, k])
         rates = evaluate_coupled_rates(
             c_w=float(sol.y[0, k]),
             h_m=max(float(sol.y[1, k]), h_min),
-            t_cond_c=float(sol.y[2, k]),
+            t_cond_c=t_cond_c,
             t_amb_c=profile.temperature_c[i],
             rh=profile.relative_humidity[i],
             q_solar_w_m2=profile.solar_w_m2[i],
@@ -722,7 +737,7 @@ def _integrate_desorption(
             t_gel_hist.append(rates.t_gel_c)
             t_abs_hist.append(rates.thermal.t_abs_c)
             t_glass_hist.append(rates.thermal.t_glass_c)
-        t_cond_hist.append(float(sol.y[2, k]))
+        t_cond_hist.append(t_cond_c)
         m_des_hist.append(rates.m_des_kg_s_m2)
 
     water = float(cumulative_desorption_yield_l_m2(sol.t, m_des_hist)[-1])

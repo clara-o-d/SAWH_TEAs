@@ -19,7 +19,7 @@ This is purely a scatter-overlay filter: the GP fit and the posterior
 mean/CI line are unchanged from gp_slices_no_outliers.py.
 
 Usage:
-    python3 scripts/diagnostics/gp_slices_near_xbest.py --run-dir outputs/runs/<run_id> [--tol 0.15]
+    python3 ../analysis/performance/optimization/diagnostics_bo/gp_slices_near_xbest.py --run-dir outputs/runs/<run_id> [--tol 0.15]
 """
 
 from __future__ import annotations

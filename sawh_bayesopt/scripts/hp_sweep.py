@@ -46,7 +46,10 @@ from pathlib import Path
 
 _REPO = Path(__file__).resolve().parent.parent
 _SRC = _REPO / "src"
-_DIAG_DIR = Path(__file__).resolve().parent / "diagnostics"
+# gp_diagnostics lives under analysis/, not in this scripts/ dir -- same location
+# run_bayesopt_sweep.py resolves it from. It is imported inside _run_one_combo, so a
+# wrong path here is a per-worker ModuleNotFoundError that no test would catch.
+_DIAG_DIR = _REPO.parent / "analysis" / "performance" / "optimization" / "diagnostics_bo"
 
 
 def _parse_float_list(s: str) -> list[float]:

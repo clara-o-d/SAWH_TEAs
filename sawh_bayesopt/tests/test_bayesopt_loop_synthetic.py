@@ -24,9 +24,11 @@ def _fake_evaluate_batch(
     combine_rule="mean",
     resolution="annual",
     case="case1",
-    # Accepted and ignored: these are real-evaluator plumbing (complex fidelity and
-    # its per-design weather frames) that the synthetic bowl has no use for.
+    # Accepted and ignored: these are real-evaluator plumbing (complex fidelity, its
+    # per-design weather frames, and the condenser mode) that the synthetic bowl has
+    # no use for.
     complex_mode=False,
+    condenser_tracks_ambient=False,
     site_frames=None,
     backend="jax",
 ):
@@ -100,9 +102,11 @@ def _fake_evaluate_batch_with_infeasible_region(
     combine_rule="mean",
     resolution="annual",
     case="case1",
-    # Accepted and ignored: these are real-evaluator plumbing (complex fidelity and
-    # its per-design weather frames) that the synthetic bowl has no use for.
+    # Accepted and ignored: these are real-evaluator plumbing (complex fidelity, its
+    # per-design weather frames, and the condenser mode) that the synthetic bowl has
+    # no use for.
     complex_mode=False,
+    condenser_tracks_ambient=False,
     site_frames=None,
     backend="jax",
 ):

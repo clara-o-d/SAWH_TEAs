@@ -21,7 +21,7 @@ since seeing how badly they distort CV/residuals is itself useful signal
 the feasible-region posterior shape.
 
 Usage:
-    python3 scripts/diagnostics/gp_slices_no_outliers.py --run-dir outputs/runs/<run_id>
+    python3 ../analysis/performance/optimization/diagnostics_bo/gp_slices_no_outliers.py --run-dir outputs/runs/<run_id>
 """
 
 from __future__ import annotations

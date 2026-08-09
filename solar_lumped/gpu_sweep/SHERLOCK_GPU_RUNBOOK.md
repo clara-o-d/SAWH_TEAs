@@ -65,20 +65,22 @@ running anything else (send me exactly what it prints if this happens).
 ## 4. Re-run the existing validation scripts
 
 These should behave identically to the CPU results in `FINDINGS.md` (same
-correctness), but the timing numbers are the new, real information:
+correctness), but the timing numbers are the new, real information. The validators
+now live under `analysis/`, one level up from the `solar_lumped/` working directory
+this runbook uses:
 
 ```bash
-python3 gpu_sweep/validate_rhs.py
-python3 gpu_sweep/validate_desorption_integration_tsit5.py
-python3 gpu_sweep/validate_single_day_pipeline.py
-python3 gpu_sweep/validate_batched_pipeline.py
+python3 ../analysis/performance/optimization/validators/validate_rhs.py
+python3 ../analysis/performance/optimization/validators/validate_desorption_integration_tsit5.py
 ```
 
-`validate_single_day_pipeline.py` and `validate_batched_pipeline.py` are the slowest
-(each does a real CPU run for comparison too, ~5 minutes each on the CPU side per
-`FINDINGS.md`) -- if you're short on allocation time, `validate_batched_pipeline.py`
-alone is the most informative one (it's the cross-length batching + fixed-round
-Aitken test, i.e. the actual architecture the full sweep would use).
+Full CPU-vs-JAX daily-cycle parity (what `validate_single_day_pipeline.py` and
+`validate_batched_pipeline.py` used to cover) is now a pytest suite instead, and is
+the faster thing to run:
+
+```bash
+python3 -m pytest tests/test_cpu_jax_parity.py -q
+```
 
 ## 5. The real question: how big a batch fits, and how fast?
 
@@ -89,7 +91,7 @@ compile time, per-instance throughput, and GPU memory at each size, stopping at
 whatever size first fails (out-of-memory or otherwise):
 
 ```bash
-python3 gpu_sweep/benchmark_gpu_batch_size.py
+python3 ../analysis/performance/optimization/validators/benchmark_gpu_batch_size.py
 ```
 
 Default sizes are `12 120 1200 12000 60000 189675` (the last one is the *actual*
@@ -98,7 +100,7 @@ failure -- it tells us the real per-A100 ceiling. You can also pass custom sizes
 e.g. to binary-search around wherever it starts struggling:
 
 ```bash
-python3 gpu_sweep/benchmark_gpu_batch_size.py --sizes 20000 30000 40000
+python3 ../analysis/performance/optimization/validators/benchmark_gpu_batch_size.py --sizes 20000 30000 40000
 ```
 
 ## What to send back (steps 1-5)

@@ -163,7 +163,11 @@ def to_complex_options(x: np.ndarray):
 
 
 def to_system_config_kwargs(
-    x: np.ndarray, *, case: str = "case2", complex_mode: bool = False
+    x: np.ndarray,
+    *,
+    case: str = "case2",
+    complex_mode: bool = False,
+    condenser_tracks_ambient: bool = False,
 ) -> dict[str, Any]:
     """Map a design vector to SystemConfig field names.
 
@@ -176,12 +180,17 @@ def to_system_config_kwargs(
     stand in for), and no "thermal" kwarg is set -- SystemConfig.thermal_params()
     derives it from the ComplexOptions so B2's pane count and stack transmittance
     stay consistent with the cost model.
+
+    ``condenser_tracks_ambient`` is orthogonal to both: False (default) keeps
+    solar_lumped's Eq. 2 condenser ODE, True pins T_cond to T_amb (the infinite-
+    cooling-capacity limit) in either fidelity mode.
     """
     x = np.asarray(x, dtype=float).reshape(-1)
     names = var_order(complex_mode)
     if x.shape[0] != len(names):
         raise ValueError(f"Expected a length-{len(names)} design vector, got shape {x.shape}")
     kwargs: dict[str, Any] = dict(zip(VAR_ORDER, (float(v) for v in x[: len(VAR_ORDER)])))
+    kwargs["condenser_tracks_ambient"] = condenser_tracks_ambient
 
     if complex_mode:
         kwargs["complex"] = to_complex_options(x)

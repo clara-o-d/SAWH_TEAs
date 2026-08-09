@@ -107,7 +107,7 @@ and `gp_state.joblib` (both needed by the diagnostics scripts below).
 ## 6. GP surrogate regression diagnostics
 
 ```bash
-python3 scripts/diagnostics/gp_diagnostics.py --run-dir outputs/runs/sherlock_gpu_run_1
+python3 ../analysis/performance/optimization/diagnostics_bo/gp_diagnostics.py --run-dir outputs/runs/sherlock_gpu_run_1
 ```
 
 Writes `outputs/runs/sherlock_gpu_run_1/diagnostics/gp_regression_report.json`
@@ -129,7 +129,7 @@ and `gp_slices.png`. What "good" looks like:
 ## 7. Optimization-loop diagnostics
 
 ```bash
-python3 scripts/diagnostics/loop_diagnostics.py --run-dir outputs/runs/sherlock_gpu_run_1
+python3 ../analysis/performance/optimization/diagnostics_bo/loop_diagnostics.py --run-dir outputs/runs/sherlock_gpu_run_1
 ```
 
 Writes `loop_best_so_far.png`, `loop_hyperparameters.png`,
@@ -151,7 +151,7 @@ What "good" looks like:
 ## 8. Baseline: does it actually beat random search?
 
 ```bash
-python3 scripts/diagnostics/baseline_random_search.py \
+python3 ../analysis/performance/optimization/diagnostics_bo/baseline_random_search.py \
     --bayesopt-run-dir outputs/runs/sherlock_gpu_run_1 \
     --run-id sherlock_gpu_run_1_random --eval-batch-size 6
 ```

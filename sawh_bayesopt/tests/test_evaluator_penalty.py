@@ -26,15 +26,18 @@ class _FakeJaxDailyCycle:
             raise self._raises
         return 0.0, 1, 1
 
-    # complex_mode is accepted and ignored: these tests exercise evaluate_batch's
-    # failure handling, which is identical in both fidelities.
+    # complex_mode and condenser_tracks_ambient are accepted and ignored: these tests
+    # exercise evaluate_batch's failure handling, which is identical in every mode.
     def build_system_arrays(self, configs, *, complex_mode=False):
         return {}
 
     def build_day_weather(self, profiles, n_abs_max, n_des_max):
         return ()
 
-    def make_year_step_fn(self, system, dt, n_abs_max, n_des_max, *, complex_mode=False):
+    def make_year_step_fn(
+        self, system, dt, n_abs_max, n_des_max, *,
+        complex_mode=False, condenser_tracks_ambient=False,
+    ):
         return lambda cw, h, weather: (self._water, self._eta, cw, h)
 
     def run_year_batched(self, step_fn, day_weathers, *, c_w_initial, h_initial, aitken_max_rounds):

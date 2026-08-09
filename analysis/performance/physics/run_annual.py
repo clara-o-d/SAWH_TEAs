@@ -14,36 +14,13 @@ if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
 from solar_lumped.physics import TILT_DEG
-from solar_lumped.physics import get_salt
 from solar_lumped.simulation import (
     simulate_annual_year,
     write_daily_summary_csv,
 )
-from solar_lumped.simulation import SystemConfig
+from solar_lumped.system import build_system_config
 from solar_lumped.weather import fetch_year_weather
 from solar_lumped.weather import real_weather_days_from_df
-
-
-def build_system_config(
-    *,
-    salt: str = "LiCl",
-    salt_loading: float = 4.0,
-    hydrogel_thickness_mm: float = 4.0,
-    vapor_gap_mm: float = 40.0,
-    insulation_gap_mm: float = 5.0,
-    tilt_deg: float = TILT_DEG,
-    fin_area_ratio: float = 7.1,
-) -> SystemConfig:
-    get_salt(salt)
-    return SystemConfig(
-        salt_name=salt,
-        salt_to_polymer_ratio=salt_loading,
-        hydrogel_thickness_m=hydrogel_thickness_mm * 1e-3,
-        vapor_gap_m=vapor_gap_mm * 1e-3,
-        insulation_gap_m=insulation_gap_mm * 1e-3,
-        tilt_deg=tilt_deg,
-        fin_area_ratio=fin_area_ratio,
-    )
 
 
 def default_output_path(lat: float, lon: float, year: int) -> Path:

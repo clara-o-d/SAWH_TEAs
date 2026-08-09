@@ -56,7 +56,6 @@ _K_AL_W_M_K: float = 167.0  # Table S3 k_Al, for the fin-efficiency parameter m
 # knowing: the simple model has been quietly assuming a premium sputtered-cermet
 # surface for free, and B1 is what finally puts a price on it.
 _EPS_ABS_IR_BASELINE: float = _pv("Absorber IR emissivity (eps_abs_ir)")
-_EPS_ABS_IR_PAINT: float = 0.95  # commodity black paint, the cheap end of the curve
 
 
 @dataclass(frozen=True, slots=True)

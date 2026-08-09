@@ -726,10 +726,8 @@ FIG_S1_DT_S = PHASE_DT_S
 FIG_S1_ABSORPTION_STEPS = int(round(FIG_S1_ABSORPTION_HOURS * 3600.0 / PHASE_DT_S))
 FIG_S1_DESORPTION_STEPS = int(round(FIG_S1_DESORPTION_HOURS * 3600.0 / PHASE_DT_S))
 
-# Experimental endpoints from Fig. S1D (water in gel, L/m²).
+# Experimental starting point from Fig. S1D (water in gel, L/m²).
 FIG_S1_INITIAL_WATER_L_M2 = 1.2
-FIG_S1_PEAK_WATER_L_M2 = 2.2
-FIG_S1_FINAL_WATER_L_M2 = 1.2
 
 
 def fig_s1_profile() -> DailyWeatherProfile:

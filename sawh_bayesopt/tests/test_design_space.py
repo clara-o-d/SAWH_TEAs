@@ -25,8 +25,11 @@ def test_to_system_config_kwargs_maps_in_order():
     x = np.arange(len(VAR_ORDER), dtype=float)
     kwargs = to_system_config_kwargs(x)
     # Every case (including the default, "case2") now gets an explicit
-    # "thermal" override -- see design_space.py::CASE_EPS_IR.
-    assert list(kwargs.keys()) == [*VAR_ORDER, "thermal"]
+    # "thermal" override -- see design_space.py::CASE_EPS_IR. The condenser mode is
+    # always passed explicitly rather than left to SystemConfig's default, so a
+    # sweep cannot silently fall back to the ODE condenser.
+    assert list(kwargs.keys()) == [*VAR_ORDER, "condenser_tracks_ambient", "thermal"]
+    assert kwargs["condenser_tracks_ambient"] is False
     assert kwargs[VAR_ORDER[0]] == 0.0
     assert kwargs[VAR_ORDER[-1]] == len(VAR_ORDER) - 1
 
