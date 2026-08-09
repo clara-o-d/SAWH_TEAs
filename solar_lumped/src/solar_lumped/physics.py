@@ -1592,7 +1592,3 @@ def c_w_from_water_in_gel_l_m2(water_l_m2: float, h_m: float) -> float:
 def water_in_sorbent_l_m2(loading: float, h_m: float, *, config: SystemConfig) -> float:
     return water_in_gel_l_m2(loading, h_m, h0_ref_m=config.hydrogel_thickness_m)
 
-
-def clip_loading(loading: float, *, config: SystemConfig) -> float:
-    return max(C_W_MIN_MOL_M3, min(C_W_MAX_MOL_M3, loading))
-

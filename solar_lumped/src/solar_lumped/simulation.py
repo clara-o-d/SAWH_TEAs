@@ -45,7 +45,6 @@ from solar_lumped.physics import (
     MassTransferParams,
     ThermalState,
     clamp_temperature_c,
-    clip_loading,
     condenser_h_conv_w_m2_k,
     desorption_water_activity,
     evaluate_mass_rates,
@@ -561,11 +560,17 @@ def _integrate_absorption(
         t_guess = _thermal_guess(rates.thermal)
         return np.array([rates.dc_w_dt, dh])
 
+    # LSODA, matching _integrate_desorption -- one integrator for the whole cycle.
+    # Absorption has no thermal Newton solve (T_gel is just T_amb) so it never had
+    # desorption's non-differentiable RHS, but there is no reason for the two halves
+    # to disagree on how they are solved. max_step=dt is load-bearing: the weather
+    # profile is piecewise-constant on dt and _profile_index samples it, so a step
+    # spanning a profile change would miss it.
     sol = solve_ivp(
         rhs,
         t_span,
         y0=np.array([c_w0, max(h0, h_min)]),
-        method="Radau",
+        method="LSODA",
         t_eval=t_eval,
         max_step=dt,
         rtol=_ODE_RTOL,
@@ -599,7 +604,7 @@ def _integrate_absorption(
         guess = _thermal_guess(rates.thermal)
         t_gel_hist.append(rates.t_gel_c)
 
-    c_w_out = np.array([clip_loading(float(v), config=config) for v in sol.y[0]])
+    c_w_out = np.asarray(sol.y[0], dtype=float)
     h_out = np.clip(sol.y[1], h_min, h_max)
     return PhaseResult(
         time_s=sol.t,
@@ -684,11 +689,18 @@ def _integrate_desorption(
         if ambient_condenser
         else np.array([c_w0, max(h0, h_min), t_cond0])
     )
+    # LSODA, not Radau: this RHS is not differentiable where the thermal Newton solve
+    # clamps T_gel at TEMP_CLAMP_HI_C (dc_w/dt kinks ~15x, then goes exactly flat in
+    # T_cond above the clamp). Implicit methods form a Jacobian across that kink and
+    # diverge -- Radau and BDF both threw the state to c_w ~ -1e5..-2e6 mol/m3 while
+    # returning success=True, silently understating the yield by 67-99%. Everything
+    # that does not build a Jacobian agrees with the JAX backend to <=0.4%: LSODA (it
+    # stays in non-stiff Adams mode here), RK45, DOP853, and diffrax's Tsit5.
     sol = solve_ivp(
         rhs,
         t_span,
         y0=y0,
-        method="Radau",
+        method="LSODA",
         t_eval=t_eval,
         max_step=dt,
         rtol=_ODE_RTOL,
@@ -761,7 +773,7 @@ def _integrate_desorption(
             f"(c_w {sol.y[0, 0]:.1f} -> {sol.y[0, -1]:.1f} mol/m3{t_cond_note})"
         )
 
-    c_w_out = np.array([clip_loading(float(v), config=config) for v in sol.y[0]])
+    c_w_out = np.asarray(sol.y[0], dtype=float)
     h_out = np.maximum(sol.y[1], h_min)
     return PhaseResult(
         time_s=sol.t,

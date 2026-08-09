@@ -37,13 +37,26 @@ echo "==========================================================================
 echo "Environment"
 echo "=============================================================================="
 nvidia-smi || echo "nvidia-smi unavailable"
-python3 -c "import jax; print('jax', jax.__version__, jax.devices()); print('x64:', jax.config.jax_enable_x64)"
+# Import jax_physics, not bare jax: x64 is enabled as a side effect of that module, so
+# checking it without the import reports False and looks like a broken run when it isn't.
+PYTHONPATH=gpu_sweep python3 -c "
+import jax_physics, jax
+print('jax', jax.__version__, jax.devices())
+print('x64:', jax.config.jax_enable_x64)
+"
 
 echo
 echo "=============================================================================="
 echo "1/3  Test suite (CPU/JAX parity, physics, design space)"
 echo "=============================================================================="
-python3 -m pytest tests -q
+# .venv_gpu is a runtime environment, not a dev one, so pytest may not be installed.
+# That is not a reason to abandon the tolerance measurement this job exists for --
+# skip loudly and let stages 2 and 3 run.
+if python3 -c "import pytest" 2>/dev/null; then
+  python3 -m pytest tests -q
+else
+  echo "SKIPPED: pytest not installed in this venv (uv pip install pytest to enable)"
+fi
 
 # The validators live one level up, outside the solar_lumped/ working directory this
 # runbook submits from -- same ../analysis/ path SHERLOCK_GPU_RUNBOOK.md section 4 uses.
