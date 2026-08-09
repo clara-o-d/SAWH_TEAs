@@ -23,13 +23,7 @@ from sawh_bayesopt.reporting import (  # noqa: E402
     write_history_csv,
     write_run_config,
 )
-from sawh_bayesopt.sites import (  # noqa: E402
-    ATACAMA,
-    CAMBRIDGE,
-    DEFAULT_SITES,
-    land_grid_sites,
-    site_from_lat_lon,
-)
+from sawh_bayesopt.sites import ATACAMA, CAMBRIDGE, site_from_lat_lon  # noqa: E402
 from sawh_bayesopt.surrogate import save_state  # noqa: E402
 from sawh_bayesopt.verification import verify_optimum  # noqa: E402
 
@@ -43,20 +37,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--ei-xi", type=float, default=0.01)
     p.add_argument("--stall-rel-tol", type=float, default=0.005)
     p.add_argument("--stall-rounds", type=int, default=3)
-    p.add_argument("--combine-rule", choices=("mean", "worst_case"), default="mean")
 
-    # Site selection: the two validated field sites by name, arbitrary coordinates,
-    # or indices into solar_lumped's land grid (the same grid the gpu_sweep global
-    # sweep uses, so runs stay comparable).
+    # Site selection: one validated field site by name, or one arbitrary coordinate.
+    # Optimization is single-site (evaluator.site_lcow_or_penalty), so there is no
+    # multi-site or land-grid option here -- sweeping the grid means one optimization
+    # per site, which is gpu_sweep/run_bayesopt_sweep.py's job.
     site = p.add_mutually_exclusive_group()
-    site.add_argument("--sites", choices=("both", "cambridge", "atacama"), default="both")
+    site.add_argument("--site", choices=("atacama", "cambridge"), default="atacama")
     site.add_argument(
-        "--lat-lon", type=float, nargs=2, action="append", metavar=("LAT", "LON"),
-        help="Optimize at these coordinates. Repeatable for a multi-site design.",
+        "--lat-lon", type=float, nargs=2, metavar=("LAT", "LON"),
+        help="Optimize at these coordinates instead of a named site.",
     )
-    site.add_argument("--num-sites", type=int, help="First N sites of the --step land grid.")
-    site.add_argument("--site-indices", type=int, nargs="+", help="Indices into the --step land grid.")
-    p.add_argument("--step", type=float, default=3.0, help="Land-grid spacing (deg).")
     p.add_argument("--year", type=int, default=2024)
 
     p.add_argument(
@@ -78,16 +69,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 
 def resolve_sites(args: argparse.Namespace) -> tuple:
-    """Turn the mutually exclusive site flags into a concrete SiteSpec tuple."""
+    """The one site to optimize at, as a 1-tuple (BayesOptConfig.sites' shape)."""
     if args.lat_lon:
-        return tuple(
-            site_from_lat_lon(lat, lon, year=args.year) for lat, lon in args.lat_lon
-        )
-    if args.num_sites is not None:
-        return land_grid_sites(step_deg=args.step, indices=list(range(args.num_sites)), year=args.year)
-    if args.site_indices is not None:
-        return land_grid_sites(step_deg=args.step, indices=args.site_indices, year=args.year)
-    return {"both": DEFAULT_SITES, "cambridge": (CAMBRIDGE,), "atacama": (ATACAMA,)}[args.sites]
+        lat, lon = args.lat_lon
+        return (site_from_lat_lon(lat, lon, year=args.year),)
+    return {"cambridge": (CAMBRIDGE,), "atacama": (ATACAMA,)}[args.site]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -99,7 +85,6 @@ def main(argv: list[str] | None = None) -> int:
         complex_mode=args.complex,
         backend=args.backend,
         sites=sites,
-        combine_rule=args.combine_rule,
         n_init=args.n_init,
         n_total=args.n_total,
         batch_size=args.batch_size,

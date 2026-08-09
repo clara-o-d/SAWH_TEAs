@@ -21,7 +21,6 @@ def _fake_evaluate_batch(
     sites,
     site_profiles=None,
     econ=None,
-    combine_rule="mean",
     resolution="annual",
     case="case1",
     # Accepted and ignored: these are real-evaluator plumbing (complex fidelity, its
@@ -99,7 +98,6 @@ def _fake_evaluate_batch_with_infeasible_region(
     sites,
     site_profiles=None,
     econ=None,
-    combine_rule="mean",
     resolution="annual",
     case="case1",
     # Accepted and ignored: these are real-evaluator plumbing (complex fidelity, its

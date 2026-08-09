@@ -15,9 +15,13 @@ than the CPU path directly — `gpu_sweep/FINDINGS.md` shows the two agree to
 <0.03% and the JAX path is ~8x faster even single-threaded on a CPU with no
 GPU, and considerably more once run on an actual GPU. Every round batches all
 of that round's (design, site, month) instances into one `jax.vmap`-compiled
-call. Designs are evaluated at both of the paper's experimentally
-field-validated sites (Cambridge, MA and the Atacama Desert, Chile) and
-combined via the mean of the two sites' LCOW.
+call. Each run optimizes for a **single site** — a design is scored where it
+will be built, not against an average of climates it will never see. Either of
+the paper's experimentally field-validated sites (Cambridge, MA and the Atacama
+Desert, Chile) is available by name, or any coordinate via `--lat-lon`. A
+multi-site study is one optimization per site: that is what
+`solar_lumped/gpu_sweep/run_bayesopt_sweep.py` does across the land grid,
+producing a per-site optimum rather than one compromise design.
 
 ## Scope (v1)
 

@@ -2,10 +2,8 @@
 """Convergence plot restricted to fully-feasible designs.
 
 write_convergence_plot (reporting.py) scatters every evaluated combined_lcow,
-including designs where one or both sites hit the infeasibility penalty
-(evaluator.PENALTY_LCOW_USD_PER_M3, 10000 USD/m^3, or a partial-penalty blend
-when only one of two sites failed e.g. combine_rule="mean" averaging one
-real ~20-30 USD/m^3 site with one 10000-penalty site into a ~5000ish point).
+including designs that hit the infeasibility penalty
+(evaluator.PENALTY_LCOW_USD_PER_M3, 10000 USD/m^3).
 Even one or two such points force the y-axis to span into the thousands,
 squashing the entire feasible-region detail into an unreadable line near 0
 -- this drops any design where *any* site was infeasible (using history.csv's

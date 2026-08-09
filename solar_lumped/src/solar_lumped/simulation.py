@@ -40,6 +40,7 @@ from solar_lumped.physics import (
     TAU_GLASS,
     TILT_DEG,
     VAPOR_GAP_TRANSPORT_MIN_M,
+    WATER_MOLAR_MASS_KG_MOL,
     SystemThermalParams,
     MassTransferParams,
     ThermalState,
@@ -741,6 +742,24 @@ def _integrate_desorption(
         m_des_hist.append(rates.m_des_kg_s_m2)
 
     water = float(cumulative_desorption_yield_l_m2(sol.t, m_des_hist)[-1])
+
+    # Every kg of water in the yield integral must have left the gel, so the trapezoid
+    # of m_des has to match the drop in c_w (both on the H0 basis -- Note S1's
+    # m_des = -dc_w/dt * MW * H0). Radau does not report failure on this RHS: the
+    # thermal Newton solve clamps T_gel at TEMP_CLAMP_HI_C, and where that binds
+    # dc_w/dt kinks ~15x and then goes exactly flat, so the implicit step gets a
+    # Jacobian inconsistent with its residual and can throw the state (observed:
+    # T_cond -> 1799 C, c_w -> -131000) while still returning success=True. The
+    # yield then freezes and is silently understated -- 67-99% low on the cases that
+    # trip it, vs <=0.09% trapezoid error when the integration is sound.
+    inventory_drop = float(sol.y[0, 0] - sol.y[0, -1]) * mass.h0_ref_m * WATER_MOLAR_MASS_KG_MOL
+    if abs(water - inventory_drop) > 0.01 * max(abs(inventory_drop), 1e-12):
+        t_cond_note = "" if ambient_condenser else f", T_cond -> {sol.y[2, -1]:.1f} C"
+        raise RuntimeError(
+            f"Desorption integration did not conserve water: yield {water:.4f} L/m2 "
+            f"vs c_w inventory drop {inventory_drop:.4f} L/m2 "
+            f"(c_w {sol.y[0, 0]:.1f} -> {sol.y[0, -1]:.1f} mol/m3{t_cond_note})"
+        )
 
     c_w_out = np.array([clip_loading(float(v), config=config) for v in sol.y[0]])
     h_out = np.maximum(sol.y[1], h_min)

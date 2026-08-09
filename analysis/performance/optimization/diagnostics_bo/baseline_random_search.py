@@ -35,7 +35,7 @@ import numpy as np  # noqa: E402
 
 from sawh_bayesopt.design_space import DesignBounds  # noqa: E402
 from sawh_bayesopt.evaluator import EvalCache, evaluate_batch  # noqa: E402
-from sawh_bayesopt.sites import ATACAMA, CAMBRIDGE, DEFAULT_SITES, fetch_daily_profiles  # noqa: E402
+from sawh_bayesopt.sites import ATACAMA, CAMBRIDGE, fetch_daily_profiles  # noqa: E402
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -63,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
     bo_config = json.loads(bo_config_path.read_text())
 
     bounds = DesignBounds(**{name: tuple(v) for name, v in bo_config["bounds"].items()})
-    site_by_name = {s.name: s for s in DEFAULT_SITES + (CAMBRIDGE, ATACAMA)}
+    site_by_name = {s.name: s for s in (CAMBRIDGE, ATACAMA)}
     sites = tuple(site_by_name[name] for name in bo_config["sites"])
     n_total = bo_config["n_total"]
 
@@ -86,7 +86,6 @@ def main(argv: list[str] | None = None) -> int:
         batch = list(X[start : start + args.eval_batch_size])
         results = evaluate_batch(
             batch, cache=cache, sites=sites, site_profiles=site_profiles, econ=econ,
-            combine_rule=bo_config["combine_rule"],
             case=bo_config.get("case", "case2"),
         )
         history.extend(results)

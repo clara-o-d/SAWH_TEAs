@@ -26,8 +26,6 @@ import numpy as np
 from sawh_bayesopt import design_space
 from sawh_bayesopt.sites import DailyProfiles, SiteSpec
 
-CombineRule = Literal["mean", "worst_case"]
-
 # Which physics backend evaluates a design. Both implement simple *and* complex
 # fidelity and agree to <0.5% on every configuration
 # (solar_lumped/tests/test_cpu_jax_parity.py):
@@ -79,9 +77,9 @@ class DesignEvalResult:
 
     @property
     def is_feasible(self) -> bool:
-        """True iff every site succeeded. A property so it always tracks site_results and
-        old cache records get it free. combined_lcow can't substitute: with
-        combine_rule="mean" a partial failure lands between a real value and the penalty."""
+        """True iff the site succeeded. A property so it always tracks site_results and
+        old cache records get it free. combined_lcow can't substitute: it maps a failure
+        onto the penalty, which is indistinguishable from a real but terrible LCOW."""
         return all(r.feasible for r in self.site_results)
 
     def site(self, name: str) -> SiteResult:
@@ -131,20 +129,24 @@ def _load_jax_daily_cycle():
     return jax_daily_cycle
 
 
-def combine_site_lcows(
+def site_lcow_or_penalty(
     site_results: tuple[SiteResult, ...],
     *,
-    combine_rule: CombineRule = "mean",
     penalty: float = PENALTY_LCOW_USD_PER_M3,
 ) -> float:
+    """The one site's LCOW, or the penalty if it failed.
+
+    Optimization is single-site: a design is scored where it will be built, not against
+    an average of climates it will never see. Multi-site studies run one optimization
+    per site (see gpu_sweep/run_bayesopt_sweep.py, which loops the land grid) and
+    compare the resulting per-site optima.
+    """
     from solar_lumped.economics import FAIL_LCO
 
-    vals = [penalty if (not r.feasible or r.lcow >= 0.99 * FAIL_LCO) else r.lcow for r in site_results]
-    if combine_rule == "mean":
-        return float(sum(vals) / len(vals))
-    if combine_rule == "worst_case":
-        return float(max(vals))
-    raise ValueError(f"Unknown combine_rule {combine_rule!r}")
+    if len(site_results) != 1:
+        raise ValueError(f"single-site optimization expects exactly 1 site, got {len(site_results)}")
+    r = site_results[0]
+    return float(penalty if (not r.feasible or r.lcow >= 0.99 * FAIL_LCO) else r.lcow)
 
 
 def _result_to_jsonable(result: DesignEvalResult) -> dict:
@@ -280,7 +282,6 @@ def evaluate_for_config(xs, *, cfg, cache, econ, site_profiles=None, site_frames
         sites=cfg.sites,
         site_profiles=site_profiles,
         econ=econ,
-        combine_rule=cfg.combine_rule,
         case=cfg.case,
         complex_mode=cfg.complex_mode,
         condenser_tracks_ambient=cfg.condenser_tracks_ambient,
@@ -366,7 +367,6 @@ def evaluate_batch(
     sites: tuple[SiteSpec, ...],
     site_profiles: dict[str, DailyProfiles],
     econ,
-    combine_rule: CombineRule = "mean",
     case: str = "case2",
     complex_mode: bool = False,
     condenser_tracks_ambient: bool = False,
@@ -484,7 +484,7 @@ def evaluate_batch(
 
             site_results.append(SiteResult(spec.name, lcow, True, "", mean_yield, mean_eta))
 
-        combined = combine_site_lcows(tuple(site_results), combine_rule=combine_rule)
+        combined = site_lcow_or_penalty(tuple(site_results))
         new_results[i] = DesignEvalResult(
             design_vector=tuple(float(v) for v in np.asarray(xs[i], dtype=float).reshape(-1)),
             site_results=tuple(site_results),

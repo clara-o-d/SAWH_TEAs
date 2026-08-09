@@ -71,7 +71,7 @@ def test_evaluate_batch_penalizes_batched_call_failure(monkeypatch, tmp_path, on
     site_profiles = {"dummy": _DUMMY_PROFILES}
     cache = EvalCache(tmp_path / "cache.jsonl")
     [result] = evaluator.evaluate_batch(
-        [x], cache=cache, sites=one_site, site_profiles=site_profiles, econ=econ, combine_rule="mean"
+        [x], cache=cache, sites=one_site, site_profiles=site_profiles, econ=econ
     )
 
     assert result.site_results[0].feasible is False
@@ -89,7 +89,7 @@ def test_evaluate_batch_penalizes_zero_yield(monkeypatch, tmp_path, one_site, ec
     site_profiles = {"dummy": _DUMMY_PROFILES}
     cache = EvalCache(tmp_path / "cache.jsonl")
     [result] = evaluator.evaluate_batch(
-        [x], cache=cache, sites=one_site, site_profiles=site_profiles, econ=econ, combine_rule="mean"
+        [x], cache=cache, sites=one_site, site_profiles=site_profiles, econ=econ
     )
 
     assert result.site_results[0].feasible is False
@@ -107,7 +107,7 @@ def test_evaluate_batch_combined_lcow_uses_finite_penalty_not_fail_lco(
     site_profiles = {"dummy": _DUMMY_PROFILES}
     cache = EvalCache(tmp_path / "cache.jsonl")
     [result] = evaluator.evaluate_batch(
-        [x], cache=cache, sites=one_site, site_profiles=site_profiles, econ=econ, combine_rule="mean"
+        [x], cache=cache, sites=one_site, site_profiles=site_profiles, econ=econ
     )
 
     assert result.site_results[0].feasible is False
@@ -126,7 +126,7 @@ def test_evaluate_batch_propagates_bugs_instead_of_penalizing(monkeypatch, tmp_p
     with pytest.raises(NameError, match="_M_DES_BRACKET_MAX"):
         evaluator.evaluate_batch(
             [_one_x()], cache=cache, sites=one_site,
-            site_profiles={"dummy": _DUMMY_PROFILES}, econ=econ, combine_rule="mean",
+            site_profiles={"dummy": _DUMMY_PROFILES}, econ=econ,
         )
 
 
@@ -137,7 +137,7 @@ def test_evaluate_batch_penalizes_missing_weather(tmp_path, one_site, econ):
     site_profiles = {"dummy": []}  # no weather at all -> never touches jax
     cache = EvalCache(tmp_path / "cache.jsonl")
     [result] = evaluator.evaluate_batch(
-        [x], cache=cache, sites=one_site, site_profiles=site_profiles, econ=econ, combine_rule="mean"
+        [x], cache=cache, sites=one_site, site_profiles=site_profiles, econ=econ
     )
 
     assert result.site_results[0].feasible is False

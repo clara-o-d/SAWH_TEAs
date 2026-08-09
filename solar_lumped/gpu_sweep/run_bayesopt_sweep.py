@@ -192,7 +192,6 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, bounds: DesignBou
         bounds=bounds,
         complex_mode=args.complex,
         sites=(site,),
-        combine_rule="mean",
         n_init=args.n_init,
         n_total=args.n_total,
         batch_size=args.batch_size,

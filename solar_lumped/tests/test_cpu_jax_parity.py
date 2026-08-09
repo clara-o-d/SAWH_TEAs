@@ -25,7 +25,7 @@ if str(_GPU_SWEEP) not in sys.path:
     sys.path.insert(0, str(_GPU_SWEEP))
 
 from solar_lumped.complex_model import ComplexOptions  # noqa: E402
-from solar_lumped.physics import initial_loading  # noqa: E402
+from solar_lumped.physics import WATER_MOLAR_MASS_KG_MOL, initial_loading  # noqa: E402
 from solar_lumped.simulation import SystemConfig, run_daily_cycle  # noqa: E402
 from solar_lumped.weather import baseline_profile  # noqa: E402
 
@@ -109,9 +109,19 @@ def test_condenser_ambient_mode_backends_agree() -> None:
 def test_complex_mode_backends_agree(name: str) -> None:
     profile = baseline_profile()
     config = SystemConfig.baseline(complex=COMPLEX_CASES[name])
-    cpu, _eta, _a, _d = run_daily_cycle(profile, config)
+    cpu, _eta, _a, des = run_daily_cycle(profile, config)
     jax_yield = _jax_daily_yield(config, profile, complex_mode=True)
-    assert cpu > 0.0, f"{name} produced no water on the CPU path -- parity is vacuous"
+    # "cpu > 0" passed happily on a trajectory that had run T_cond to 1799 C and c_w
+    # to -131000; what makes the comparison meaningful is that the reference actually
+    # conserved water. _integrate_desorption raises on that now, so this is the
+    # backstop for the clipped public trajectory rather than the primary guard.
+    inventory_drop = (
+        float(des.c_w[0] - des.c_w[-1]) * config.hydrogel_thickness_m * WATER_MOLAR_MASS_KG_MOL
+    )
+    assert cpu == pytest.approx(inventory_drop, rel=0.01), (
+        f"{name}: CPU reference lost water -- yield {cpu:.4f} L/m2 vs inventory drop "
+        f"{inventory_drop:.4f} L/m2; parity against it would be meaningless"
+    )
     assert jax_yield == pytest.approx(cpu, rel=COMPLEX_PARITY_TOL)
 
 

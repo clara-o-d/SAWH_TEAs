@@ -31,7 +31,6 @@ CAMBRIDGE = SiteSpec("cambridge", 42.36, -71.09)
 # Atacama Desert, Chile, near Antofagasta -- field test (Wilson et al. 2025, Fig. 4).
 ATACAMA = SiteSpec("atacama", -23.65, -70.40)
 
-DEFAULT_SITES: tuple[SiteSpec, ...] = (CAMBRIDGE, ATACAMA)
 
 
 def daily_profiles(df) -> DailyProfiles:
@@ -90,7 +89,6 @@ def land_grid_sites(
 __all__ = [
     "ATACAMA",
     "CAMBRIDGE",
-    "DEFAULT_SITES",
     "DailyProfiles",
     "SiteSpec",
     "WeatherClient",

@@ -70,8 +70,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--stall-rounds", type=int, default=3)
     p.add_argument("--batch-size", type=int, default=3)
     p.add_argument("--seed", type=int, default=0, help="Shared across every combination on purpose -- see module docstring.")
-    p.add_argument("--combine-rule", choices=("mean", "worst_case"), default="mean")
-    p.add_argument("--sites", choices=("both", "cambridge", "atacama"), default="both")
+    p.add_argument("--sites", choices=("cambridge", "atacama"), default="atacama")
     p.add_argument("--case", choices=("case1", "case2", "case3"), default="case2")
     p.add_argument("--weather-cache-dir", type=str, default=str(_REPO / ".weather_cache"))
     p.add_argument("--n-workers", type=int, default=1)
@@ -118,11 +117,11 @@ def _run_one_combo(task: dict) -> dict:
         write_history_csv,
         write_run_config,
     )
-    from sawh_bayesopt.sites import ATACAMA, CAMBRIDGE, DEFAULT_SITES
+    from sawh_bayesopt.sites import ATACAMA, CAMBRIDGE
     from sawh_bayesopt.surrogate import save_state
     from sawh_bayesopt.verification import verify_optimum
 
-    sites = {"both": DEFAULT_SITES, "cambridge": (CAMBRIDGE,), "atacama": (ATACAMA,)}[task["sites"]]
+    sites = {"cambridge": (CAMBRIDGE,), "atacama": (ATACAMA,)}[task["sites"]]
     run_dir = Path(task["run_dir"])
     run_dir.mkdir(parents=True, exist_ok=True)
 
@@ -138,7 +137,6 @@ def _run_one_combo(task: dict) -> dict:
     cfg = BayesOptConfig(
         bounds=DesignBounds(),
         sites=sites,
-        combine_rule=task["combine_rule"],
         n_init=task["n_init"],
         n_total=task["n_total"],
         batch_size=task["batch_size"],
@@ -261,7 +259,6 @@ def main(argv: list[str] | None = None) -> int:
             "stall_rounds": args.stall_rounds,
             "batch_size": args.batch_size,
             "seed": args.seed,
-            "combine_rule": args.combine_rule,
             "sites": args.sites,
             "case": args.case,
             "weather_cache_dir": args.weather_cache_dir,

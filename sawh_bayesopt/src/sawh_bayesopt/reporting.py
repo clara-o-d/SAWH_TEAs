@@ -32,7 +32,6 @@ def write_run_config(cfg: BayesOptConfig, path: str | Path) -> None:
     payload = {
         "bounds": {name: list(getattr(cfg.bounds, name)) for name in cfg.bounds.names()},
         "sites": [s.name for s in cfg.sites],
-        "combine_rule": cfg.combine_rule,
         "n_init": cfg.n_init,
         "n_total": cfg.n_total,
         "batch_size": cfg.batch_size,

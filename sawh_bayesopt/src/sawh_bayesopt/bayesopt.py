@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import logging
 import math
+import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -14,7 +15,7 @@ import numpy as np
 from sawh_bayesopt.acquisition import propose_batch
 from sawh_bayesopt.design_space import DesignBounds, latin_hypercube_design
 from sawh_bayesopt.evaluator import DesignEvalResult, EvalCache, evaluate_batch
-from sawh_bayesopt.sites import DEFAULT_SITES, SiteSpec, fetch_daily_profiles, fetch_site_frame
+from sawh_bayesopt.sites import ATACAMA, SiteSpec, fetch_daily_profiles, fetch_site_frame
 from sawh_bayesopt.surrogate import (
     SurrogateState,
     append_observations,
@@ -36,8 +37,10 @@ MIN_FEASIBLE_TO_FIT = 2
 @dataclass
 class BayesOptConfig:
     bounds: DesignBounds = DesignBounds()
-    sites: tuple[SiteSpec, ...] = DEFAULT_SITES
-    combine_rule: str = "mean"
+    # Exactly one site: see evaluator.site_lcow_or_penalty for why optimization is
+    # single-site. A 1-tuple rather than a bare SiteSpec so per-site plumbing
+    # (profiles, frames, SiteResult) keeps its existing shape.
+    sites: tuple[SiteSpec, ...] = (ATACAMA,)
     n_init: int = 24
     n_total: int = 50
     batch_size: int = 3
@@ -124,7 +127,6 @@ def run_bayesopt(cfg: BayesOptConfig, run_dir: str | Path) -> BayesOptResult:
             sites=cfg.sites,
             site_profiles=site_profiles,
             econ=econ,
-            combine_rule=cfg.combine_rule,
             case=cfg.case,
             complex_mode=cfg.complex_mode,
             condenser_tracks_ambient=cfg.condenser_tracks_ambient,
@@ -132,8 +134,24 @@ def run_bayesopt(cfg: BayesOptConfig, run_dir: str | Path) -> BayesOptResult:
             backend=cfg.backend,
         )
 
+    # A complex-mode run is hours long and otherwise prints nothing until it finishes,
+    # so each round reports progress and a rate-based ETA. cache.jsonl is the ground
+    # truth (one fsync'd line per completed design) -- this just saves tailing it.
+    t_start = time.perf_counter()
+
+    def _progress(label: str, n_done: int, best: float) -> None:
+        elapsed = time.perf_counter() - t_start
+        eta = elapsed / n_done * (cfg.n_total - n_done) if n_done else 0.0
+        best_str = f"{best:.4f}" if math.isfinite(best) else "n/a"
+        print(
+            f"[{n_done:4d}/{cfg.n_total}] {label:<9s} best {best_str:>10s} USD/m3  "
+            f"elapsed {elapsed / 60:.1f}m  eta {eta / 60:.0f}m",
+            flush=True,
+        )
+
     X0 = latin_hypercube_design(cfg.n_init, cfg.bounds, seed=cfg.seed, reject_gap_degenerate=True)
     history = _evaluate(list(X0))
+    _progress("lhs-init", len(history), min((r.combined_lcow for r in history), default=float("inf")))
 
     # The Matern kernel is anisotropic (one length scale per dimension), so it must
     # be built at this run's width -- 6 simple, 13 complex.
@@ -171,6 +189,7 @@ def run_bayesopt(cfg: BayesOptConfig, run_dir: str | Path) -> BayesOptResult:
 
         new_results = _evaluate(batch)
         history.extend(new_results)
+        _progress(f"round {round_idx}", len(history), min(r.combined_lcow for r in history))
 
         X_new, y_new, feasible_new = _to_xyf(new_results)
         state = append_observations(state, X_new, y_new, feasible_new)
