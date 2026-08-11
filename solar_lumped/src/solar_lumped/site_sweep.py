@@ -135,6 +135,9 @@ _CSV_COLUMNS: tuple[str, ...] = (
     "cx_blend_weights",
     # "ode" (default, Eq. 2) or "ambient" (T_cond == T_amb, infinite-cooling limit).
     "condenser_mode",
+    # "hydrate" (default, n*c_s) or "drh" (equilibrium c_w at the deliquescence RH) --
+    # which physical limit stopped desorption. See SystemConfig.c_w_floor_mode.
+    "c_w_floor_mode",
 )
 
 

@@ -25,8 +25,27 @@ def _load_sheet(sheet_name: str) -> dict[str, dict[str, Any]]:
     }
 
 
+def _load_salts() -> dict[str, dict[str, Any]]:
+    """The Salts sheet, keyed by salt name.
+
+    Its shape is one row per salt rather than Physics/Economics' one row per named
+    scalar, so it gets its own reader: a 4-salt x 9-property table cannot be expressed
+    in a Name -> Value sheet without splitting the salts apart.
+    """
+    wb = openpyxl.load_workbook(_XLSX_PATH, data_only=True, read_only=True)
+    ws = wb["Salts"]
+    rows = ws.iter_rows(values_only=True)
+    header = [str(h).strip() for h in next(rows)]
+    return {
+        str(row[0]).strip(): dict(zip(header[1:], row[1:]))
+        for row in rows
+        if row[0] is not None
+    }
+
+
 PHYSICS: dict[str, dict[str, Any]] = _load_sheet("Physics")
 ECONOMICS: dict[str, dict[str, Any]] = _load_sheet("Economics")
+SALTS: dict[str, dict[str, Any]] = _load_salts()
 
 
 def physics_value(name: str, *, mm_to_m: bool = False) -> float:

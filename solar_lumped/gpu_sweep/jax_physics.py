@@ -35,7 +35,7 @@ RABS_M2_K_W = _pv("Absorber-to-gel constant resistance (Rabs)")
 RHO_AL_KG_M3 = _pv("Aluminum density (rho_Al)")
 CP_AL_J_KG_K = _pv("Aluminum specific heat (cp_Al)")
 # Table S3 k_Al, for complex mode's (B3) fin-efficiency parameter m = sqrt(2h/(k t)).
-K_AL_W_M_K = 167.0
+K_AL_W_M_K = _pv("Aluminum thermal conductivity (k_Al)")
 
 EPS_GEL = _pv("Gel emissivity (eps_gel)")
 EPS_AL = _pv("Condenser (Al) emissivity (eps_Al)")
@@ -47,34 +47,34 @@ EPS_GLASS_IR_CASE2 = _pv("Glass IR emissivity (eps_glass_ir)")
 STEFAN_BOLTZMANN = _pv("Stefan-Boltzmann constant (sigma)")
 D_AIR_M2_S = _pv("Water-vapor-in-air diffusivity (D_air)")
 GRAVITY_M_S2 = _pv("Gravitational acceleration (g)")
-BETA_AIR_K = 1.0 / 300.0
+BETA_AIR_K = 1.0 / _pv("Air reference temperature for thermal expansion")
 NU_AIR_M2_S = _pv("Air kinematic viscosity (nu_air)")
-RHO_AIR_KG_M3 = 1.2
-CP_AIR_J_KG_K = 1005.0
+RHO_AIR_KG_M3 = _pv("Air density (rho_air)")
+CP_AIR_J_KG_K = _pv("Air specific heat (cp_air)")
 ALPHA_AIR_M2_S = K_AIR_W_M_K / (RHO_AIR_KG_M3 * CP_AIR_J_KG_K)
 
 WATER_MOLAR_MASS_KG_MOL = _pv("Water molar mass (MW_w)")
 GAS_CONSTANT_J_MOL_K = _pv("Universal gas constant (R)")
-C_W_MAX_MOL_M3 = _pv("Gel water concentration upper bound (c_w,max)")
-C_W_MIN_MOL_M3 = _pv("Gel water concentration lower bound (c_w,min)")
+# No C_W_MAX/C_W_MIN module constants: both gel-water bounds are per-instance
+# (salt- and blend-dependent) and ride on MassParams. See physics.hydrate_floor_c_w
+# and physics.dilution_ceiling_c_w.
 
 CONDENSER_THERMAL_MASS_J_M2_K = RHO_AL_KG_M3 * CP_AL_J_KG_K * L_C_M
 
 # Conde (2004) Table 3 LiCl vapour-pressure correlation parameters.
 _PI0, _PI1, _PI2, _PI3, _PI4 = 0.28, 4.30, 0.60, 0.21, 5.10
 _PI5, _PI6, _PI7, _PI8, _PI9 = 0.49, 0.362, -4.75, -0.40, 0.03
-# LiCl saturation (solubility) brine mass fraction: 845 g per litre of water -> 45.8 wt%.
-# Past saturation the excess salt is solid and a_w pins here. Same arithmetic as
-# physics.XI_SAT_LICL so the two stay bit-identical -- keep them in step.
-_SOLUBILITY_G_PER_L_LICL = 845.0
-_XI_SAT_LICL = _SOLUBILITY_G_PER_L_LICL / (_SOLUBILITY_G_PER_L_LICL + 1000.0)
-T_CRIT_H2O_K = 647.096
-P_CRIT_H2O_PA = 22.064e6
+# LiCl saturation (solubility) brine mass fraction: past saturation the excess salt is
+# solid and a_w pins here. Imported rather than recomputed -- this used to duplicate
+# physics.XI_SAT_LICL's arithmetic with a comment asking that the two be kept in step.
+from solar_lumped.physics import XI_SAT_LICL as _XI_SAT_LICL
+T_CRIT_H2O_K = _pv("Water critical temperature (T_crit,H2O)")
+P_CRIT_H2O_PA = _pv("Water critical pressure (P_crit,H2O)")
 _SAUL_WAGNER_A = jnp.array([-7.858230, 1.839910, -11.781100, 22.670500, -15.939300, 1.775160])
 _SAUL_WAGNER_EXP = jnp.array([1.0, 1.5, 3.0, 3.5, 4.0, 7.5])
 
-TEMP_CLAMP_LO_C = -40.0
-TEMP_CLAMP_HI_C = 120.0
+TEMP_CLAMP_LO_C = _pv("Temperature clamp lower bound")
+TEMP_CLAMP_HI_C = _pv("Temperature clamp upper bound")
 
 
 def clamp_temperature_c(t_c):
@@ -232,13 +232,18 @@ class MassParams:
 
     def __init__(
         self, *, h0_ref_m, vapor_gap_m, tilt_deg, c_s_mol_m3, formula_weight_g_mol,
-        g_conv_m_s=0.015, aw_table=None,
+        c_w_min_mol_m3, c_w_max_mol_m3, g_conv_m_s=0.015, aw_table=None,
     ):
         self.h0_ref_m = h0_ref_m
         self.vapor_gap_m = vapor_gap_m
         self.tilt_deg = tilt_deg
         self.c_s_mol_m3 = c_s_mol_m3
         self.formula_weight_g_mol = formula_weight_g_mol
+        # Per-instance gel-water bounds from physics.hydrate_floor_c_w and
+        # physics.dilution_ceiling_c_w -- salt- and blend-dependent, so they are traced
+        # per-instance values, not module constants.
+        self.c_w_min_mol_m3 = c_w_min_mol_m3
+        self.c_w_max_mol_m3 = c_w_max_mol_m3
         self.g_conv_m_s = g_conv_m_s
         # Complex mode (B8): host-built (T, f_b) -> a_w table. None keeps the
         # closed-form LiCl isotherm, which is what the simple model uses.
@@ -277,8 +282,8 @@ def dc_dh_desorption(c_w, *, t_gel_c, t_cond_c, h_m, mass: MassParams):
     pref = g / mass.h0_ref_m
     rate = pref * (p_sat / (GAS_CONSTANT_J_MOL_K * t_k)) * driving
     rate = jnp.where(jnp.isfinite(rate), rate, 0.0)
-    dc = jnp.where((c_w >= C_W_MAX_MOL_M3) & (rate > 0.0), 0.0, rate)
-    dc = jnp.where((c_w <= C_W_MIN_MOL_M3) & (dc < 0.0), 0.0, dc)
+    dc = jnp.where((c_w >= mass.c_w_max_mol_m3) & (rate > 0.0), 0.0, rate)
+    dc = jnp.where((c_w <= mass.c_w_min_mol_m3) & (dc < 0.0), 0.0, dc)
 
     dh = (
         g
@@ -613,8 +618,8 @@ def dc_dh_absorption(c_w, *, t_gel_c, rh, h_m, mass: "MassParams", salt_to_polym
     pref = g / mass.h0_ref_m
     rate = pref * (p_sat / (GAS_CONSTANT_J_MOL_K * t_k)) * driving
     rate = jnp.where(jnp.isfinite(rate), rate, 0.0)
-    dc = jnp.where((c_w >= C_W_MAX_MOL_M3) & (rate > 0.0), 0.0, rate)
-    dc = jnp.where((c_w <= C_W_MIN_MOL_M3) & (dc < 0.0), 0.0, dc)
+    dc = jnp.where((c_w >= mass.c_w_max_mol_m3) & (rate > 0.0), 0.0, rate)
+    dc = jnp.where((c_w <= mass.c_w_min_mol_m3) & (dc < 0.0), 0.0, dc)
 
     dh = g * WATER_MOLAR_MASS_KG_MOL / RHO_GEL_KG_M3 * (p_sat / (GAS_CONSTANT_J_MOL_K * t_k)) * driving
     dh = jnp.where(jnp.isfinite(dh), dh, 0.0)

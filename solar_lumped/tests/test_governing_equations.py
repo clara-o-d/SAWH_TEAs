@@ -345,3 +345,31 @@ def test_thermal_efficiency_definition(config: SystemConfig):
     expected_eta = (y * config.h_fg_j_per_kg / q_solar_int) if q_solar_int > 0 else 0.0
     assert eta == pytest.approx(expected_eta, rel=1e-12)
     assert y == des_res.water_collected_kg_m2
+
+
+def test_c_w_floor_modes_bracket_correctly(config: SystemConfig):
+    """The DRH floor is the wetter bound, and both sit under the dilution ceiling."""
+    import dataclasses
+
+    from solar_lumped.physics import saturation_brine_salt_fraction
+
+    hyd = config.mass_params()
+    drh = dataclasses.replace(config, c_w_floor_mode="drh").mass_params()
+
+    # Hydrate floor is n·c_s exactly (LiCl·H₂O ⇒ n = 1).
+    assert hyd.c_w_min_mol_m3 == pytest.approx(hyd.c_s_mol_m3, rel=1e-12)
+    # DRH floor is the saturated-brine composition on the same H₀ basis.
+    f_b = saturation_brine_salt_fraction(config.salt_name)
+    expected = (
+        hyd.c_s_mol_m3 * hyd.formula_weight_g_mol / 1000.0
+        * (1.0 - f_b) / f_b / WATER_MOLAR_MASS_KG_MOL
+    )
+    assert drh.c_w_min_mol_m3 == pytest.approx(expected, rel=1e-12)
+    assert drh.c_w_min_mol_m3 > hyd.c_w_min_mol_m3 < hyd.c_w_max_mol_m3
+    assert drh.c_w_min_mol_m3 < drh.c_w_max_mol_m3
+    # Only the floor changed, so the wetter floor can only cost yield.
+    y_hyd, _, _, _ = run_daily_cycle(baseline_profile(), config)
+    y_drh, _, _, _ = run_daily_cycle(
+        baseline_profile(), dataclasses.replace(config, c_w_floor_mode="drh")
+    )
+    assert y_drh < y_hyd

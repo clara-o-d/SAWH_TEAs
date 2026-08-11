@@ -11,10 +11,9 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
-import pandas as pd
 from scipy.optimize import root
 
-from solar_lumped._parameters_xlsx import physics_value as _pv
+from solar_lumped._parameters_xlsx import SALTS, physics_value as _pv
 from solar_lumped.utils import find_root_bracketed, load_two_column_csv
 
 if TYPE_CHECKING:
@@ -87,8 +86,8 @@ CONDENSER_THERMAL_MASS_J_M2_K: float = RHO_AL_KG_M3 * CP_AL_J_KG_K * L_C_M
 # θ = T/T_c,H2O. π is the interface water activity a_w; p_H2O from Saul–Wagner.
 
 # Conde (2004): θ ≡ T / T_c,H2O
-T_CRIT_H2O_K: float = 647.096
-P_CRIT_H2O_PA: float = 22.064e6
+T_CRIT_H2O_K: float = _pv("Water critical temperature (T_crit,H2O)")
+P_CRIT_H2O_PA: float = _pv("Water critical pressure (P_crit,H2O)")
 
 # Saturation (solubility) brine salt mass fraction: the most concentrated the liquid can
 # get. Past it the excess salt is precipitated solid, so a_w is pinned here rather than
@@ -97,10 +96,7 @@ P_CRIT_H2O_PA: float = 22.064e6
 # 42.7 wt%. Both sit inside Conde's stated validity range (§ Density: LiCl 0.56, CaCl2
 # 0.60), so the correlation is never evaluated outside its own domain.
 SOLUBILITY_G_PER_L: dict[str, float] = {
-    "LiCl": 845.0,
-    "CaCl2": 745.0,
-    "NaCl": 360.0,
-    "MgCl2": 546.0,
+    name: float(row["solubility_g_per_l"]) for name, row in SALTS.items()
 }
 
 
@@ -119,8 +115,8 @@ def saturation_brine_salt_fraction(salt_name: str) -> float:
 XI_SAT_LICL: float = saturation_brine_salt_fraction("LiCl")
 XI_SAT_CACL2: float = saturation_brine_salt_fraction("CaCl2")
 
-_BRACKET_LO: float = 0.01
-_BRACKET_HI: float = 0.75
+_BRACKET_LO: float = _pv("Brine mass-fraction bracket lower")
+_BRACKET_HI: float = _pv("Brine mass-fraction bracket upper")
 
 
 @dataclass(frozen=True, slots=True)
@@ -230,10 +226,15 @@ def equilibrium_salt_mass_fraction(
     rh = float(relative_humidity)
     if rh <= 0.0:
         return 1.0
-    if rh >= 0.99:
-        return _BRACKET_LO
     if temperature_c > temperature_max_c:
         return float("nan")
+    # Bracket exhaustion, not a dilution cap: above the activity of the most dilute
+    # bracketed brine the root lies below _BRACKET_LO and find_root_bracketed has
+    # nothing to bisect, so _BRACKET_LO is the closest representable answer. Derived
+    # per salt and temperature rather than approximated by a flat 0.99 (the true
+    # threshold is 0.9930 for LiCl, 0.9961 for CaCl2).
+    if rh >= vapor_pressure_ratio(_BRACKET_LO, temperature_c, params):
+        return _BRACKET_LO
 
     def residual(xi: float) -> float:
         return rh - vapor_pressure_ratio(xi, temperature_c, params)
@@ -282,11 +283,11 @@ def water_vapor_pressure_pa(temperature_c: float) -> float:
 STEFAN_BOLTZMANN_W_M2_K4: float = _pv("Stefan-Boltzmann constant (sigma)")
 D_AIR_M2_S: float = _pv("Water-vapor-in-air diffusivity (D_air)")  # H2O in air ~25 °C (Note S1 Sh = Nu analogy)
 GRAVITY_M_S2: float = _pv("Gravitational acceleration (g)")
-BETA_AIR_K: float = 1.0 / 300.0  # not tracked in parameters.xlsx
+BETA_AIR_K: float = 1.0 / _pv("Air reference temperature for thermal expansion")
 NU_AIR_M2_S: float = _pv("Air kinematic viscosity (nu_air)")
 PR_AIR: float = _pv("Air Prandtl number (Pr_air)")
-RHO_AIR_KG_M3: float = 1.2  # not tracked in parameters.xlsx
-CP_AIR_J_KG_K: float = 1005.0
+RHO_AIR_KG_M3: float = _pv("Air density (rho_air)")
+CP_AIR_J_KG_K: float = _pv("Air specific heat (cp_air)")
 ALPHA_AIR_M2_S: float = K_AIR_W_M_K / (RHO_AIR_KG_M3 * CP_AIR_J_KG_K)
 
 
@@ -374,6 +375,14 @@ GAS_CONSTANT_J_MOL_K: float = _pv("Universal gas constant (R)")
 C_W_MAX_MOL_M3: float = _pv("Gel water concentration upper bound (c_w,max)")
 C_W_MIN_MOL_M3: float = _pv("Gel water concentration lower bound (c_w,min)")
 
+# The one dilution cap. a_w -> 1 is infinite dilution: c_w diverges and the a_w -> f_b
+# inversion goes ill-conditioned (da_w/df_b -> 0), so an upper bound is structural, not
+# cosmetic. It used to be expressed three inconsistent ways -- per-salt rh_max, an
+# rh>=0.99 short-circuit, and C_W_MAX -- of which the tightest (C_W_MAX, a_w~0.948) was
+# the one that actually bound. Now one number gates the isotherm, clamps the equilibrium
+# inversion, and sets each salt's c_w ceiling through dilution_ceiling_c_w.
+DILUTION_CAP_RH: float = _pv("Dilution cap (maximum water activity)")
+
 
 @dataclass(frozen=True, slots=True)
 class SaltProperties:
@@ -386,48 +395,35 @@ class SaltProperties:
     default_sl: float
     rh_min: float
     rh_max: float
+    # Moles of water per mole of salt in the lowest hydrate that is stable at this
+    # model's desorption temperatures (gel runs ~60-120 C). This is the physical floor
+    # on gel water: below it the remaining water is crystal-bound, and removing it
+    # costs far more than h_fg, which Eq. 5 does not model. See hydrate_floor_c_w.
+    hydrate_h2o_per_formula: float
 
 
 @lru_cache(maxsize=1)
 def _load_salt_catalog() -> dict[str, SaltProperties]:
-    def _load_heat_of_desorption() -> dict[str, float]:
-        path = (
-            Path(__file__).resolve().parent
-            / "data"
-            / "materials"
-            / "salt_heat_of_desorption.csv"
-        )
-        if not path.is_file():
-            return {}
-        df = pd.read_csv(path)
-        out: dict[str, float] = {}
-        for _, row in df.iterrows():
-            name = str(row["salt_name"]).strip()
-            try:
-                h = float(row["heat_of_desorption_j_per_kg"])
-            except (TypeError, ValueError):
-                continue
-            if math.isfinite(h) and h > 0.0:
-                out[name] = h
-        return out
+    """Per-salt properties from the Salts sheet of docs/parameters.xlsx.
 
-    df = pd.read_csv(Path(__file__).resolve().parent / "data" / "materials" / "salt_catalog.csv")
-    h_des_table = _load_heat_of_desorption()
+    Formerly two CSVs under data/materials; salt_heat_of_desorption.csv duplicated the
+    catalog's h_des exactly (verified equal before the collapse) and contributed only
+    its provenance notes, which now live in the sheet's Source column."""
     out: dict[str, SaltProperties] = {}
-    for _, row in df.iterrows():
-        name = str(row["salt"]).strip()
-        h_des = h_des_table.get(name, float(row["h_des_j_per_kg"]))
+    for name, row in SALTS.items():
         out[name] = SaltProperties(
             name=name,
             formula_weight_g_mol=float(row["formula_weight_g_mol"]),
             ions_per_formula=int(row["ions_per_formula"]),
             price_usd_per_kg=float(row["price_usd_per_kg"]),
-            h_des_j_per_kg=float(h_des),
+            h_des_j_per_kg=float(row["h_des_j_per_kg"]),
             rho_solution_kg_m3=float(row["rho_solution_kg_m3"]),
             default_sl=float(row["default_sl"]),
-            # Derived from solubility, not tabulated -- see deliquescence_rh().
+            # Both bounds are derived, not tabulated per salt: rh_min from solubility
+            # (deliquescence_rh), rh_max from the one dilution cap shared by every salt.
             rh_min=deliquescence_rh(name),
-            rh_max=float(row["rh_max"]),
+            rh_max=DILUTION_CAP_RH,
+            hydrate_h2o_per_formula=float(row["hydrate_h2o_per_formula"]),
         )
     return out
 
@@ -443,7 +439,12 @@ def get_salt_price_usd_per_kg(name: str) -> float:
     return get_salt(name).price_usd_per_kg
 
 
-TEMPERATURE_CLAMP_C: tuple[float, float] = (-40.0, 120.0)
+# Shared with the JAX backend, which reads the same two rows -- these used to be a
+# hardcoded tuple here and separate constants there, i.e. one clamp with two sources.
+TEMPERATURE_CLAMP_C: tuple[float, float] = (
+    _pv("Temperature clamp lower bound"),
+    _pv("Temperature clamp upper bound"),
+)
 
 
 def clamp_temperature_c(temperature_c: float) -> float:
@@ -474,10 +475,10 @@ def salt_molarity_from_composite(
 
 
 # Díaz-Marín Methods — one-pot batch in 50 mL, poured into 60 mm petri dishes.
-_CHAMBER_DISH_DIAMETER_M: float = 0.060
-_SYNTHESIS_BATCH_ML: float = 50.0
-_PAM_LICL_STANDARD_POUR_ML: float = 8.0
-_PAM_LICL_2GG_CHAMBER_POUR_ML: float = 12.8  # thicker pour for similar H₀ at 20 % RH
+_CHAMBER_DISH_DIAMETER_M: float = _pv("Chamber dish diameter")
+_SYNTHESIS_BATCH_ML: float = _pv("Synthesis batch volume")
+_PAM_LICL_STANDARD_POUR_ML: float = _pv("PAM-LiCl standard pour volume")
+_PAM_LICL_2GG_CHAMBER_POUR_ML: float = _pv("PAM-LiCl 2 g/g chamber pour volume")
 _LICL_BATCH_G_BY_SL: dict[int, float] = {
     1: 4.18,
     2: 8.36,
@@ -485,8 +486,8 @@ _LICL_BATCH_G_BY_SL: dict[int, float] = {
     8: 33.44,
 }
 # Table S3 reference for anchoring synthesis c_s to the 4 g/g DVS dry-basis density.
-_CHAMBER_CS_CALIB_SL: float = 4.0
-_CHAMBER_CS_CALIB_H0_MM: float = 2.34
+_CHAMBER_CS_CALIB_SL: float = _pv("Chamber c_s calibration salt:polymer ratio")
+_CHAMBER_CS_CALIB_H0_MM: float = _pv("Chamber c_s calibration hydrogel thickness")
 _CHAMBER_CS_CALIB_POUR_ML: float = _PAM_LICL_STANDARD_POUR_ML
 
 
@@ -737,8 +738,11 @@ def equilibrium_c_w_at_rh(
     del ions_per_formula
     if rh <= 0.0:
         return 0.0
-    if rh >= 0.99:
-        return C_W_MAX_MOL_M3
+    # Clamp to the dilution cap rather than short-circuiting to a constant: above the
+    # cap the isotherm has no finite answer, and the capped equilibrium *is* the ceiling
+    # (that is exactly what dilution_ceiling_c_w asks for), so returning it keeps the
+    # bound self-consistent instead of pinning to an unrelated C_W_MAX.
+    rh = min(float(rh), DILUTION_CAP_RH)
 
     h_ref = h0_ref_m if h0_ref_m is not None else H0_M
     del h_m  # inventory referenced to H₀ (see pam_licl_gravimetric_uptake_g_g)
@@ -765,8 +769,8 @@ def equilibrium_c_w_at_rh(
     mass_water = mass_salt * (1.0 - f_b) / f_b
     if mass_water <= 0.0:
         return C_W_MIN_MOL_M3
-    c_w = mass_water / (h_ref * WATER_MOLAR_MASS_KG_MOL)
-    return max(C_W_MIN_MOL_M3, min(C_W_MAX_MOL_M3, c_w))
+    # No C_W_MAX clamp: rh is capped above, so c_w cannot exceed the dilution ceiling.
+    return mass_water / (h_ref * WATER_MOLAR_MASS_KG_MOL)
 
 
 # Methods: hydrogel cast at equilibrium with ~20% RH ambient.
@@ -986,15 +990,24 @@ def _water_activity_at_brine_fraction_by_name(
     return float("nan")
 
 
-def deliquescence_rh(salt_name: str) -> float:
-    """Deliquescence RH: the brine water activity at saturation.
+@lru_cache(maxsize=1024)
+def deliquescence_rh(salt_name: str, temperature_c: float = 25.0) -> float:
+    """Deliquescence RH: the brine water activity at saturation, at this temperature.
 
-    Derived, not tabulated -- it is the same number as ``SaltProperties.rh_min`` and the
-    lower end of the salt's usable RH window. Below it no brine exists at equilibrium, so
-    the salt stays solid and cannot take up water.
+    Derived, not tabulated. Below it no brine exists at equilibrium, so the salt stays
+    solid and cannot take up water -- which also makes it the floor a_w pins to once
+    the excess salt has precipitated.
+
+    Temperature matters: the saturation *mass fraction* is held at its solubility value
+    but the *activity* at that composition rises with temperature (LiCl 0.081 at 0 C ->
+    0.182 at 100 C), so a gel desorbing at 80 C pins ~50% higher than the 25 C value.
+    ``SaltProperties.rh_min`` keeps the 25 C default as the catalog reference.
+
+    NaCl and MgCl2 use temperature-independent polynomial isotherms, so their
+    deliquescence point does not move -- a limit of those correlations, not of this.
     """
     return _water_activity_at_brine_fraction_by_name(
-        salt_name, saturation_brine_salt_fraction(salt_name), 25.0
+        salt_name, saturation_brine_salt_fraction(salt_name), float(temperature_c)
     )
 
 
@@ -1331,6 +1344,10 @@ class MassTransferParams:
     c_s_mol_m3: float
     ions_per_formula: int
     rho_solution_kg_m3: float
+    # Gel-water bounds (mol/m³), both salt- and blend-dependent so neither can be a
+    # module constant: hydrate_floor_c_w below, dilution_ceiling_c_w above.
+    c_w_min_mol_m3: float
+    c_w_max_mol_m3: float
     salt_name: str = "LiCl"
     formula_weight_g_mol: float = 42.394
     salt_to_polymer_ratio: float = SALT_TO_POLYMER_RATIO_DEFAULT
@@ -1426,9 +1443,9 @@ def dc_w_dt(
     rate = (g / params.h0_ref_m) * (p_sat / (GAS_CONSTANT_J_MOL_K * t_k)) * driving
     if not math.isfinite(rate):
         return 0.0
-    if c_w >= C_W_MAX_MOL_M3 and rate > 0.0:
+    if c_w >= params.c_w_max_mol_m3 and rate > 0.0:
         return 0.0
-    if c_w <= C_W_MIN_MOL_M3 and rate < 0.0:
+    if c_w <= params.c_w_min_mol_m3 and rate < 0.0:
         return 0.0
     return rate
 
@@ -1449,6 +1466,106 @@ def dH_dt(
         c_w, t_gel_c=t_gel_c, c_r=c_r, params=params, h_m=h_m, phase=phase, t_cond_c=t_cond_c
     )
     return g * WATER_MOLAR_MASS_KG_MOL / params.rho_solution_kg_m3 * (p_sat / (GAS_CONSTANT_J_MOL_K * t_k)) * driving
+
+
+def hydrate_floor_c_w(
+    *,
+    c_s_mol_m3: float,
+    salt_name: str,
+    blend_weights: tuple[float, ...] | None = None,
+) -> float:
+    """Lowest physically reachable gel water concentration (mol/m³), on the H₀ basis.
+
+    Eq. 5's rate depends on c_w only through a_w, and a_w is floored at the salt's
+    deliquescence RH -- correct for the brine (below DRH the salt precipitates and a
+    saturated solution's activity stops falling), but it leaves the rate with no
+    knowledge of how much water is actually left. Desorption therefore never
+    self-terminates for a salt whose DRH sits above the condenser's concentration
+    ratio, and the ODE will drive c_w through zero. The bound that is missing is
+    chemical, not numerical: once every remaining water molecule is crystal-bound as
+    ``salt·nH₂O``, removing more is a dehydration reaction costing far more than
+    h_fg, which this model does not represent.
+
+    So the floor is n·c_s, with n blend-weighted over ZSR_SALTS. That replaces the
+    single global C_W_MIN_MOL_M3, which corresponds to 0.01-0.03 water per salt --
+    roughly 100x drier than any hydrate, i.e. no constraint at all.
+    """
+    if blend_weights is None:
+        n_eff = get_salt(salt_name).hydrate_h2o_per_formula
+    else:
+        from solar_lumped.complex_model import ZSR_SALTS, normalized_blend_weights
+
+        w = normalized_blend_weights(blend_weights)
+        n_eff = float(
+            sum(wi * get_salt(name).hydrate_h2o_per_formula for name, wi in zip(ZSR_SALTS, w))
+        )
+    return max(0.0, n_eff * float(c_s_mol_m3))
+
+
+def drh_floor_c_w(
+    *,
+    c_s_mol_m3: float,
+    salt_name: str,
+    formula_weight_g_mol: float,
+    blend_weights: tuple[float, ...] | None = None,
+    temperature_c: float = 25.0,
+) -> float:
+    """Alternative lower bound to :func:`hydrate_floor_c_w`: stop at brine saturation.
+
+    The equilibrium c_w at the deliquescence RH -- the water still held when the brine
+    reaches its solubility limit and any further drying precipitates solid salt. That is
+    where the Conde/ZSR activity model stops being a description of a real solution, so
+    it is the conservative place to stop: strictly wetter than the hydrate floor (a
+    saturated LiCl brine holds ~2.8 H2O per LiCl vs. 1 in the monohydrate), ending
+    desorption earlier and yielding less. Selected by ``SystemConfig(c_w_floor_mode="drh")``.
+
+    Taken as the saturation *composition* rather than by inverting a_w at the DRH: the
+    DRH is by construction the activity at saturation, so the inversion is being asked
+    for a root sitting exactly on its own bracket edge and returns NaN. The saturated
+    brine fraction is the same answer, directly.
+
+    Composition-only, so temperature enters solely through the blend window; a single
+    salt's solubility is not temperature-resolved in this model.
+    """
+    if blend_weights is None:
+        f_b = saturation_brine_salt_fraction(salt_name)
+    else:
+        from solar_lumped.complex_model import blend_water_activity_window, zsr_brine_state
+
+        aw_lo, _hi = blend_water_activity_window(blend_weights, temperature_c)
+        f_b, _ions, _mw = zsr_brine_state(blend_weights, aw_lo, temperature_c)
+    if not (0.0 < f_b <= 1.0):
+        return float("nan")
+    # Same H₀-basis algebra as equilibrium_c_w_at_rh, with H₀ cancelling out.
+    mass_salt_per_h = c_s_mol_m3 * formula_weight_g_mol / 1000.0
+    return mass_salt_per_h * (1.0 - f_b) / f_b / WATER_MOLAR_MASS_KG_MOL
+
+
+def dilution_ceiling_c_w(
+    *,
+    c_s_mol_m3: float,
+    salt_name: str,
+    formula_weight_g_mol: float,
+    blend_weights: tuple[float, ...] | None = None,
+    temperature_c: float = 25.0,
+) -> float:
+    """Highest physically modelled gel water concentration (mol/m³), on the H₀ basis.
+
+    The upper mirror of :func:`hydrate_floor_c_w`: the equilibrium c_w at
+    ``DILUTION_CAP_RH``. Beyond the cap the brine is so dilute that a_w -> 1, c_w
+    diverges, and the a_w -> f_b inversion loses conditioning, so the model has
+    nothing meaningful to say. Per salt and blend, because the same a_w corresponds
+    to a different water inventory for each.
+    """
+    return equilibrium_c_w_at_rh(
+        DILUTION_CAP_RH,
+        c_s=c_s_mol_m3,
+        ions_per_formula=0,
+        temperature_c=temperature_c,
+        salt_name=salt_name,
+        formula_weight_g_mol=formula_weight_g_mol,
+        blend_weights=blend_weights,
+    )
 
 
 def m_des_kg_s_m2_from_state(

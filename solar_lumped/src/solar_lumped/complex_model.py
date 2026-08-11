@@ -31,7 +31,7 @@ from functools import lru_cache
 
 import numpy as np
 
-from solar_lumped._parameters_xlsx import physics_value as _pv
+from solar_lumped._parameters_xlsx import economics_value as _ev, physics_value as _pv
 
 # =============================================================================
 # Option set
@@ -44,10 +44,10 @@ ZSR_SALTS: tuple[str, ...] = ("LiCl", "CaCl2", "MgCl2")
 
 # Below this weight a salt is treated as absent, so a nominally 3-component blend
 # that the optimizer has driven into a corner takes the fast single-salt path.
-_SINGLE_SALT_TOL: float = 1e-9
+_SINGLE_SALT_TOL: float = _pv("Single-salt blend weight tolerance")
 
 _TAU_GLASS_PER_PANE: float = _pv("Glass transmittance (tau_glass)")
-_K_AL_W_M_K: float = 167.0  # Table S3 k_Al, for the fin-efficiency parameter m
+_K_AL_W_M_K: float = _pv("Aluminum thermal conductivity (k_Al)")
 
 # The simple model's base case (Case 2) is already a *selective* absorber at
 # eps_abs_ir = 0.05 -- not the black spray paint Wilson's Methods describe. Complex
@@ -169,8 +169,8 @@ def normalized_blend_weights(weights: tuple[float, ...] | np.ndarray) -> np.ndar
 # bucket and interpolated.
 # ponytail: linear interp on a 512-point grid, ~1e-6 relative on a smooth monotone
 # curve; swap in a spline only if the blend optimum ever looks grid-sensitive.
-_MOLALITY_GRID_POINTS: int = 512
-_T_BUCKET_C: float = 0.5  # temperature quantization for the tabulated curve
+_MOLALITY_GRID_POINTS: int = int(_pv("Binary molality curve grid points"))
+_T_BUCKET_C: float = _pv("Binary molality curve temperature bucket")
 
 
 @lru_cache(maxsize=4096)
@@ -271,11 +271,12 @@ def zsr_brine_state(
 
 # Inset from the window edges: the isotherm fits are evaluated *at* rh_min/rh_max,
 # so stepping a hair inside keeps both bracket endpoints finite.
-_AW_WINDOW_INSET: float = 1e-4
+_AW_WINDOW_INSET: float = _pv("Water-activity window inset")
 
 
 def blend_water_activity_window(
     blend_weights: tuple[float, ...] | np.ndarray,
+    temperature_c: float = 25.0,
 ) -> tuple[float, float]:
     """Water-activity range over which the blend holds *some* liquid brine.
 
@@ -284,13 +285,24 @@ def blend_water_activity_window(
     :func:`zsr_brine_state`) while the stronger ones keep a brine. So a blend
     reaches as dry as its best component, with progressively less dissolved salt.
     The upper edge is the *smallest* rh_max, past which the isotherm fits stop.
+
+    The lower edge moves with temperature, and getting that wrong is not cosmetic: it
+    is the value a_w pins to through the whole two-phase region, so it sets the
+    desorption driving force for a gel that has dried past saturation. Fixed at 25 C
+    it understated a_w by 0.055 at 80 C for LiCl -- a ~30x error in (c_r - a_w).
+
+    Never goes below the 25 C catalog ``rh_min``, because that is the gate
+    ``physics.equilibrate_salt_mf`` rejects outside; below 25 C the window therefore
+    stays at its old value rather than following the isotherm down.
     """
-    from solar_lumped.physics import get_salt
+    from solar_lumped.physics import deliquescence_rh, get_salt
 
     w = normalized_blend_weights(blend_weights)
-    active = [get_salt(n) for n, wi in zip(ZSR_SALTS, w) if wi > 1e-15]
-    lo = min(rec.rh_min for rec in active) + _AW_WINDOW_INSET
-    hi = min(rec.rh_max for rec in active) - _AW_WINDOW_INSET
+    active = [n for n, wi in zip(ZSR_SALTS, w) if wi > 1e-15]
+    lo = min(
+        max(deliquescence_rh(n, float(temperature_c)), get_salt(n).rh_min) for n in active
+    ) + _AW_WINDOW_INSET
+    hi = min(get_salt(n).rh_max for n in active) - _AW_WINDOW_INSET
     return float(lo), float(hi)
 
 
@@ -338,8 +350,13 @@ def _blend_fb_curve(
 
     Cached on the exact weight tuple, which is constant for the whole of any single
     ODE integration -- so one design pays for one table.
+
+    The window is taken at this curve's own temperature bucket, not at 25 C, so the
+    concentrated edge sits at the saturated activity the gel actually sees. The JAX
+    table does the same per temperature row -- both must, or the backends disagree
+    exactly where the gel is driest.
     """
-    lo, hi = blend_water_activity_window(blend_weights)
+    lo, hi = blend_water_activity_window(blend_weights, t_bucket_c)
     if not (hi > lo):
         return np.empty(0), np.empty(0)
     aw = np.linspace(lo, hi, _MOLALITY_GRID_POINTS)
@@ -358,8 +375,12 @@ def _blend_fb_curve(
 # CPU path uses the same builder, so the two backends are inverting *the same*
 # numbers rather than two implementations that have to be kept in agreement.
 
-ZSR_TABLE_T_GRID_C: tuple[float, float, int] = (0.0, 100.0, 41)  # lo, hi, count
-ZSR_TABLE_FB_POINTS: int = 256
+ZSR_TABLE_T_GRID_C: tuple[float, float, int] = (
+    _pv("ZSR inverse table temperature grid lower"),
+    _pv("ZSR inverse table temperature grid upper"),
+    int(_pv("ZSR inverse table temperature grid points")),
+)
+ZSR_TABLE_FB_POINTS: int = int(_pv("ZSR inverse table brine-fraction points"))
 
 
 @lru_cache(maxsize=1024)
@@ -377,12 +398,20 @@ def zsr_inverse_table(
     """
     t_lo, t_hi, n_t = ZSR_TABLE_T_GRID_C
     t_grid = np.linspace(t_lo, t_hi, n_t)
-    aw_lo, aw_hi = blend_water_activity_window(blend_weights)
 
-    # Common f_b axis spanning every temperature's reachable range.
+    # Common f_b axis spanning every temperature's reachable range. Each row takes the
+    # window at ITS OWN temperature: the concentrated edge is the saturated activity,
+    # which rises with temperature, and that edge value is what a_w pins to for every
+    # f_b past saturation. Sharing one 25 C window across all rows pinned an 80 C gel
+    # at the 25 C activity -- 0.106 instead of 0.162 for LiCl, a ~30x error in the
+    # desorption driving force (c_r - a_w) through the whole two-phase region.
     fb_bounds = []
     per_t_curves = []
     for t in t_grid:
+        aw_lo, aw_hi = blend_water_activity_window(blend_weights, float(t))
+        if not (aw_hi > aw_lo):
+            per_t_curves.append((np.empty(0), np.empty(0)))
+            continue
         aw = np.linspace(aw_lo, aw_hi, ZSR_TABLE_FB_POINTS)
         fb = np.array([zsr_brine_state(blend_weights, float(a), float(t))[0] for a in aw])
         ok = np.isfinite(fb)
@@ -554,7 +583,7 @@ ABSORBER_COATING_COST_ANCHORS: tuple[tuple[float, float], ...] = (
 
 # The premium the anchors above encode, asserted so a future re-fit that breaks it
 # is caught rather than silently shifting every B1 result.
-CASE2_COATING_PREMIUM_USD_PER_M2: float = 10.00
+CASE2_COATING_PREMIUM_USD_PER_M2: float = _ev("Case 2 selective coating premium")
 
 
 def absorber_coating_cost_usd_per_m2(eps_abs_ir: float) -> float:
@@ -571,8 +600,8 @@ def absorber_coating_cost_usd_per_m2(eps_abs_ir: float) -> float:
 
 
 # --- B2: glazing stack, USD/m^2 ---
-GLAZING_COST_PER_PANE_USD_PER_M2: float = 12.00  # low-iron float, installed
-EVACUATED_GAP_PREMIUM_USD_PER_M2: float = 90.00  # sealed evacuated panel
+GLAZING_COST_PER_PANE_USD_PER_M2: float = _ev("Glazing cost per pane")
+EVACUATED_GAP_PREMIUM_USD_PER_M2: float = _ev("Evacuated gap premium")
 
 
 def glazing_cost_usd_per_m2(n_panes: int, *, evacuated: bool = False) -> float:
@@ -584,7 +613,7 @@ def glazing_cost_usd_per_m2(n_panes: int, *, evacuated: bool = False) -> float:
 
 
 # --- B3: condenser fin aluminum, USD/m^2 ---
-ALUMINUM_PRICE_USD_PER_KG: float = 2.20  # Table S2 basis: $29.87 / 13.55 kg
+ALUMINUM_PRICE_USD_PER_KG: float = _ev("Aluminum price")
 _RHO_AL_KG_M3: float = _pv("Aluminum density (rho_Al)")
 
 
@@ -609,10 +638,10 @@ def fin_material_cost_usd_per_m2(
 # --- B4: forced condenser cooling, USD/m^2 (Wilson Table S2 line items) ---
 # "Condenser fans, 50 qty, $34.50" + "Electronics, PV cells, 50 qty, $20.00" buy
 # the ~0.5 m/s the Atacama system blows over its condenser (Note S2).
-CONDENSER_FAN_COST_USD_PER_M2: float = 34.50
-CONDENSER_PV_COST_USD_PER_M2: float = 20.00
-WILSON_FAN_AIR_SPEED_M_S: float = 0.5
-FAN_LIFETIME_YEARS: float = 5.0
+CONDENSER_FAN_COST_USD_PER_M2: float = _ev("Condenser fan cost")
+CONDENSER_PV_COST_USD_PER_M2: float = _ev("Condenser PV cost")
+WILSON_FAN_AIR_SPEED_M_S: float = _pv("Wilson condenser fan air speed")
+FAN_LIFETIME_YEARS: float = _ev("Condenser fan lifetime")
 
 
 def forced_cooling_capex_usd_per_m2(air_speed_m_s: float) -> float:

@@ -133,6 +133,19 @@ def test_water_inventory_series_baseline():
     assert series.collected_water_l_m2[-1] == pytest.approx(des_res.water_collected_kg_m2, rel=0.02)
 
 
+def test_conservation_drift_series_small_near_baseline():
+    from solar_lumped.simulation import conservation_drift_series
+
+    y, _, abs_res, des_res = run_daily_cycle(baseline_profile(), SystemConfig.baseline())
+    drift = conservation_drift_series(des_res, config=SystemConfig.baseline())
+    assert len(drift.mass_l_m2) == len(drift.mass_drift_l_m2) == len(des_res.time_s)
+    scale = float(np.max(drift.mass_l_m2)) - float(np.min(drift.mass_l_m2))
+    assert float(np.max(np.abs(drift.mass_drift_l_m2))) < 0.05 * max(scale, 1e-9)
+    assert drift.enthalpy_j_m2 is not None and drift.enthalpy_drift_j_m2 is not None
+    e_scale = float(np.max(drift.enthalpy_j_m2)) - float(np.min(drift.enthalpy_j_m2))
+    assert float(np.max(np.abs(drift.enthalpy_drift_j_m2))) < 0.05 * max(e_scale, 1e-9)
+
+
 def test_baseline_simulation_runs():
     y, eta, _, _ = run_daily_cycle(baseline_profile(), SystemConfig.baseline())
     assert y >= 0.0

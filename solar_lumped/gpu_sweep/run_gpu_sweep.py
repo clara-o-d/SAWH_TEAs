@@ -79,6 +79,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Pin T_cond == T_amb instead of solving Eq. 2's condenser ODE -- the "
         "infinite-cooling-capacity limit, not a physical design.",
     )
+    p.add_argument(
+        "--cw-floor", choices=("hydrate", "drh"), default="hydrate",
+        help="Which limit stops desorption. hydrate (default): crystal-hydrate water, "
+        "n*c_s. drh: the wetter, more conservative equilibrium c_w at the salt's "
+        "deliquescence RH, where the brine saturates.",
+    )
     p.add_argument("--blend-weights", type=float, nargs=3, default=None,
                    metavar=("LICL", "CACL2", "MGCL2"),
                    help="B8 ZSR molality weights, renormalized (default: pure LiCl).")
@@ -186,6 +192,8 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, client: WeatherCl
         configs = [dataclasses.replace(cfg, complex=_complex_options(args)) for cfg in configs]
     if args.condenser_ambient:
         configs = [dataclasses.replace(cfg, condenser_tracks_ambient=True) for cfg in configs]
+    if args.cw_floor != "hydrate":
+        configs = [dataclasses.replace(cfg, c_w_floor_mode=args.cw_floor) for cfg in configs]
 
     # Batch axis is the combo list; every combo walks the same year in lockstep, one
     # vmapped step per day, so days stay sequential and combos run in parallel.
@@ -221,6 +229,7 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, client: WeatherCl
                 "vapor_gap_mm": combo.vapor_gap_mm,
                 "warmup_method": "aitken-gpu-fixed-round", "resolution": "annual",
                 "condenser_mode": "ambient" if args.condenser_ambient else "ode",
+                "c_w_floor_mode": args.cw_floor,
                 "mean_yield_kg_m2": f"{mean_yield[ci]:.6f}", "mean_eta_thermal": f"{mean_eta[ci]:.6f}",
                 "n_periods": len(days),
                 # Complex settings are recorded per row, not just in the invocation:

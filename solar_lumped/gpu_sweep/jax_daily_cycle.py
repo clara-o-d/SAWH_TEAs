@@ -56,7 +56,7 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
         c_w_initial, h_initial,
         t_amb_abs, rh_abs, h_amb_abs, n_abs_real,
         t_amb_des, solar_des, h_amb_des, n_des_real,
-        c_s_mol_m3, formula_weight_g_mol, g_conv_m_s, eps_abs, tau_glass,
+        c_s_mol_m3, formula_weight_g_mol, c_w_min_mol_m3, c_w_max_mol_m3, g_conv_m_s, eps_abs, tau_glass,
         eps_abs_ir, eps_glass_ir,
         h0_ref_m, vapor_gap_m, insulation_gap_m, tilt_deg, fin_area_ratio,
         salt_to_polymer_ratio, h_fg_j_per_kg,
@@ -75,7 +75,9 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
 
         mass = jp.MassParams(
             h0_ref_m=h0_ref_m, vapor_gap_m=vapor_gap_m, tilt_deg=tilt_deg,
-            c_s_mol_m3=c_s_mol_m3, formula_weight_g_mol=formula_weight_g_mol, g_conv_m_s=g_conv_m_s,
+            c_s_mol_m3=c_s_mol_m3, formula_weight_g_mol=formula_weight_g_mol,
+            c_w_min_mol_m3=c_w_min_mol_m3, c_w_max_mol_m3=c_w_max_mol_m3,
+            g_conv_m_s=g_conv_m_s,
             aw_table=aw_table,
         )
         thermal = jp.ThermalParams(
@@ -109,7 +111,7 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
             t_amb_c = t_amb_des[i]
             q_solar = solar_des[i]
             h_amb = h_amb_des[i]
-            t_cond_c = t_amb_c if condenser_tracks_ambient else jnp.clip(y[2], -40.0, 120.0)
+            t_cond_c = t_amb_c if condenser_tracks_ambient else jp.clamp_temperature_c(y[2])
             t_gel0 = jnp.maximum(t_amb_c + 5.0, t_cond_c + 5.0)
             guess = [t_gel0, t_gel0 + jnp.clip(q_solar / 40.0, 5.0, 30.0), t_amb_c + 2.0]
             if complex_mode:
@@ -139,10 +141,10 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
             stepsize_controller=diffrax.PIDController(rtol=_RTOL, atol=_ATOL, dtmax=dt),
             max_steps=16384, adjoint=diffrax.DirectAdjoint(), throw=False,
         )
-        c_w_mid = jnp.clip(sol_abs.ys[0, 0], jp.C_W_MIN_MOL_M3, jp.C_W_MAX_MOL_M3)
+        c_w_mid = jnp.clip(sol_abs.ys[0, 0], c_w_min_mol_m3, c_w_max_mol_m3)
         h_mid = jnp.clip(sol_abs.ys[0, 1], h0_ref_m, h_max_m)
 
-        t_cond0 = jnp.clip(t_amb_des[0], -40.0, 120.0)
+        t_cond0 = jp.clamp_temperature_c(t_amb_des[0])
         y0_des = jnp.array([c_w_mid, h_mid, t_cond0, 0.0])
         sol_des = diffrax.diffeqsolve(
             diffrax.ODETerm(des_vf), diffrax.Tsit5(), t0=0.0, t1=dt * n_des_max, dt0=dt, y0=y0_des, args=None,
@@ -155,7 +157,7 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
         solar_sum = jnp.sum(jnp.where(jnp.arange(n_des_max) < n_des_real, solar_des, 0.0)) * dt
         eta = jnp.where(solar_sum > 0.0, water * h_fg_j_per_kg / solar_sum, 0.0)
 
-        c_w_end = jnp.clip(sol_des.ys[0, 0], jp.C_W_MIN_MOL_M3, jp.C_W_MAX_MOL_M3)
+        c_w_end = jnp.clip(sol_des.ys[0, 0], c_w_min_mol_m3, c_w_max_mol_m3)
         h_end = jnp.maximum(sol_des.ys[0, 1], h0_ref_m)
         return water, eta, c_w_end, h_end
 
@@ -200,6 +202,11 @@ def build_system_arrays(configs, *, complex_mode=False):
     arrays = dict(
         c_s_mol_m3=jnp.array([m.c_s_mol_m3 for m in mass_ps]),
         formula_weight_g_mol=jnp.array([m.formula_weight_g_mol for m in mass_ps]),
+        # Gel-water bounds, per instance -- salt- and blend-dependent, so neither can be
+        # the module constant the guards used to read. Both come straight off
+        # MassTransferParams so the two backends bound at the same numbers by construction.
+        c_w_min_mol_m3=jnp.array([m.c_w_min_mol_m3 for m in mass_ps]),
+        c_w_max_mol_m3=jnp.array([m.c_w_max_mol_m3 for m in mass_ps]),
         g_conv_m_s=jnp.array([m.g_conv_m_s for m in mass_ps]),
         eps_abs=jnp.array([t.eps_abs for t in thermal_ps]),
         tau_glass=jnp.array([t.tau_glass for t in thermal_ps]),

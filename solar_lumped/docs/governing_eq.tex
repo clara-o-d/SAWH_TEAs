@@ -142,8 +142,13 @@ modeled in either phase.
 $\dot{m}_{calc}(\dot{m}_{des}) - \dot{m}_{des} = 0$ (Brent's method) so that the gel heat balance
 (Eq.~1) and the mass-transfer equations (Eqs.~5--6) agree on the same rate at every step.
 \item \textbf{Scope:} default salt is LiCl with a hydrogel sorbent. A MOF-sorbent path and three
-additional deliquescent salts exist in code with their own property tables but are not documented
-further here.
+additional deliquescent salts (blendable via ZSR mixing) exist in code with their own property
+tables but are not documented further here, except to note that a blend's deliquescence RH (the
+water-activity floor of its brine window, \code{deliquescence\_rh}) is temperature-dependent for
+LiCl/CaCl$_2$ and is evaluated at the gel's actual temperature bucket, not a fixed 25\,\si{\celsius}
+-- a fixed-25\,\si{\celsius} floor understated $a_w$ by 0.055 at 80\,\si{\celsius} for LiCl, a
+$\sim$30$\times$ error in the desorption driving force $(C_R-a_w)$ for a gel dried past
+saturation.
 \item \textbf{Initial condition:} $c_w$ initializes at equilibrium with the $\sim$\SI{20}{\percent}
 RH ambient the gel is fabricated at (DVS isotherm, LiCl), unless a cyclic steady-state or explicit
 override is requested instead.
@@ -306,7 +311,19 @@ Eqs.~1 and 5--6 are self-consistent at each ODE evaluation.
 \section{Constraints and cycle-level outputs}
 
 \begin{itemize}
-\item $c_w \in [c_{w,\min}, c_{w,\max}]$; rates clipped at bounds.
+\item $c_w \in [c_{w,\min}, c_{w,\max}]$; rates clipped at bounds. Both bounds are physical, not
+tuning constants, and are computed per salt/blend and salt loading $c_s$ rather than shared global
+values: $c_{w,\min} = n_{hydrate}\,c_s$ is the water content of the lowest hydrate stable at
+desorption temperatures (\code{hydrate\_floor\_c\_w}) -- below it the remaining water is
+crystal-bound and removing it is a dehydration reaction Eq.~\eqref{eq:dcw} does not model;
+$c_{w,\max}$ is the equilibrium $c_w$ at a shared dilution-cap water activity
+(\code{dilution\_ceiling\_c\_w}, \code{Dilution cap (maximum water activity)} row) -- past it
+$a_w\to 1$, $c_w$ diverges, and the $a_w \to$ brine-fraction inversion loses conditioning.
+\code{SystemConfig(c\_w\_floor\_mode="drh")} swaps the lower bound for the equilibrium $c_w$ at
+the salt's deliquescence RH (\code{drh\_floor\_c\_w}) -- i.e.\ stop where the brine saturates
+rather than where it crystallizes. That is the conservative choice: a saturated LiCl brine still
+holds $\approx$2.78 H$_2$O per LiCl against 1 in the monohydrate, so it ends desorption earlier
+and yields less (baseline profile: 2.30 vs.\ \SI{2.61}{\kilo\gram\per\square\metre\per day}).
 \item $H \ge H_0$; swelling allowed in absorption ($\dot{H}\ge 0$ at $H=H_0$); no shrinkage below
 $H_0$ in desorption.
 \item Desorption: enforce $\dot{c}_w \le 0$, $\dot{H} \le 0$.
@@ -456,10 +473,13 @@ $1-\left(1 - i\,CAPEX/(R_{annual}-OPEX_{annual})\right) = (1+i)^{-t}$ for $t$
 
 \section{Integration}
 
-The coupled physics system is integrated with SciPy \code{solve\_ivp} (Radau, stiff). State
-during desorption: $\mathbf{y} = [c_w,\, H,\, T_{cond}]$; during absorption: $\mathbf{y} =
-[c_w,\, H]$. LCOW/NPV are evaluated post-hoc from the resulting daily yield -- they do not feed
-back into the ODE integration.
+The coupled physics system is integrated with SciPy \code{solve\_ivp} (LSODA, stiff-capable
+multistep). State during desorption: $\mathbf{y} = [c_w,\, H,\, T_{cond}]$; during absorption:
+$\mathbf{y} = [c_w,\, H]$. LCOW/NPV are evaluated post-hoc from the resulting daily yield -- they
+do not feed back into the ODE integration. Water-balance closure (measured yield vs.\ the
+inventory drop implied by the states) is checked each desorption solve against a tolerance
+(\code{Desorption water-balance closure tolerance}, Physics sheet) and raises if violated --
+catching the LSODA step-rejection failure mode where reported yield silently freezes.
 
 \section{Open items}
 

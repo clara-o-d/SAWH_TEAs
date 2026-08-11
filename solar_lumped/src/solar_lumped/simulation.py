@@ -17,6 +17,7 @@ import pandas as pd
 from scipy.integrate import solve_ivp
 from scipy.optimize import brentq
 
+from solar_lumped._parameters_xlsx import physics_value as _pv
 from solar_lumped.complex_model import ComplexOptions
 from solar_lumped.economics import LCOEconomicParams, lcow_from_daily_yield
 from solar_lumped.physics import (
@@ -49,7 +50,10 @@ from solar_lumped.physics import (
     desorption_water_activity,
     evaluate_mass_rates,
     get_salt,
+    dilution_ceiling_c_w,
+    drh_floor_c_w,
     hollands_vapor_gap_h_conv_w_m2_k,
+    hydrate_floor_c_w,
     initial_loading,
     inventory_ylabel,
     m_des_kg_s_m2_from_dc_w,
@@ -99,6 +103,13 @@ class SystemConfig:
     # infinite cooling capacity, T_cond == T_amb at every instant -- an upper bound
     # on desorption driving force, not a physical design.
     condenser_tracks_ambient: bool = False
+    # Which physical limit stops desorption. "hydrate" (default): the crystal-hydrate
+    # water content, n*c_s -- the driest the gel can get before dehydration chemistry
+    # this model doesn't have takes over. "drh": the equilibrium c_w at the salt's
+    # deliquescence RH, i.e. stop where the brine saturates and the activity
+    # correlations stop describing a real solution. "drh" is the wetter, more
+    # conservative bound and yields less. See physics.hydrate_floor_c_w / drh_floor_c_w.
+    c_w_floor_mode: Literal["hydrate", "drh"] = "hydrate"
 
     def desorption_surface_ic_c(self) -> tuple[float, float, float, float] | None:
         """Configured (T_gel, T_abs, T_glass, T_cond) at desorption start, if any."""
@@ -145,18 +156,31 @@ class SystemConfig:
                 )
                 if math.isfinite(fw_blend):
                     fw = fw_blend
+        c_s = salt_molarity_from_composite(
+            self.salt_to_polymer_ratio, self.hydrogel_density_kg_m3, fw
+        )
         return MassTransferParams(
             g_conv_m_s=self.g_conv_m_s,
             h0_ref_m=self.hydrogel_thickness_m,
             vapor_gap_m=self.vapor_gap_m,
             tilt_deg=self.tilt_deg,
-            c_s_mol_m3=salt_molarity_from_composite(
-                self.salt_to_polymer_ratio,
-                self.hydrogel_density_kg_m3,
-                fw,
-            ),
+            c_s_mol_m3=c_s,
             ions_per_formula=s.ions_per_formula,
             rho_solution_kg_m3=s.rho_solution_kg_m3,
+            c_w_min_mol_m3=(
+                hydrate_floor_c_w(
+                    c_s_mol_m3=c_s, salt_name=s.name, blend_weights=blend_weights
+                )
+                if self.c_w_floor_mode == "hydrate"
+                else drh_floor_c_w(
+                    c_s_mol_m3=c_s, salt_name=s.name, formula_weight_g_mol=fw,
+                    blend_weights=blend_weights,
+                )
+            ),
+            c_w_max_mol_m3=dilution_ceiling_c_w(
+                c_s_mol_m3=c_s, salt_name=s.name, formula_weight_g_mol=fw,
+                blend_weights=blend_weights,
+            ),
             salt_name=s.name,
             formula_weight_g_mol=fw,
             salt_to_polymer_ratio=self.salt_to_polymer_ratio,
@@ -487,10 +511,11 @@ def evaluate_coupled_rates(
         thermal=state,
     )
 
-# --- SciPy Radau integration for Wilson half-cycles (coupled Eqs. 1-6 + Eq. 2) ---
+# --- SciPy LSODA integration for Wilson half-cycles (coupled Eqs. 1-6 + Eq. 2) ---
 
 _ODE_RTOL = 1e-4
 _ODE_ATOL = 1e-7
+WATER_BALANCE_TOL: float = _pv("Desorption water-balance closure tolerance")
 
 
 @dataclass
@@ -506,6 +531,9 @@ class PhaseResult:
     # by quasi_steady (algebraic Eqs 1/3/4 each step, with k=0 pinned when ICs set).
     t_abs_c: np.ndarray | None = None
     t_glass_c: np.ndarray | None = None
+    # Raw RHS rate at each output point, kept only for the conservation_drift_series
+    # self-consistency check below -- not used by anything upstream.
+    dT_cond_dt: np.ndarray | None = None
 
 
 def _profile_index(t: float, dt_s: float, n: int) -> int:
@@ -714,6 +742,7 @@ def _integrate_desorption(
     t_glass_hist: list[float] = []
     t_cond_hist: list[float] = []
     m_des_hist: list[float] = []
+    dT_cond_hist: list[float] = []
     guess: tuple[float, float, float] | None = t_guess0
     for k in range(len(sol.t)):
         i = _profile_index(float(sol.t[k]), dt, n)
@@ -752,6 +781,7 @@ def _integrate_desorption(
             t_glass_hist.append(rates.thermal.t_glass_c)
         t_cond_hist.append(t_cond_c)
         m_des_hist.append(rates.m_des_kg_s_m2)
+        dT_cond_hist.append(rates.dT_cond_dt)
 
     water = float(cumulative_desorption_yield_l_m2(sol.t, m_des_hist)[-1])
 
@@ -765,7 +795,7 @@ def _integrate_desorption(
     # yield then freezes and is silently understated -- 67-99% low on the cases that
     # trip it, vs <=0.09% trapezoid error when the integration is sound.
     inventory_drop = float(sol.y[0, 0] - sol.y[0, -1]) * mass.h0_ref_m * WATER_MOLAR_MASS_KG_MOL
-    if abs(water - inventory_drop) > 0.01 * max(abs(inventory_drop), 1e-12):
+    if abs(water - inventory_drop) > WATER_BALANCE_TOL * max(abs(inventory_drop), 1e-12):
         t_cond_note = "" if ambient_condenser else f", T_cond -> {sol.y[2, -1]:.1f} C"
         raise RuntimeError(
             f"Desorption integration did not conserve water: yield {water:.4f} L/m2 "
@@ -785,6 +815,7 @@ def _integrate_desorption(
         m_des_kg_s_m2=np.array(m_des_hist),
         t_abs_c=np.array(t_abs_hist),
         t_glass_c=np.array(t_glass_hist),
+        dT_cond_dt=np.array(dT_cond_hist),
     )
 
 
@@ -1274,6 +1305,54 @@ def water_inventory_series(
         phase=phase,
         absorption_end_s=t_abs_end,
         collected_water_l_m2=collected_water_l_m2,
+    )
+
+
+# --- Per-point mass/enthalpy drift: LSODA's dense output vs. the RHS it integrated.
+# Growing drift here is the error indicator solve_ivp doesn't otherwise expose -- it
+# is not corrected/normalized, only reported. Absorption has no independent output
+# flux to check the sorbent uptake against (the ambient air reservoir isn't tracked),
+# so this only covers desorption, where m_des and dT_cond_dt are known boundary flows.
+
+@dataclass(frozen=True, slots=True)
+class ConservationDriftSeries:
+    time_s: np.ndarray
+    mass_l_m2: np.ndarray
+    mass_drift_l_m2: np.ndarray
+    enthalpy_j_m2: np.ndarray | None
+    enthalpy_drift_j_m2: np.ndarray | None
+
+
+def conservation_drift_series(
+    des_res: PhaseResult, *, config: SystemConfig
+) -> ConservationDriftSeries:
+    """Sorbent water mass and condenser enthalpy at each desorption output point,
+    compared to what the integrated m_des/dT_cond_dt flows predict."""
+    mass_l_m2 = np.array(
+        [
+            water_in_sorbent_l_m2(float(c), float(h), config=config)
+            for c, h in zip(des_res.c_w, des_res.H)
+        ]
+    )
+    predicted_loss = cumulative_desorption_yield_l_m2(des_res.time_s, des_res.m_des_kg_s_m2)
+    mass_drift_l_m2 = (mass_l_m2[0] - mass_l_m2) - predicted_loss
+
+    enthalpy_j_m2 = None
+    enthalpy_drift_j_m2 = None
+    if des_res.dT_cond_dt is not None and des_res.t_cond_c is not None:
+        tmass = config.condenser_thermal_mass_j_m2_k()
+        enthalpy_j_m2 = tmass * des_res.t_cond_c
+        predicted_denthalpy = cumulative_desorption_yield_l_m2(
+            des_res.time_s, tmass * des_res.dT_cond_dt
+        )
+        enthalpy_drift_j_m2 = (enthalpy_j_m2 - enthalpy_j_m2[0]) - predicted_denthalpy
+
+    return ConservationDriftSeries(
+        time_s=des_res.time_s,
+        mass_l_m2=mass_l_m2,
+        mass_drift_l_m2=mass_drift_l_m2,
+        enthalpy_j_m2=enthalpy_j_m2,
+        enthalpy_drift_j_m2=enthalpy_drift_j_m2,
     )
 
 
