@@ -29,6 +29,7 @@ _REPO = Path(__file__).resolve().parents[2]
 MATCHED_CSV = _REPO / "solar_lumped" / "outputs" / "case2_variants_matched.csv"
 SITES_CSV = _REPO / "analysis" / "global" / "case2_variants_best_per_site.csv"
 OUTPUT = _REPO / "analysis" / "global" / "case2_variants_comparison.png"
+OUTPUT_BARS = _REPO / "analysis" / "global" / "case2_variants_mean_yield.png"
 
 # Categorical slots 1-2 (validated against the light chart surface). Colour follows
 # the variant, not its rank, so drh stays blue in both panels.
@@ -43,11 +44,50 @@ VARIANTS = (
 )
 
 
+def plot_mean_yield(m: pd.DataFrame) -> None:
+    """Mean yield per variant over the matched points, as a bar chart."""
+    bars = (("base", INK_MUTED, "Base"), ("drh", C_DRH, "DRH floor"),
+            ("ambient_cond", C_AMB, "Ambient condenser"))
+    means = [m[k].mean() for k, _, _ in bars]
+
+    fig, ax = plt.subplots(figsize=(6.2, 4.6), facecolor=SURFACE)
+    x = np.arange(len(bars))
+    ax.bar(x, means, width=0.62, color=[c for _, c, _ in bars], zorder=3)
+    for xi, (k, colour, _), mu in zip(x, bars, means):
+        # Value on every bar (only three) plus the paired delta, which is the number
+        # the chart is actually being asked for -- a bare mean invites eyeballing
+        # bar heights that differ by 5%.
+        delta = "" if k == "base" else f"\n{mu / means[0] - 1:+.1%} vs base"
+        ax.annotate(f"{mu:.3f}{delta}", xy=(xi, mu), xytext=(0, 6), ha="center",
+                    textcoords="offset points", color=colour, fontsize=10)
+
+    ax.set_xticks(x, [lab for _, _, lab in bars], color=INK_2)
+    ax.set_ylim(0, max(means) * 1.22)
+    ax.set_ylabel("Mean annual yield (kg m$^{-2}$ day$^{-1}$)", color=INK_2)
+    ax.set_title(
+        f"Case 2 variants, {len(m):,} matched points over "
+        f"{m.groupby(['lat', 'lon']).ngroups} sites",
+        color=INK, fontsize=11, loc="left", pad=10,
+    )
+    ax.set_facecolor(SURFACE)
+    ax.grid(True, axis="y", color=INK_MUTED, alpha=0.18, lw=0.7)
+    ax.set_axisbelow(True)
+    for side in ("top", "right"):
+        ax.spines[side].set_visible(False)
+    for side in ("left", "bottom"):
+        ax.spines[side].set_color(INK_MUTED)
+    ax.tick_params(colors=INK_2, labelsize=9)
+
+    fig.savefig(OUTPUT_BARS, dpi=200, bbox_inches="tight", facecolor=SURFACE)
+    print(f"wrote {OUTPUT_BARS.relative_to(_REPO)}")
+
+
 def main() -> int:
     if not MATCHED_CSV.is_file():
         sys.exit(f"missing {MATCHED_CSV.relative_to(_REPO)} -- scp it from Sherlock first")
     m = pd.read_csv(MATCHED_CSV)
     ratio = pd.DataFrame({v: m[v] / m["base"] for v, *_ in VARIANTS})
+    plot_mean_yield(m)
 
     fig, (ax_l, ax_r) = plt.subplots(1, 2, figsize=(12.5, 5.0), facecolor=SURFACE)
     fig.subplots_adjust(wspace=0.26)
