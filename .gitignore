@@ -14,3 +14,8 @@ outputs/
 !**/tornado_plots/.gitkeep
 
 *.mph
+
+# Slurm's default per-task output, written to the submit directory when a job's
+# --output path is unavailable. An array job drops thousands of these and makes
+# `git status` take ~90s while it walks them.
+slurm-*.out
