@@ -93,7 +93,7 @@ _RH_COLORS: dict[int, str] = {
 class HydrogelCase:
     key: str
     panel_title: str
-    salt_to_polymer_ratio: float
+    salt_loading: float
     h0_mm: float
     salt_name: str = "LiCl"
     t_max_min: float = 5200.0
@@ -118,7 +118,7 @@ _PANELS: tuple[HydrogelCase, ...] = (
 def _chamber_params(case: HydrogelCase) -> run_solar_sim.HydrogelChamberParams:
     return run_solar_sim.build_hydrogel_chamber_params(
         salt=case.salt_name,
-        salt_loading=case.salt_to_polymer_ratio,
+        salt_loading=case.salt_loading,
         h0_mm=case.h0_mm,
         g_conv_m_s=_G_CONV_M_S,
         pour_ml=case.pour_ml,
@@ -295,7 +295,7 @@ def main() -> Path:
     print(f"\nRH switch times from {schedule_label} (high → 20 %):")
     print(format_schedule_table(schedules))
     for case in _PANELS:
-        print(f"  {case.panel_title}: SL={case.salt_to_polymer_ratio}, H₀={case.h0_mm:.2f} mm")
+        print(f"  {case.panel_title}: SL={case.salt_loading}, H₀={case.h0_mm:.2f} mm")
     return plot_figure5(schedules, dt_s=args.dt_s)
 
 

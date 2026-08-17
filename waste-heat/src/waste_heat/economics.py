@@ -6,81 +6,100 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, fields
-from pathlib import Path
 from typing import Any
 
+from solar_lumped._parameters_xlsx import ECONOMICS as _ECON_XLSX
+from solar_lumped._parameters_xlsx import PHYSICS as _PHYS_XLSX
+from solar_lumped._parameters_xlsx import economics_value as _ev
+from solar_lumped._parameters_xlsx import physics_value as _pv
 from waste_heat.physics import (
     DRY_COMPOSITE_DENSITY_KG_M3,
     H_FG_J_PER_KG,
     get_salt_price_usd_per_kg,
 )
 
-_COL_PARAMETER = "parameter"
-_COL_VALUE = "value"
-_SYSTEM_BOM_PREFIX = "system_bom_"
-_PHYSICAL_SCALAR_PARAMS: tuple[str, ...] = (
-    "hydrogel_thickness_m",
-    "hydrogel_thickness_min_m",
-    "hydrogel_thickness_max_m",
-    "hydrogel_density_kg_m3",
-    "water_density_kg_per_l",
-    "l_per_m3",
-    "mass_transfer_convection_coefficient_m_s",
-)
+# --- Economic parameter loading and defaults ---
+# Read directly from solar_lumped/docs/parameters.xlsx (Economics + Physics sheets), the
+# repo-wide single source of truth; no separate CSV. Rows prefixed "Waste-heat" are this
+# system's own, the rest are shared with the solar device.
+
+_BOM_PREFIX = "Waste-heat BOM: "
+
+# LCOEconomicParams field name -> parameters.xlsx Economics-sheet row name.
+_ECON_FIELD_ROWS: dict[str, str] = {
+    "discount_rate": "Discount rate (i)",
+    "system_lifetime_years": "Device lifetime (L)",
+    "total_investment_factor": "Total investment factor (f_inv)",
+    "maintenance_cost_fraction": "Maintenance cost fraction (f_maint)",
+    "utilization_factor": "Utilization factor (f_util)",
+    "hydrogel_lifetime_years": "Hydrogel lifetime (L_gel)",
+    "energy_cost_usd_per_year": "Waste-heat: fixed annual energy cost",
+    "energy_cost_usd_per_extra_half_cycle_per_day": (
+        "Waste-heat: energy cost per extra half-cycle per day"
+    ),
+    "c_acrylamide_usd_per_kg": "Acrylamide price, AM (c_AM)",
+    "c_additives_usd_per_kg_composite": (
+        "Hydrogel additives cost per kg composite (APS + MBA + TEMED)"
+    ),
+    "electricity_price_usd_per_kwh": "Electricity price (p_elec)",
+    "desorption_hours_per_day": "Desorption hours per day (t_des)",
+    "max_electric_heat_w_per_m2": "Max electric heat, optimizer bound (Q_elec,max)",
+    "include_desorption_enthalpy": "Include desorption enthalpy in T_g solve (flag)",
+}
 
 
-def _load_economic_data(
-    csv_path: Path | str | None = None,
-) -> tuple[dict[str, Any], tuple[tuple[str, float], ...]]:
-    def _coerce(name: str, raw: Any) -> Any:
-        if name == "system_lifetime_years":
-            return int(round(float(raw)))
-        if name == "include_desorption_enthalpy":
-            if isinstance(raw, bool):
-                return raw
-            s = str(raw).strip().lower()
-            return s in {"1", "true", "yes", "y", "t"}
-        return float(raw)
+def _coerce_bool(raw: Any) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    return str(raw).strip().lower() in {"1", "true", "yes", "y", "t"}
 
-    path = (
-        Path(csv_path)
-        if csv_path is not None
-        else Path(__file__).resolve().parent / "data" / "economics" / "lcow_economic_params.csv"
-    )
-    if not path.is_file():
-        raise FileNotFoundError(f"LCOW economic params not found at {path}")
-    import pandas as pd
 
-    df = pd.read_csv(path)
-    if _COL_PARAMETER not in df.columns or _COL_VALUE not in df.columns:
-        raise ValueError(f"Expected parameter/value columns in {path}.")
-
+def _load_economic_data() -> tuple[dict[str, Any], tuple[tuple[str, float], ...]]:
     scalars: dict[str, Any] = {}
-    bom_rows: list[tuple[str, float]] = []
-    for _, row in df.iterrows():
-        name = str(row[_COL_PARAMETER]).strip()
-        if not name:
-            continue
-        raw_val = row[_COL_VALUE]
-        value = _coerce(name, raw_val)
-        if name.startswith(_SYSTEM_BOM_PREFIX):
-            notes = row.get("notes")
-            label = str(notes).strip() if notes == notes and str(notes).strip() else name
-            bom_rows.append((label, float(value)))
+    for field_name, row_name in _ECON_FIELD_ROWS.items():
+        raw = _ev(row_name)
+        if field_name == "system_lifetime_years":
+            scalars[field_name] = int(round(float(raw)))
+        elif field_name == "include_desorption_enthalpy":
+            scalars[field_name] = _coerce_bool(raw)
         else:
-            scalars[name] = value
+            scalars[field_name] = float(raw)
+
+    # Physical (not economic) quantities from the Physics sheet, needed here for the
+    # sorbent-replacement cost calculation.
+    h0_row = _PHYS_XLSX["Hydrogel reference thickness (H0)"]
+    scalars["hydrogel_thickness_m"] = float(h0_row["value"]) / 1000.0
+    scalars["hydrogel_thickness_min_m"] = float(h0_row["lower"]) / 1000.0
+    scalars["hydrogel_thickness_max_m"] = float(h0_row["upper"]) / 1000.0
+    scalars["hydrogel_density_kg_m3"] = _pv("Composite (hydrogel) density at 20% RH (rho_gel)")
+    scalars["mass_transfer_convection_coefficient_m_s"] = _pv(
+        "Chamber convection coefficient, absorption (g_chamber)"
+    )
+
+    bom_rows = tuple(
+        (name[len(_BOM_PREFIX) :], float(row["value"]))
+        for name, row in _ECON_XLSX.items()
+        if name.startswith(_BOM_PREFIX)
+    )
 
     lcow_field_names = {f.name for f in fields(LCOEconomicParams)}
+    physical_scalar_params = (
+        "hydrogel_thickness_m",
+        "hydrogel_thickness_min_m",
+        "hydrogel_thickness_max_m",
+        "hydrogel_density_kg_m3",
+        "mass_transfer_convection_coefficient_m_s",
+    )
     missing = [
         name
-        for name in (*_PHYSICAL_SCALAR_PARAMS, *sorted(lcow_field_names))
+        for name in (*physical_scalar_params, *sorted(lcow_field_names))
         if name not in scalars
     ]
     if not bom_rows:
-        missing.append("system_bom_*")
+        missing.append("Waste-heat BOM: *")
     if missing:
-        raise ValueError(f"Missing required parameters in {path}: {', '.join(missing)}")
-    return scalars, tuple(bom_rows)
+        raise ValueError(f"Missing required parameters in parameters.xlsx: {', '.join(missing)}")
+    return scalars, bom_rows
 
 
 @dataclass(frozen=True, slots=True, init=False)
@@ -129,9 +148,7 @@ HYDROGEL_DENSITY_KG_M3: float = float(_SCALARS["hydrogel_density_kg_m3"])
 MASS_TRANSFER_CONVECTION_COEFFICIENT_M_S: float = float(
     _SCALARS["mass_transfer_convection_coefficient_m_s"]
 )
-WATER_DENSITY_KG_PER_L: float = float(_SCALARS["water_density_kg_per_l"])
-L_PER_M3: float = float(_SCALARS["l_per_m3"])
-KG_WATER_PER_M3: float = WATER_DENSITY_KG_PER_L * L_PER_M3
+KG_WATER_PER_M3: float = _ev("Water density (rho_w)")
 SYSTEM_BOM_USD_PER_M2: tuple[tuple[str, float], ...] = _SYSTEM_BOM_ROWS
 C_SYSTEM_USD: float = sum(cost for _, cost in SYSTEM_BOM_USD_PER_M2)
 _LCOW_DEFAULTS: dict[str, Any] = {f.name: _SCALARS[f.name] for f in fields(LCOEconomicParams)}
@@ -142,19 +159,10 @@ def dry_composite_mass_kg(hydrogel_thickness_m: float) -> float:
     dry-basis density -- Table S3's rho_gel is measured at 20% RH and already carries
     ~126% water, while the hydrogel cost below is priced per kg of dry solids."""
     return float(hydrogel_thickness_m) * DRY_COMPOSITE_DENSITY_KG_M3
-PATENT_BOM_USD_PER_M2: tuple[tuple[str, float], ...] = (
-    ("Vacuum pump (28)", 3500.0),
-    ("Chambers (22A, 22B) with door assemblies (38)", 1050.0),
-    ("Three-way valve (32) + check valve (30)", 275.0),
-    ("Condenser (24)", 850.0),
-    ("Coolant source (26)", 325.0),
-    ("Water pump (34)", 165.0),
-    ("Controller (16) + sensors (36)", 800.0),
-    ("Purge pump (234)", 400.0),
-    ("Structural housing, manifolds, plumbing, fasteners", 1350.0),
-)
-
-C_PATENT_BOM_USD: float = sum(cost for _, cost in PATENT_BOM_USD_PER_M2)
+# The patent BOM *is* the system BOM here -- both names used to hold the same nine line
+# items, one from the CSV and one hardcoded. Kept as aliases so callers of either survive.
+PATENT_BOM_USD_PER_M2: tuple[tuple[str, float], ...] = SYSTEM_BOM_USD_PER_M2
+C_PATENT_BOM_USD: float = C_SYSTEM_USD
 @dataclass(frozen=True, slots=True)
 class ElectricalLoadSpec:
     """One electrical component's parasitic load per m² footprint."""
@@ -179,39 +187,44 @@ class ElectricalLoadSpec:
         return float(electricity_price_usd_per_kwh) * self.annual_kwh_per_m2()
 
 
+_DEFAULT_VACUUM_HOURS_PER_DAY: float = _ev("Waste-heat parasitic: vacuum pump operating hours")
+
+
 def default_electrical_loads(
     *,
-    vacuum_operating_hours_per_day: float = 12.0,
+    vacuum_operating_hours_per_day: float = _DEFAULT_VACUUM_HOURS_PER_DAY,
 ) -> tuple[ElectricalLoadSpec, ...]:
     """Default parasitic loads for the data-center baseline system: no pumped HTF loop or
     transfer pump, since the desorbing contactor couples directly to the waste-heat stream."""
     return (
         ElectricalLoadSpec(
             name="Vacuum pump (28)",
-            shaft_power_w_per_m2=45.0,
-            motor_efficiency=0.35,
+            shaft_power_w_per_m2=_ev("Waste-heat parasitic: vacuum pump shaft power"),
+            motor_efficiency=_ev("Waste-heat parasitic: vacuum pump motor efficiency"),
             operating_hours_per_day=vacuum_operating_hours_per_day,
             notes="Roughing pump during desorption half-cycles",
         ),
         ElectricalLoadSpec(
             name="Water pump (34)",
-            shaft_power_w_per_m2=3.0,
-            motor_efficiency=0.50,
-            operating_hours_per_day=2.0,
+            shaft_power_w_per_m2=_ev("Waste-heat parasitic: water pump shaft power"),
+            motor_efficiency=_ev("Waste-heat parasitic: water pump motor efficiency"),
+            operating_hours_per_day=_ev("Waste-heat parasitic: water pump operating hours"),
             notes="Product-water transfer",
         ),
         ElectricalLoadSpec(
             name="Purge pump (234)",
-            shaft_power_w_per_m2=8.0,
-            motor_efficiency=0.45,
-            operating_hours_per_day=1.0,
+            shaft_power_w_per_m2=_ev("Waste-heat parasitic: purge pump shaft power"),
+            motor_efficiency=_ev("Waste-heat parasitic: purge pump motor efficiency"),
+            operating_hours_per_day=_ev("Waste-heat parasitic: purge pump operating hours"),
             notes="Manifold / valve purge",
         ),
         ElectricalLoadSpec(
             name="Controller (16) + sensors (36)",
-            shaft_power_w_per_m2=2.5,
-            motor_efficiency=0.85,
-            operating_hours_per_day=24.0,
+            shaft_power_w_per_m2=_ev("Waste-heat parasitic: controller and sensors shaft power"),
+            motor_efficiency=_ev("Waste-heat parasitic: controller and sensors efficiency"),
+            operating_hours_per_day=_ev(
+                "Waste-heat parasitic: controller and sensors operating hours"
+            ),
             notes="Controls and instrumentation",
         ),
     )
@@ -249,13 +262,13 @@ def waste_heat_specific_energy_kwh_per_l(
 
 
 def parasitic_specific_energy_kwh_per_l(
-    daily_yield_kg_per_m2: float,
+    yield_per_cycle_kg_per_m2: float,
     *,
     cycles_per_day: float = 1.0,
     loads: tuple[ElectricalLoadSpec, ...] | None = None,
 ) -> float:
     """Grid electricity for pumps and controls, amortized per liter water (kWh/L)."""
-    yield_kg = float(daily_yield_kg_per_m2)
+    yield_kg = float(yield_per_cycle_kg_per_m2)
     if yield_kg <= 0.0 or not math.isfinite(yield_kg):
         return _FAIL_SPECIFIC_ENERGY
     load_specs = loads if loads is not None else default_electrical_loads()
@@ -268,11 +281,11 @@ def supplemental_heat_specific_energy_kwh_per_l(
     *,
     electric_heat_w_per_m2: float,
     econ: LCOEconomicParams,
-    daily_yield_kg_per_m2: float,
+    yield_per_cycle_kg_per_m2: float,
     cycles_per_day: float = 1.0,
 ) -> float:
     """Optional supplemental electric desorption heat per liter water (kWh/L)."""
-    yield_kg = float(daily_yield_kg_per_m2)
+    yield_kg = float(yield_per_cycle_kg_per_m2)
     if yield_kg <= 0.0 or not math.isfinite(yield_kg):
         return _FAIL_SPECIFIC_ENERGY
     kwh_per_m2_yr = (
@@ -286,7 +299,7 @@ def supplemental_heat_specific_energy_kwh_per_l(
 
 
 def total_specific_energy_kwh_per_l(
-    daily_yield_kg_per_m2: float,
+    yield_per_cycle_kg_per_m2: float,
     *,
     thermal_efficiency: float,
     h_fg_j_per_kg: float = H_FG_J_PER_KG,
@@ -301,7 +314,7 @@ def total_specific_energy_kwh_per_l(
         h_fg_j_per_kg=h_fg_j_per_kg,
     )
     parasitic = parasitic_specific_energy_kwh_per_l(
-        daily_yield_kg_per_m2,
+        yield_per_cycle_kg_per_m2,
         cycles_per_day=cycles_per_day,
         loads=loads,
     )
@@ -310,7 +323,7 @@ def total_specific_energy_kwh_per_l(
         supplemental = supplemental_heat_specific_energy_kwh_per_l(
             electric_heat_w_per_m2=electric_heat_w_per_m2,
             econ=econ,
-            daily_yield_kg_per_m2=daily_yield_kg_per_m2,
+            yield_per_cycle_kg_per_m2=yield_per_cycle_kg_per_m2,
             cycles_per_day=cycles_per_day,
         )
     total = wh + parasitic + supplemental
@@ -331,10 +344,10 @@ class LcowCostBreakdown:
 
 def _hydrogel_cost_per_kg(
     salt_price_usd_per_kg: float,
-    salt_to_polymer_ratio: float,
+    salt_loading: float,
     econ: LCOEconomicParams,
 ) -> float:
-    sl = salt_to_polymer_ratio
+    sl = salt_loading
     return (
         (salt_price_usd_per_kg * sl + econ.c_acrylamide_usd_per_kg) / (1.0 + sl)
         + econ.c_additives_usd_per_kg_composite
@@ -342,25 +355,34 @@ def _hydrogel_cost_per_kg(
 
 
 def lcow_from_daily_yield(
-    daily_yield_kg_per_m2: float,
+    yield_per_cycle_kg_per_m2: float,
     *,
     salt_name: str,
-    salt_to_polymer_ratio: float,
+    salt_loading: float,
     hydrogel_thickness_m: float,
     econ: LCOEconomicParams,
     cycles_per_day: float = 1.0,
     electric_heat_w_per_m2: float = 0.0,
     salt_price_usd_per_kg: float | None = None,
 ) -> float:
-    """Scalar LCOW (USD/m³) — identical structure to lcow_zsr_at_sl."""
-    if daily_yield_kg_per_m2 <= 0.0 or not math.isfinite(daily_yield_kg_per_m2):
+    """Scalar LCOW (USD/m³) — identical structure to lcow_zsr_at_sl.
+
+    Takes yield **per cycle**, not per day: annual water is
+    ``cycles_per_day * 365 * yield_per_cycle_kg_per_m2``, and ``cycles_per_day`` also
+    drives the per-cycle energy term, so it has to be the true cycle count. With the
+    default ``cycles_per_day=1.0`` a whole day's yield is the correct thing to pass.
+    Feeding a multi-cycle daily total *and* the real cycle count double-counts the water
+    by that count -- which is exactly what analysis/sensitivity/parameter_sweep.py's
+    waste-heat model used to do.
+    """
+    if yield_per_cycle_kg_per_m2 <= 0.0 or not math.isfinite(yield_per_cycle_kg_per_m2):
         return FAIL_LCO
-    if salt_to_polymer_ratio <= 0.0 or not math.isfinite(salt_to_polymer_ratio):
+    if salt_loading <= 0.0 or not math.isfinite(salt_loading):
         return FAIL_LCO
 
-    sl = salt_to_polymer_ratio
+    sl = salt_loading
     dry_mass = dry_composite_mass_kg(hydrogel_thickness_m)
-    annual_water_yield_kg = float(cycles_per_day) * 365.0 * float(daily_yield_kg_per_m2)
+    annual_water_yield_kg = float(cycles_per_day) * 365.0 * float(yield_per_cycle_kg_per_m2)
 
     salt_price = (
         salt_price_usd_per_kg
@@ -401,10 +423,10 @@ def lcow_from_daily_yield(
 
 
 def lcow_cost_breakdown_from_daily_yield(
-    daily_yield_kg_per_m2: float,
+    yield_per_cycle_kg_per_m2: float,
     *,
     salt_name: str,
-    salt_to_polymer_ratio: float,
+    salt_loading: float,
     hydrogel_thickness_m: float,
     econ: LCOEconomicParams,
     cycles_per_day: float = 1.0,
@@ -413,9 +435,9 @@ def lcow_cost_breakdown_from_daily_yield(
 ) -> LcowCostBreakdown | None:
     """Per-term LCOW breakdown — same segments as lcow_cost_breakdown_usd_per_m3."""
     lcow = lcow_from_daily_yield(
-        daily_yield_kg_per_m2,
+        yield_per_cycle_kg_per_m2,
         salt_name=salt_name,
-        salt_to_polymer_ratio=salt_to_polymer_ratio,
+        salt_loading=salt_loading,
         hydrogel_thickness_m=hydrogel_thickness_m,
         econ=econ,
         cycles_per_day=cycles_per_day,
@@ -425,9 +447,9 @@ def lcow_cost_breakdown_from_daily_yield(
     if not math.isfinite(lcow) or lcow >= 0.99 * FAIL_LCO:
         return None
 
-    sl = salt_to_polymer_ratio
+    sl = salt_loading
     dry_mass = dry_composite_mass_kg(hydrogel_thickness_m)
-    annual_water_yield_kg = float(cycles_per_day) * 365.0 * float(daily_yield_kg_per_m2)
+    annual_water_yield_kg = float(cycles_per_day) * 365.0 * float(yield_per_cycle_kg_per_m2)
     if annual_water_yield_kg <= 0.0:
         return None
 
@@ -487,12 +509,15 @@ class NpvResult:
     payback_years_discounted: float
 
 
+WATER_PRICE_USD_PER_M3: float = _ev("Water price, NPV/payback scenario input (p_water)")
+
+
 def npv_from_daily_yield(
-    daily_yield_kg_per_m2: float,
-    water_price_usd_per_m3: float,
+    yield_per_cycle_kg_per_m2: float,
+    water_price_usd_per_m3: float = WATER_PRICE_USD_PER_M3,
     *,
     salt_name: str,
-    salt_to_polymer_ratio: float,
+    salt_loading: float,
     hydrogel_thickness_m: float,
     econ: LCOEconomicParams,
     cycles_per_day: float = 1.0,
@@ -500,14 +525,14 @@ def npv_from_daily_yield(
     salt_price_usd_per_kg: float | None = None,
 ) -> NpvResult | None:
     """NPV and payback period (USD/m2 of system footprint) for one site."""
-    if daily_yield_kg_per_m2 <= 0.0 or not math.isfinite(daily_yield_kg_per_m2):
+    if yield_per_cycle_kg_per_m2 <= 0.0 or not math.isfinite(yield_per_cycle_kg_per_m2):
         return None
-    if salt_to_polymer_ratio <= 0.0 or not math.isfinite(salt_to_polymer_ratio):
+    if salt_loading <= 0.0 or not math.isfinite(salt_loading):
         return None
 
-    sl = salt_to_polymer_ratio
+    sl = salt_loading
     dry_mass = dry_composite_mass_kg(hydrogel_thickness_m)
-    annual_water_yield_kg = float(cycles_per_day) * 365.0 * float(daily_yield_kg_per_m2)
+    annual_water_yield_kg = float(cycles_per_day) * 365.0 * float(yield_per_cycle_kg_per_m2)
     gross_annual_water_m3 = econ.utilization_factor * (annual_water_yield_kg / KG_WATER_PER_M3)
 
     salt_price = (

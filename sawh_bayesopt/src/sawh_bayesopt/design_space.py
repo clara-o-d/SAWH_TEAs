@@ -9,6 +9,7 @@ from typing import Any
 import numpy as np
 from scipy.stats import qmc
 
+from solar_lumped._parameters_xlsx import physics_bounds as _bounds
 from solar_lumped.physics import EPS_ABS_IR_CASE2, EPS_GLASS_IR_CASE2
 from solar_lumped.physics import VAPOR_GAP_TRANSPORT_MIN_M as _VAPOR_GAP_TRANSPORT_MIN_M
 
@@ -18,7 +19,7 @@ VAR_ORDER: tuple[str, ...] = (
     "insulation_gap_m",
     "fin_area_ratio",
     "tilt_deg",
-    "salt_to_polymer_ratio",
+    "salt_loading",
 )
 
 # --- Complex-fidelity dimensions (solar_lumped.complex_model) ---
@@ -31,7 +32,7 @@ VAR_ORDER: tuple[str, ...] = (
 # bound and the GP dimension is wasted:
 #
 #   hydrogel_thickness_m   KEEP  capacity vs. sensible load + conduction + sorbent cost
-#   salt_to_polymer_ratio  KEEP  uptake gain saturates while salt cost keeps climbing
+#   salt_loading  KEEP  uptake gain saturates while salt cost keeps climbing
 #   insulation_gap_m       KEEP  conduction falls as 1/L until Hollands convection starts
 #   fin_area_ratio         KEEP  was a free lever (flat BOM line); B3 now prices the
 #                                aluminum, and the measured optimum moved below A_r=3
@@ -88,6 +89,20 @@ CASE_EPS_IR: dict[str, tuple[float | None, float | None]] = {
 }
 
 
+# Box bounds come from the "Lower (for Sweeps)" / "Upper (for Sweeps)" columns of
+# solar_lumped/docs/parameters.xlsx, the repo-wide parameter source. Nothing here is a
+# second opinion on those ranges.
+_HYDROGEL_THICKNESS_BOUNDS_M = _bounds("Hydrogel reference thickness (H0)", mm_to_m=True)
+_VAPOR_GAP_BOUNDS_M = _bounds("Vapor gap (L_g)", mm_to_m=True)
+_INSULATION_GAP_BOUNDS_M = _bounds("Insulation gap (L_ins)", mm_to_m=True)
+_FIN_AREA_RATIO_BOUNDS = _bounds("Condenser fin area ratio (A_r)")
+_TILT_BOUNDS_DEG = _bounds("Tilt angle (theta)")
+_SALT_LOADING_BOUNDS = _bounds("Salt loading (SL)")
+_EPS_ABS_IR_BOUNDS = _bounds("Absorber IR emissivity (eps_abs_ir)")
+_CONDENSER_AIR_SPEED_BOUNDS_M_S = _bounds("Condenser forced-air speed")
+_SEAL_OPEN_OFFSET_BOUNDS_H = _bounds("Seal / open offset from sunrise-sunset")
+
+
 @dataclass(frozen=True, slots=True)
 class DesignBounds:
     """(low, high) box bounds. 6 rows in simple mode, 13 with ``complex_mode=True``.
@@ -97,25 +112,22 @@ class DesignBounds:
     SystemConfig's default.
     """
 
-    hydrogel_thickness_m: tuple[float, float] = (0.001, 0.010)
-    vapor_gap_m: tuple[float, float] = (0.007, 0.060)
-    insulation_gap_m: tuple[float, float] = (0.001, 0.020)
-    fin_area_ratio: tuple[float, float] = (3.0, 12.0)
-    tilt_deg: tuple[float, float] = (0.0, 60.0)
-    salt_to_polymer_ratio: tuple[float, float] = (1.0, 8.0)
+    hydrogel_thickness_m: tuple[float, float] = _HYDROGEL_THICKNESS_BOUNDS_M
+    vapor_gap_m: tuple[float, float] = _VAPOR_GAP_BOUNDS_M
+    insulation_gap_m: tuple[float, float] = _INSULATION_GAP_BOUNDS_M
+    fin_area_ratio: tuple[float, float] = _FIN_AREA_RATIO_BOUNDS
+    tilt_deg: tuple[float, float] = _TILT_BOUNDS_DEG
+    salt_loading: tuple[float, float] = _SALT_LOADING_BOUNDS
 
     # --- complex mode only (appended in COMPLEX_VAR_ORDER when complex_mode) ---
     complex_mode: bool = False
-    # Spans commodity black paint (0.95) to sputtered cermet (0.05).
-    eps_abs_ir: tuple[float, float] = (0.05, 0.95)
-    # Continuous stand-in for the GLAZING_CONFIGS index; rounded on use.
-    glazing_config: tuple[float, float] = (0.0, 3.0)
-    # 0 = passive. Wilson's own fan array runs 0.5 m/s; 1.5 allows ~3x that.
-    condenser_air_speed_m_s: tuple[float, float] = (0.0, 1.5)
-    # Hours the seal/open boundaries move off GHI sunrise/sunset. +/-4 h covers
-    # sealing before dawn through holding shut well past dusk.
-    seal_offset_h: tuple[float, float] = (-4.0, 4.0)
-    open_offset_h: tuple[float, float] = (-4.0, 4.0)
+    eps_abs_ir: tuple[float, float] = _EPS_ABS_IR_BOUNDS
+    # Continuous stand-in for the GLAZING_CONFIGS index; rounded on use. Not a workbook
+    # row -- the range is just the length of that tuple.
+    glazing_config: tuple[float, float] = (0.0, float(len(GLAZING_CONFIGS) - 1))
+    condenser_air_speed_m_s: tuple[float, float] = _CONDENSER_AIR_SPEED_BOUNDS_M_S
+    seal_offset_h: tuple[float, float] = _SEAL_OPEN_OFFSET_BOUNDS_H
+    open_offset_h: tuple[float, float] = _SEAL_OPEN_OFFSET_BOUNDS_H
     # Stick-breaking coordinates onto the ZSR simplex (see blend_weights_from_uv).
     blend_u: tuple[float, float] = (0.0, 1.0)
     blend_v: tuple[float, float] = (0.0, 1.0)
@@ -168,6 +180,7 @@ def to_system_config_kwargs(
     case: str = "case2",
     complex_mode: bool = False,
     condenser_tracks_ambient: bool = False,
+    instant_equilibrium: bool = False,
 ) -> dict[str, Any]:
     """Map a design vector to SystemConfig field names.
 
@@ -183,7 +196,8 @@ def to_system_config_kwargs(
 
     ``condenser_tracks_ambient`` is orthogonal to both: False (default) keeps
     solar_lumped's Eq. 2 condenser ODE, True pins T_cond to T_amb (the infinite-
-    cooling-capacity limit) in either fidelity mode.
+    cooling-capacity limit) in either fidelity mode. ``instant_equilibrium`` is
+    orthogonal in the same way: the g -> infinity sorption limit, either fidelity.
     """
     x = np.asarray(x, dtype=float).reshape(-1)
     names = var_order(complex_mode)
@@ -191,6 +205,7 @@ def to_system_config_kwargs(
         raise ValueError(f"Expected a length-{len(names)} design vector, got shape {x.shape}")
     kwargs: dict[str, Any] = dict(zip(VAR_ORDER, (float(v) for v in x[: len(VAR_ORDER)])))
     kwargs["condenser_tracks_ambient"] = condenser_tracks_ambient
+    kwargs["instant_equilibrium"] = instant_equilibrium
 
     if complex_mode:
         kwargs["complex"] = to_complex_options(x)

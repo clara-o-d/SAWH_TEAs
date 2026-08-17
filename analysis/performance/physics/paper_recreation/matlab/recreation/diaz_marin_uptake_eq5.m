@@ -1,4 +1,4 @@
-function uptake = diaz_marin_uptake_eq5(relativeHumidity, saltToPolymerRatio, temperatureC)
+function uptake = diaz_marin_uptake_eq5(relativeHumidity, saltLoading, temperatureC)
 %DIAZ_MARIN_UPTAKE_EQ5  Eq. 5 gravimetric uptake U [g/g] for PAM--LiCl.
 
 if nargin < 3
@@ -6,7 +6,7 @@ if nargin < 3
 end
 
 rh = relativeHumidity;
-sl = saltToPolymerRatio;
+sl = saltLoading;
 if sl <= 0.0 || rh <= 0.0
     uptake = 0.0;
     return

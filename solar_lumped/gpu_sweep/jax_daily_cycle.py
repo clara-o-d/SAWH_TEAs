@@ -43,7 +43,8 @@ WEATHER_KEYS: tuple[str, ...] = (
 _RTOL, _ATOL = 1e-4, 1e-7
 
 
-def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_tracks_ambient=False):
+def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_tracks_ambient=False,
+                 h_des_isosteric=False, instant_equilibrium=False):
     """The per-instance daily cycle, taking weather and system parameters as arguments.
 
     ``complex_mode`` is static (it fixes how many unknowns the thermal Newton solve
@@ -58,8 +59,8 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
         t_amb_des, solar_des, h_amb_des, n_des_real,
         c_s_mol_m3, formula_weight_g_mol, c_w_min_mol_m3, c_w_max_mol_m3, g_conv_m_s, eps_abs, tau_glass,
         eps_abs_ir, eps_glass_ir,
-        h0_ref_m, vapor_gap_m, insulation_gap_m, tilt_deg, fin_area_ratio,
-        salt_to_polymer_ratio, h_fg_j_per_kg,
+        h0_ref_m, h_floor_m, vapor_gap_m, insulation_gap_m, tilt_deg, fin_area_ratio,
+        salt_loading, h_fg_j_per_kg, p_atm_pa,
         *complex_extras,
     ):
         if complex_mode:
@@ -79,6 +80,8 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
             c_w_min_mol_m3=c_w_min_mol_m3, c_w_max_mol_m3=c_w_max_mol_m3,
             g_conv_m_s=g_conv_m_s,
             aw_table=aw_table,
+            instant_equilibrium=instant_equilibrium,
+            p_atm_pa=p_atm_pa,
         )
         thermal = jp.ThermalParams(
             insulation_gap_m=insulation_gap_m, vapor_gap_m=vapor_gap_m,
@@ -86,6 +89,8 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
             eps_abs_ir=eps_abs_ir, eps_glass_ir=eps_glass_ir,
             n_glazing_panes=n_glazing_panes, evacuated_gap=evacuated_gap,
             complex_mode=complex_mode,
+            h_des_isosteric=h_des_isosteric,
+            p_atm_pa=p_atm_pa,
         )
         h_max_m = jnp.maximum(vapor_gap_m - jp.VAPOR_GAP_TRANSPORT_MIN_M, h0_ref_m + 1e-6)
 
@@ -98,8 +103,9 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
         def abs_vf(t, y, args):
             i = idx_abs(t)
             dy = jp.absorption_rhs(
-                y, t_amb_c=t_amb_abs[i], rh=rh_abs[i], h0_ref_m=h0_ref_m, h_max_m=h_max_m,
-                mass=mass, salt_to_polymer_ratio=salt_to_polymer_ratio,
+                y, t_amb_c=t_amb_abs[i], rh=rh_abs[i], h0_ref_m=h0_ref_m,
+                h_floor_m=h_floor_m, h_max_m=h_max_m,
+                mass=mass, salt_loading=salt_loading,
             )
             return jnp.where(i < n_abs_real, dy, 0.0)
 
@@ -122,7 +128,8 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
             dy, aux = jp.desorption_rhs(
                 y[:3], t_amb_c=t_amb_c, q_solar_w_m2=q_solar,
                 h_amb=h_amb, thermal=thermal, mass=mass,
-                h0_ref_m=h0_ref_m, h_fg_j_per_kg=h_fg_j_per_kg, fin_area_ratio=fin_area_ratio,
+                h0_ref_m=h0_ref_m, h_floor_m=h_floor_m, h_fg_j_per_kg=h_fg_j_per_kg,
+                fin_area_ratio=fin_area_ratio,
                 x0_guess=x0_guess,
                 # B4: forced condenser air is a separate channel from the absorber's
                 # h_amb, so a fan-cooled condenser is not tied to ambient wind.
@@ -134,7 +141,7 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
             dy4 = jnp.concatenate([dy, jnp.array([m_des])])
             return jnp.where(i < n_des_real, dy4, 0.0)
 
-        y0_abs = jnp.array([c_w_initial, jnp.maximum(h_initial, h0_ref_m)])
+        y0_abs = jnp.array([c_w_initial, jnp.maximum(h_initial, h_floor_m)])
         sol_abs = diffrax.diffeqsolve(
             diffrax.ODETerm(abs_vf), diffrax.Tsit5(), t0=0.0, t1=dt * n_abs_max, dt0=dt, y0=y0_abs, args=None,
             saveat=diffrax.SaveAt(t1=True),
@@ -142,7 +149,7 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
             max_steps=16384, adjoint=diffrax.DirectAdjoint(), throw=False,
         )
         c_w_mid = jnp.clip(sol_abs.ys[0, 0], c_w_min_mol_m3, c_w_max_mol_m3)
-        h_mid = jnp.clip(sol_abs.ys[0, 1], h0_ref_m, h_max_m)
+        h_mid = jnp.clip(sol_abs.ys[0, 1], h_floor_m, h_max_m)
 
         t_cond0 = jp.clamp_temperature_c(t_amb_des[0])
         y0_des = jnp.array([c_w_mid, h_mid, t_cond0, 0.0])
@@ -158,7 +165,7 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
         eta = jnp.where(solar_sum > 0.0, water * h_fg_j_per_kg / solar_sum, 0.0)
 
         c_w_end = jnp.clip(sol_des.ys[0, 0], c_w_min_mol_m3, c_w_max_mol_m3)
-        h_end = jnp.maximum(sol_des.ys[0, 1], h0_ref_m)
+        h_end = jnp.maximum(sol_des.ys[0, 1], h_floor_m)
         return water, eta, c_w_end, h_end
 
     return single
@@ -188,7 +195,7 @@ def _h_amb_cond_for(cx) -> float:
     return float(H_AMB_W_M2_K) if h is None else float(h)
 
 
-def build_system_arrays(configs, *, complex_mode=False):
+def build_system_arrays(configs, *, complex_mode=False, instant_equilibrium=False):
     """Per-instance system parameters -- constant across the year.
 
     In complex mode the dict gains B2/B3/B8's per-instance parameters, appended in
@@ -199,6 +206,15 @@ def build_system_arrays(configs, *, complex_mode=False):
     """
     mass_ps = [c.mass_params() for c in configs]
     thermal_ps = [c.thermal_params() for c in configs]
+    # instant_equilibrium selects a code path (like complex_mode), so it is static: it
+    # reaches the RHS through make_year_step_fn, not through these arrays. Checking it
+    # here is the only place that catches a caller who set it on the configs and then
+    # ran a whole sweep at finite g without noticing.
+    if {c.instant_equilibrium for c in configs} != {instant_equilibrium}:
+        raise ValueError(
+            "instant_equilibrium must be uniform across the batch and match the flag "
+            "passed to build_system_arrays / make_year_step_fn"
+        )
     arrays = dict(
         c_s_mol_m3=jnp.array([m.c_s_mol_m3 for m in mass_ps]),
         formula_weight_g_mol=jnp.array([m.formula_weight_g_mol for m in mass_ps]),
@@ -213,12 +229,18 @@ def build_system_arrays(configs, *, complex_mode=False):
         eps_abs_ir=jnp.array([t.eps_abs_ir if t.eps_abs_ir is not None else 1.0 for t in thermal_ps]),
         eps_glass_ir=jnp.array([t.eps_glass_ir if t.eps_glass_ir is not None else 1.0 for t in thermal_ps]),
         h0_ref_m=jnp.array([c.hydrogel_thickness_m for c in configs]),
+        # Hydrate-floor thickness, not H0: mirrors SystemConfig.hydrogel_floor_thickness_m
+        # so the CPU and JAX backends bottom the gel out at the same place.
+        h_floor_m=jnp.array([c.hydrogel_floor_thickness_m() for c in configs]),
         vapor_gap_m=jnp.array([c.vapor_gap_m for c in configs]),
         insulation_gap_m=jnp.array([t.insulation_gap_m for t in thermal_ps]),
         tilt_deg=jnp.array([c.tilt_deg for c in configs]),
         fin_area_ratio=jnp.array([c.fin_area_ratio for c in configs]),
-        salt_to_polymer_ratio=jnp.array([c.salt_to_polymer_ratio for c in configs]),
+        salt_loading=jnp.array([c.salt_loading for c in configs]),
         h_fg_j_per_kg=jnp.array([c.h_fg_j_per_kg for c in configs]),
+        # Site ambient pressure. Must stay LAST in this dict: single() unpacks these
+        # positionally, so insertion order here is the signature there.
+        p_atm_pa=jnp.array([t.p_atm_pa for t in thermal_ps]),
     )
     if not complex_mode:
         return arrays
@@ -258,13 +280,16 @@ def build_day_weather(profiles, n_abs_max, n_des_max):
     )
 
 
-def make_year_step_fn(system, dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_tracks_ambient=False):
+def make_year_step_fn(system, dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_tracks_ambient=False,
+                      h_des_isosteric=False, instant_equilibrium=False):
     """One compiled step reused for every day of the year: (c_w, h, weather) -> (water,
     eta, c_w_end, h_end). Weather is an argument, not a closure constant, so all 365 days
     share a single compilation as long as they are padded to the same shape."""
     single = _make_single(
         dt, n_abs_max, n_des_max, complex_mode=complex_mode,
         condenser_tracks_ambient=condenser_tracks_ambient,
+        h_des_isosteric=h_des_isosteric,
+        instant_equilibrium=instant_equilibrium,
     )
     n_weather = len(WEATHER_KEYS)
     batched = jax.vmap(single, in_axes=(0, 0) + (0,) * (n_weather + len(system)))

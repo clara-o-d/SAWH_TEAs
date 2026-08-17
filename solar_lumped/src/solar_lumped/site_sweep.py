@@ -62,6 +62,10 @@ def build_system_config(
     tau_glass: float,
     eps_abs_ir: float | None = EPS_ABS_IR_CASE2,
     eps_glass_ir: float | None = EPS_GLASS_IR_CASE2,
+    # Site elevation, from the weather frame (weather.site_elevation_m). Thins the air:
+    # more vapor diffusivity and a better-insulated collector, so high sites gain. The
+    # 0.0 default keeps every non-site caller (tests, single designs) at sea level.
+    site_elevation_m: float = 0.0,
 ) -> SystemConfig:
     thermal = SystemThermalParams(
         insulation_gap_m=insulation_gap_mm * 1e-3,
@@ -74,13 +78,14 @@ def build_system_config(
     )
     return SystemConfig(
         salt_name=salt,
-        salt_to_polymer_ratio=salt_loading,
+        salt_loading=salt_loading,
         hydrogel_thickness_m=combo.hydrogel_thickness_mm * 1e-3,
         vapor_gap_m=combo.vapor_gap_mm * 1e-3,
         insulation_gap_m=insulation_gap_mm * 1e-3,
         fin_area_ratio=combo.fin_area_ratio,
         tilt_deg=tilt_deg,
         thermal=thermal,
+        site_elevation_m=site_elevation_m,
     )
 
 
@@ -108,6 +113,10 @@ def mean_weather_stats(
 _CSV_COLUMNS: tuple[str, ...] = (
     "lat",
     "lon",
+    # Site elevation drives ambient pressure, which changes yield by ~+2.4%/1000 m, so a
+    # row without it is ambiguous. NOTE: adding this broke append-compatibility with
+    # pre-elevation CSVs -- those have a different header and must not be appended to.
+    "elevation_m",
     "mean_rh_frac",
     "mean_t_amb_c",
     "mean_solar_w_m2",
@@ -138,6 +147,9 @@ _CSV_COLUMNS: tuple[str, ...] = (
     # "hydrate" (default, n*c_s) or "drh" (equilibrium c_w at the deliquescence RH) --
     # which physical limit stopped desorption. See SystemConfig.c_w_floor_mode.
     "c_w_floor_mode",
+    # "finite_g" (default) or "instant" (g -> infinity, equilibrium every instant).
+    # See SystemConfig.instant_equilibrium.
+    "kinetics",
 )
 
 

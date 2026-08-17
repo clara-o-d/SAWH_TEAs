@@ -9,7 +9,7 @@ design_bounds:
   insulation_gap_m: [0.001, 0.020]
   fin_area_ratio: [3.0, 12.0]
   tilt_deg: [0.0, 60.0]
-  salt_to_polymer_ratio: [1.0, 8.0]
+  salt_loading: [1.0, 8.0]
   # No condenser_thickness_m: fixed at Table S3's constant, both because
   # economics/lcow.py charges a flat condenser BOM cost regardless of it,
   # and because the JAX gpu_sweep fast path this now evaluates against

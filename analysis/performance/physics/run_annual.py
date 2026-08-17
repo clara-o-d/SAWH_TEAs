@@ -78,7 +78,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     df = fetch_year_weather(args.lat, args.lon, args.year, cache_dir=args.cache_dir)
 
-    day_items = real_weather_days_from_df(df, stride=args.stride)
+    day_items = real_weather_days_from_df(df, stride=args.stride, poa_tilt_deg=args.tilt_deg)
     if not day_items:
         print("No valid weather days found.", file=sys.stderr)
         return 1

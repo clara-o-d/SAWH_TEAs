@@ -24,10 +24,12 @@ def _fake_evaluate_batch(
     resolution="annual",
     case="case1",
     # Accepted and ignored: these are real-evaluator plumbing (complex fidelity, its
-    # per-design weather frames, and the condenser mode) that the synthetic bowl has
-    # no use for.
+    # per-design weather frames, the condenser mode, the sorption-kinetics limit) that
+    # the synthetic bowl has no use for.
     complex_mode=False,
     condenser_tracks_ambient=False,
+    site_elevations=None,
+    instant_equilibrium=False,
     site_frames=None,
     backend="jax",
 ):
@@ -48,6 +50,9 @@ def _fake_evaluate_batch(
 
 def _patch(monkeypatch):
     monkeypatch.setattr("sawh_bayesopt.bayesopt.fetch_daily_profiles", lambda site, cache_dir: [])
+    monkeypatch.setattr(
+        "sawh_bayesopt.bayesopt.fetch_site_elevations", lambda sites, cache_dir: {}
+    )
     monkeypatch.setattr("sawh_bayesopt.bayesopt.evaluate_batch", _fake_evaluate_batch)
 
 
@@ -101,10 +106,12 @@ def _fake_evaluate_batch_with_infeasible_region(
     resolution="annual",
     case="case1",
     # Accepted and ignored: these are real-evaluator plumbing (complex fidelity, its
-    # per-design weather frames, and the condenser mode) that the synthetic bowl has
-    # no use for.
+    # per-design weather frames, the condenser mode, the sorption-kinetics limit) that
+    # the synthetic bowl has no use for.
     complex_mode=False,
     condenser_tracks_ambient=False,
+    site_elevations=None,
+    instant_equilibrium=False,
     site_frames=None,
     backend="jax",
 ):
@@ -135,6 +142,9 @@ def _fake_evaluate_batch_with_infeasible_region(
 
 def test_run_bayesopt_handles_an_infeasible_region_without_crashing(tmp_path, monkeypatch):
     monkeypatch.setattr("sawh_bayesopt.bayesopt.fetch_daily_profiles", lambda site, cache_dir: [])
+    monkeypatch.setattr(
+        "sawh_bayesopt.bayesopt.fetch_site_elevations", lambda sites, cache_dir: {}
+    )
     monkeypatch.setattr(
         "sawh_bayesopt.bayesopt.evaluate_batch", _fake_evaluate_batch_with_infeasible_region
     )

@@ -102,7 +102,7 @@ def test_pam_licl_brine_aw_inverts_at_rh():
         c_s=mass.c_s_mol_m3,
         ions_per_formula=2,
         temperature_c=25.0,
-        salt_to_polymer_ratio=config.salt_to_polymer_ratio,
+        salt_loading=config.salt_loading,
         h_m=h0,
         h0_ref_m=h0,
     )
@@ -111,7 +111,7 @@ def test_pam_licl_brine_aw_inverts_at_rh():
         c_s=mass.c_s_mol_m3,
         ions_per_formula=2,
         temperature_c=25.0,
-        salt_to_polymer_ratio=config.salt_to_polymer_ratio,
+        salt_loading=config.salt_loading,
         h_m=h0,
         h0_ref_m=h0,
     )
@@ -176,8 +176,13 @@ def test_baseline_yield_from_desorption_flux():
     y, _, _, des = run_daily_cycle(baseline_profile(), config)
     assert y == des.water_collected_kg_m2
     assert y >= 0.0
-    # Paper Fig. 2 baseline ~1.7 L/m²/day (25°C, 50% RH, 600 W/m²)
-    assert 0.8 < y < 2.5
+    # Paper Fig. 2 baseline ~1.7 L/m²/day (25°C, 50% RH, 600 W/m²). The model does NOT
+    # reproduce that: it sat at 2.50 under the paper's own Hollands gap correlation (+47%)
+    # and moved to 2.75 (+61%) once the gap switched to the ISO 15099 heated-from-above
+    # treatment (physics.vapor_gap_h_conv_w_m2_k) that the device's geometry actually
+    # calls for. This bound is a regression guard on the current model, not evidence of
+    # agreement with Fig. 2 -- the residual gap is unexplained and worth chasing.
+    assert 0.8 < y < 3.0
 
 
 def test_lcow_breakdown_sums():
@@ -187,7 +192,7 @@ def test_lcow_breakdown_sums():
     bd = lcow_cost_breakdown_from_daily_yield(
         y,
         salt_name=cfg.salt_name,
-        salt_to_polymer_ratio=cfg.salt_to_polymer_ratio,
+        salt_loading=cfg.salt_loading,
         hydrogel_thickness_m=cfg.hydrogel_thickness_m,
         econ=econ,
     )
@@ -195,7 +200,7 @@ def test_lcow_breakdown_sums():
     total = lcow_from_daily_yield(
         y,
         salt_name=cfg.salt_name,
-        salt_to_polymer_ratio=cfg.salt_to_polymer_ratio,
+        salt_loading=cfg.salt_loading,
         hydrogel_thickness_m=cfg.hydrogel_thickness_m,
         econ=econ,
     )
@@ -225,13 +230,14 @@ def test_cycled_initial_uses_post_desorption_state():
 
     profile = replay_profile("atacama-replay")
     config = SystemConfig.atacama_field()
-    h0 = config.hydrogel_thickness_m
     _, _, abs_res, _ = run_daily_cycle(
         profile, config, cyclic_initial=True, cyclic_warmup_cycles=2
     )
     cw_cycled = float(abs_res.c_w[0])
     h_cycled = float(abs_res.H[0])
-    assert h_cycled >= h0
+    # Starts where the previous desorption left it, which is below the as-cast H₀ but
+    # never below the thickness the hydrate floor implies.
+    assert config.hydrogel_floor_thickness_m() <= h_cycled <= config.hydrogel_thickness_m
     assert cw_cycled > 0.0
 
 
@@ -292,3 +298,50 @@ def test_fig_s1_replay_matches_note_s1d():
     assert w_end < w_peak
     # Paper Fig. S1D: ~1.2 → ~2.2 → ~1.2 L/m² (kinetic; our T is self-consistent not measured).
     assert w_peak > w0
+
+
+def test_reversal_diagnostics_reports_the_desorption_clamp():
+    """The dc_w/dt <= 0 clamp is an unreported approximation; this is its error term.
+
+    Constant flux never reverses -- the gel stays hot for the whole window. A window
+    with dark ends does, at both of them, because T_gel -> T_cond drives c_r -> 1 above
+    any reachable a_w. Both cases must be *reported*; neither changes the yield.
+    """
+    from solar_lumped.simulation import reversal_diagnostics
+    from solar_lumped.weather import (
+        PHASE_DT_S,
+        STEPS_PER_PHASE,
+        DailyWeatherProfile,
+        PhaseProfile,
+        baseline_profile,
+    )
+
+    config = SystemConfig.baseline()
+    flat = baseline_profile()
+    _y, _eta, _abs_res, des_flat = run_daily_cycle(flat, config)
+    rev_flat = reversal_diagnostics(des_flat, config=config)
+    assert rev_flat.reversed_time_fraction == 0.0
+    assert rev_flat.discarded_l_m2 == 0.0
+    assert len(rev_flat.driving) == len(des_flat.time_s)
+
+    n = STEPS_PER_PHASE
+    dark_ends = PhaseProfile(
+        temperature_c=(25.0,) * n,
+        relative_humidity=(0.5,) * n,
+        solar_w_m2=tuple(
+            600.0 * max(0.0, math.sin(math.pi * (k + 0.5) / n)) ** 3 for k in range(n)
+        ),
+        h_amb_w_m2_k=(10.0,) * n,
+        dt_s=PHASE_DT_S,
+    )
+    profile = DailyWeatherProfile(absorption=flat.absorption, desorption=dark_ends)
+    y_dark, _e, _a, des_dark = run_daily_cycle(profile, config)
+    rev = reversal_diagnostics(des_dark, config=config)
+    assert 0.0 < rev.reversed_time_fraction < 1.0
+    assert rev.discarded_l_m2 > 0.0
+    # A bound, not a correction. If the discarded flow ever rivals the yield it
+    # qualifies, the clamp has stopped being a small approximation and the gap needs a
+    # real vapor inventory instead.
+    assert rev.discarded_l_m2 < y_dark
+    # driving = c_r - a_w, so the reversed steps are the positive ones.
+    assert np.max(rev.driving) > 0.0 > np.min(rev.driving)

@@ -86,12 +86,12 @@ def test_fabrication_ic_differs_by_salt():
     nacl = SystemConfig(salt_name="NaCl")
     cw_licl = fabrication_c_w_initial(
         salt_name=licl.salt_name,
-        salt_to_polymer_ratio=licl.salt_to_polymer_ratio,
+        salt_loading=licl.salt_loading,
         hydrogel_thickness_m=licl.hydrogel_thickness_m,
     )
     cw_nacl = fabrication_c_w_initial(
         salt_name=nacl.salt_name,
-        salt_to_polymer_ratio=nacl.salt_to_polymer_ratio,
+        salt_loading=nacl.salt_loading,
         hydrogel_thickness_m=nacl.hydrogel_thickness_m,
         hydrogel_density_kg_m3=nacl.hydrogel_density_kg_m3,
         formula_weight_g_mol=nacl.salt().formula_weight_g_mol,
@@ -120,7 +120,7 @@ def test_gravimetric_uptake_component_basis_matches_dvs_density():
         h0_ref_m=h0,
         c_s_mol_m3=mass.c_s_mol_m3,
         formula_weight_g_mol=mass.formula_weight_g_mol,
-        salt_to_polymer_ratio=mass.salt_to_polymer_ratio,
+        salt_loading=mass.salt_loading,
         salt_weight_factor=1.0,
     )
     assert u_components == pytest.approx(u_density, rel=1e-9)
@@ -139,7 +139,7 @@ def test_salt_weight_factor_scales_gravimetric_uptake():
         h0_ref_m=h0,
         c_s_mol_m3=mass.c_s_mol_m3,
         formula_weight_g_mol=mass.formula_weight_g_mol,
-        salt_to_polymer_ratio=mass.salt_to_polymer_ratio,
+        salt_loading=mass.salt_loading,
         salt_weight_factor=1.0,
     )
     u_high = pam_licl_gravimetric_uptake_g_g(
@@ -148,7 +148,7 @@ def test_salt_weight_factor_scales_gravimetric_uptake():
         h0_ref_m=h0,
         c_s_mol_m3=mass.c_s_mol_m3,
         formula_weight_g_mol=mass.formula_weight_g_mol,
-        salt_to_polymer_ratio=mass.salt_to_polymer_ratio,
+        salt_loading=mass.salt_loading,
         salt_weight_factor=1.2,
     )
     assert u_high < u_ref

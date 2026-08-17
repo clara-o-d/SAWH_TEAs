@@ -13,12 +13,12 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.integrate import solve_ivp
 
+from solar_lumped._parameters_xlsx import physics_value as _pv
 from waste_heat.physics import (
     CP_WH_J_KG_K,
     C_VAC_BASE_KG_S_PA_M2,
     C_VAC_MAX_KG_S_PA_M2,
     C_VAC_MIN_KG_S_PA_M2,
-    C_W_MIN_HYDROGEL,
     DEFAULT_SALT_NAME,
     G_CHAMBER_M_S,
     H0_M,
@@ -30,7 +30,7 @@ from waste_heat.physics import (
     RHO_COMPOSITE_KG_M3,
     RH_AMB,
     RH_DESORBER_SWITCH,
-    SALT_TO_POLYMER_RATIO,
+    SALT_LOADING,
     TAU_HALF_S,
     TILT_DEG,
     T_AMB_C,
@@ -67,7 +67,7 @@ class ControllerParams:
 @dataclass(frozen=True, slots=True)
 class SystemConfig:
     salt_name: str = DEFAULT_SALT_NAME
-    salt_to_polymer_ratio: float = SALT_TO_POLYMER_RATIO
+    salt_loading: float = SALT_LOADING
     hydrogel_thickness_m: float = H0_M
     hydrogel_density_kg_m3: float = RHO_COMPOSITE_KG_M3
     g_conv_m_s: float = G_CHAMBER_M_S
@@ -257,9 +257,9 @@ def controls_for_state(
         integral_ads_kg_m2=integral_ads_kg_m2,
         integral_des_kg_m2=integral_des_kg_m2,
     )
-_ODE_RTOL = 1e-4
-_ODE_ATOL = 1e-7
-_INVENTORY_SAMPLE_DT_S = 6.0
+_ODE_RTOL = _pv("ODE relative tolerance")
+_ODE_ATOL = _pv("ODE absolute tolerance")
+_INVENTORY_SAMPLE_DT_S = _pv("Waste-heat: inventory sample time step")
 
 # loading_a, loading_d, h_a, h_d, t_a, t_d, t_cond
 CycleState: TypeAlias = tuple[float, float, float | None, float | None, float, float, float]
@@ -318,9 +318,12 @@ def _clip_mass_state(y: np.ndarray, config: SystemConfig) -> np.ndarray:
     h_min = config.hydrogel_thickness_m
     out[1] = max(float(out[1]), h_min)
     out[3] = max(float(out[3]), h_min)
-    if out[1] > h_min + 1e-12 and float(out[0]) >= C_W_MIN_HYDROGEL:
-        pass
-    elif float(out[1]) <= h_min + 1e-12:
+    # Snap a bed-A thickness sitting within solver noise of the floor onto it exactly, so
+    # downstream `h > h_min` tests are not decided by a 1e-13 residual. This was written
+    # as an `if ...: pass` / `elif` pair also testing c_w against C_W_MIN_HYDROGEL, but
+    # that test could never change the outcome: its thickness clause was the exact negation
+    # of the elif's, so the c_w term was inert and the pass branch did nothing.
+    if float(out[1]) <= h_min + 1e-12:
         out[1] = h_min
     return out
 
@@ -1564,6 +1567,7 @@ def simulate_daily(
     n_cycles: int | None = None,
 ) -> SimulationResult:
     from waste_heat.economics import (
+        KG_WATER_PER_M3,
         parasitic_specific_energy_kwh_per_l,
         total_specific_energy_kwh_per_l,
         waste_heat_specific_energy_kwh_per_l,
@@ -1583,7 +1587,9 @@ def simulate_daily(
     )
     return SimulationResult(
         mean_daily_yield_kg_m2=yield_kg,
-        mean_daily_yield_l_m2=yield_kg * 1000.0,
+        # litres = kg / (kg/m3) * 1000 L/m3. The bare *1000.0 this replaced read the
+        # conversion the wrong way round and reported 20634 L/m2/day for 20.6 kg/m2/day.
+        mean_daily_yield_l_m2=yield_kg / KG_WATER_PER_M3 * 1000.0,
         mean_thermal_efficiency=eta,
         specific_energy_wh_kwh_per_l=wh_kwh_per_l,
         specific_energy_parasitic_kwh_per_l=parasitic_kwh_per_l,

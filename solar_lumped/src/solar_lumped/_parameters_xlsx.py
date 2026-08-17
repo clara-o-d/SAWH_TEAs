@@ -1,7 +1,8 @@
-"""Loads the Physics and Economics parameter tables directly from
-``docs/parameters.xlsx`` -- the single source of truth for system physics
-constants and LCOW/NPV economics inputs. Replaces the former
-``lcow_economic_params.csv``.
+"""Loads the Physics, Economics and Salts parameter tables directly from
+``docs/parameters.xlsx`` -- the repo-wide single source of truth for system physics
+constants, LCOW/NPV economics inputs, and salt properties. ``waste_heat`` and
+``sawh_bayesopt`` read the same workbook through this module; ``waste_heat``'s rows
+carry a "Waste-heat" prefix where its value differs from the solar device's.
 """
 
 from __future__ import annotations
@@ -51,6 +52,13 @@ SALTS: dict[str, dict[str, Any]] = _load_salts()
 def physics_value(name: str, *, mm_to_m: bool = False) -> float:
     value = float(PHYSICS[name]["value"])
     return value / 1000.0 if mm_to_m else value
+
+
+def physics_bounds(name: str, *, mm_to_m: bool = False) -> tuple[float, float]:
+    """The row's ``Lower (for Sweeps)`` / ``Upper (for Sweeps)`` pair."""
+    row = PHYSICS[name]
+    lower, upper = float(row["lower"]), float(row["upper"])
+    return (lower / 1000.0, upper / 1000.0) if mm_to_m else (lower, upper)
 
 
 def economics_value(name: str) -> Any:

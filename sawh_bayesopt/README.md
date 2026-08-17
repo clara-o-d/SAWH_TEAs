@@ -26,7 +26,7 @@ producing a per-site optimum rather than one compromise design.
 ## Scope (v1)
 
 - Design variables: `hydrogel_thickness_m`, `vapor_gap_m`, `insulation_gap_m`,
-  `fin_area_ratio`, `tilt_deg`, `salt_to_polymer_ratio`. No
+  `fin_area_ratio`, `tilt_deg`, `salt_loading`. No
   `condenser_thickness_m`: `economics/lcow.py` charges a flat condenser BOM
   cost regardless of thickness (a free cost-side lever with no downside), and
   the JAX fast path hardcodes condenser thermal mass at Table S3's constant

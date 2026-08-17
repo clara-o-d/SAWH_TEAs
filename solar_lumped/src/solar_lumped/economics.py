@@ -169,6 +169,19 @@ POLYMER_AM_ONLY_PRICE_USD_PER_KG: float = _AM_FRACTION_SHARE * float(_ev(_POLYME
 _water_gel_fraction = float(_ev("De-ionized water mass fraction (Table S1 recipe)"))
 WATER_RATIO_PER_KG_DRY_COMPOSITE: float = _water_gel_fraction / (1.0 - _water_gel_fraction)
 
+# Closure check on the Table S1 recipe: salt + the four polymer components + water are
+# the whole batch. If they stop summing to 1 the renormalization above is dividing by a
+# denominator that no longer means "the polymer share", so fail loudly at import.
+_TABLE_S1_TOTAL = (
+    float(_ev("LiCl mass fraction, salt (Table S1 recipe)"))
+    + _polymer_fraction_sum
+    + _water_gel_fraction
+)
+if abs(_TABLE_S1_TOTAL - 1.0) > 1e-9:
+    raise ValueError(
+        f"Table S1 mass fractions in parameters.xlsx sum to {_TABLE_S1_TOTAL!r}, not 1.0"
+    )
+
 # --- Levelized cost of water (LCOW) ---
 
 FAIL_LCO: float = 1e30
@@ -193,10 +206,10 @@ def complex_system_cost_usd(complex_options, *, fin_area_ratio: float) -> float:
 
 
 def lcow_from_daily_yield(
-    daily_yield_kg_per_m2: float,
+    yield_per_cycle_kg_per_m2: float,
     *,
     salt_name: str,
-    salt_to_polymer_ratio: float,
+    salt_loading: float,
     hydrogel_thickness_m: float,
     econ: LCOEconomicParams,
     cycles_per_day: float = 1.0,
@@ -211,17 +224,24 @@ def lcow_from_daily_yield(
     ``complex_options`` (a ``ComplexOptions``) switches on the complex-fidelity cost
     model: a design-dependent system BOM, a ZSR-blended salt price, and the annual
     fan-replacement stream. It requires ``fin_area_ratio``, since B3 prices fin
-    aluminum per unit of added area."""
-    if daily_yield_kg_per_m2 <= 0.0 or not math.isfinite(daily_yield_kg_per_m2):
+    aluminum per unit of added area.
+
+    Takes yield **per cycle**, not per day: annual water is
+    ``cycles_per_day * 365 * yield_per_cycle_kg_per_m2``, and ``cycles_per_day`` also
+    drives the per-cycle energy term, so it has to be the true cycle count. This device
+    runs one cycle per day, so every caller here leaves ``cycles_per_day`` at 1.0 and
+    passes the day's yield. Feeding a multi-cycle daily total *and* the real cycle count
+    double-counts the water by that count -- see the same note on waste_heat's copy."""
+    if yield_per_cycle_kg_per_m2 <= 0.0 or not math.isfinite(yield_per_cycle_kg_per_m2):
         return FAIL_LCO
     if (
-        salt_to_polymer_ratio <= 0.0 or not math.isfinite(salt_to_polymer_ratio)
+        salt_loading <= 0.0 or not math.isfinite(salt_loading)
     ):
         return FAIL_LCO
     if complex_options is not None and fin_area_ratio is None:
         raise ValueError("complex_options requires fin_area_ratio (B3 prices fin aluminum)")
 
-    annual_water_yield_kg = float(cycles_per_day) * 365.0 * float(daily_yield_kg_per_m2)
+    annual_water_yield_kg = float(cycles_per_day) * 365.0 * float(yield_per_cycle_kg_per_m2)
     if complex_options is not None and salt_price_usd_per_kg is None:
         from solar_lumped.complex_model import zsr_blend_price_usd_per_kg
         from solar_lumped.physics import FABRICATION_EQUILIBRIUM_RH
@@ -233,7 +253,7 @@ def lcow_from_daily_yield(
             return FAIL_LCO
     sorbent_replacement = _sorbent_replacement_annual_usd(
         salt_name=salt_name,
-        salt_to_polymer_ratio=salt_to_polymer_ratio,
+        salt_loading=salt_loading,
         hydrogel_thickness_m=hydrogel_thickness_m,
         econ=econ,
         salt_price_usd_per_kg=salt_price_usd_per_kg,
@@ -266,14 +286,14 @@ def lcow_from_daily_yield(
 def _sorbent_replacement_annual_usd(
     *,
     salt_name: str,
-    salt_to_polymer_ratio: float,
+    salt_loading: float,
     hydrogel_thickness_m: float,
     econ: LCOEconomicParams,
     salt_price_usd_per_kg: float | None = None,
     simplified: bool = False,
 ) -> float:
     gel_lifetime = econ.hydrogel_lifetime_years
-    sl = salt_to_polymer_ratio
+    sl = salt_loading
     dry_mass = dry_composite_mass_kg(hydrogel_thickness_m)
     salt_price = (
         salt_price_usd_per_kg
@@ -309,10 +329,10 @@ class LcowCostBreakdown:
 
 
 def lcow_cost_breakdown_from_daily_yield(
-    daily_yield_kg_per_m2: float,
+    yield_per_cycle_kg_per_m2: float,
     *,
     salt_name: str,
-    salt_to_polymer_ratio: float,
+    salt_loading: float,
     hydrogel_thickness_m: float,
     econ: LCOEconomicParams,
     cycles_per_day: float = 1.0,
@@ -322,9 +342,9 @@ def lcow_cost_breakdown_from_daily_yield(
     """Per-term LCOW breakdown, same segments as lcow_cost_breakdown_usd_per_m3.
     ``simplified=True`` drops the water line and bills only the acrylamide share."""
     lcow = lcow_from_daily_yield(
-        daily_yield_kg_per_m2,
+        yield_per_cycle_kg_per_m2,
         salt_name=salt_name,
-        salt_to_polymer_ratio=salt_to_polymer_ratio,
+        salt_loading=salt_loading,
         hydrogel_thickness_m=hydrogel_thickness_m,
         econ=econ,
         cycles_per_day=cycles_per_day,
@@ -334,9 +354,9 @@ def lcow_cost_breakdown_from_daily_yield(
     if not math.isfinite(lcow) or lcow >= 0.99 * FAIL_LCO:
         return None
 
-    sl = salt_to_polymer_ratio
+    sl = salt_loading
     dry_mass = dry_composite_mass_kg(hydrogel_thickness_m)
-    annual_water_yield_kg = float(cycles_per_day) * 365.0 * float(daily_yield_kg_per_m2)
+    annual_water_yield_kg = float(cycles_per_day) * 365.0 * float(yield_per_cycle_kg_per_m2)
     if annual_water_yield_kg <= 0.0:
         return None
 
@@ -400,31 +420,34 @@ class NpvResult:
     payback_years_discounted: float
 
 
+WATER_PRICE_USD_PER_M3: float = _ev("Water price, NPV/payback scenario input (p_water)")
+
+
 def npv_from_daily_yield(
-    daily_yield_kg_per_m2: float,
-    water_price_usd_per_m3: float,
+    yield_per_cycle_kg_per_m2: float,
+    water_price_usd_per_m3: float = WATER_PRICE_USD_PER_M3,
     *,
     salt_name: str,
-    salt_to_polymer_ratio: float,
+    salt_loading: float,
     hydrogel_thickness_m: float,
     econ: LCOEconomicParams,
     cycles_per_day: float = 1.0,
     salt_price_usd_per_kg: float | None = None,
 ) -> NpvResult | None:
     """NPV and payback period (USD/m2 of system footprint) for one site."""
-    if daily_yield_kg_per_m2 <= 0.0 or not math.isfinite(daily_yield_kg_per_m2):
+    if yield_per_cycle_kg_per_m2 <= 0.0 or not math.isfinite(yield_per_cycle_kg_per_m2):
         return None
     if (
-        salt_to_polymer_ratio <= 0.0 or not math.isfinite(salt_to_polymer_ratio)
+        salt_loading <= 0.0 or not math.isfinite(salt_loading)
     ):
         return None
 
-    annual_water_yield_kg = float(cycles_per_day) * 365.0 * float(daily_yield_kg_per_m2)
+    annual_water_yield_kg = float(cycles_per_day) * 365.0 * float(yield_per_cycle_kg_per_m2)
     gross_annual_water_m3 = econ.utilization_factor * (annual_water_yield_kg / KG_WATER_PER_M3)
 
     sorbent_replacement = _sorbent_replacement_annual_usd(
         salt_name=salt_name,
-        salt_to_polymer_ratio=salt_to_polymer_ratio,
+        salt_loading=salt_loading,
         hydrogel_thickness_m=hydrogel_thickness_m,
         econ=econ,
         salt_price_usd_per_kg=salt_price_usd_per_kg,

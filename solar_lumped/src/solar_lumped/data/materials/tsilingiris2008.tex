@@ -1,0 +1,1140 @@
+% ============================================================
+%  P.T. Tsilingiris, "Thermophysical and transport properties of
+%  humid air at temperature range between 0 and 100 degC"
+%  Energy Conversion and Management 49 (2008) 1098-1110
+%  doi:10.1016/j.enconman.2007.09.015
+%
+%  LaTeX transcription: structure, nomenclature, all numbered
+%  equations, all numerical constants, all data tables, and the
+%  reference list.  Body prose is marked with placeholder
+%  comments -- see the note accompanying this file.
+%
+%  NOTE ON TWO DEFECTS IN THE ORIGINAL, both flagged inline below:
+%   (a) Table 4 prints SK2 = -1.788037411E-2.  That value is
+%       physically impossible (it drives k_m to -178 W/m K at
+%       100 degC).  Numerical check against the paper's own
+%       Eq. (29) confirms the intended value is
+%       SK2 = -1.788037411E-7, which reproduces Eq. (29) to
+%       ~1% and matches Fig. 3 (0.0240 at 0 degC, maximum near
+%       60 degC).  See the comment at Table 4.
+%   (b) Eq. (39) is captioned "in W/m K x 10^-3", but its
+%       coefficients already return W/m K directly
+%       (k_a(273 K) = 0.02403).  Eq. (42) for water vapor DOES
+%       need the 10^-3 factor.  See the comment at Eq. (39).
+%
+%  Compile: pdflatex tsilingiris2008.tex   (twice)
+% ============================================================
+
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{mathptmx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{pdflscape}
+\usepackage[margin=1in]{geometry}
+\usepackage{fancyhdr}
+\usepackage[hidelinks]{hyperref}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[C]{\itshape P.T. Tsilingiris / Energy Conversion and Management 49 (2008) 1098--1110}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0pt}
+
+% --- notation shortcuts -------------------------------------
+\newcommand{\degC}{$^{\circ}$C}
+\newcommand{\mdegC}{^{\circ}\mathrm{C}}
+\newcommand{\Psv}{P_\mathrm{sv}}
+\newcommand{\RH}{\mathrm{RH}}
+\newcommand{\fPT}{f(P,T)}
+% The recurring group  f(P,T).RH.(Psv/P0)  appears in Eqs.
+% (21), (29), (32) and (34); \grp keeps them readable.
+\newcommand{\grp}{\fPT\cdot\RH\cdot\left(\dfrac{\Psv}{P_0}\right)}
+\newcommand{\frcaption}[1]{\begin{center}\itshape #1\end{center}}
+
+\begin{document}
+
+\title{Thermophysical and transport properties of humid air at
+       temperature range between 0 and 100 \degC}
+\author{P.T. Tsilingiris\thanks{Tel.: +30 210 9355289.
+        \textit{E-mail address:} ptsiling@teiath.gr} \\[4pt]
+        \small\itshape Department of Energy Engineering, Technological
+        Education Institution (TEI) of Athens, \\
+        \small\itshape A. Spyridonos Street, GR 122 10 Egaleo, Athens, Greece}
+\date{\small Received 4 February 2007; accepted 29 September 2007 \\
+      Available online 28 November 2007 \\[6pt]
+      \normalsize Energy Conversion and Management \textbf{49} (2008) 1098--1110}
+\maketitle
+
+\begin{abstract}
+% [Abstract text -- paste from the original, p.\ 1098]
+\end{abstract}
+
+\noindent\textit{Keywords:} Thermophysical properties; Density;
+Viscosity; Specific heat capacity; Thermal conductivity; Thermal
+diffusivity; Prandtl number
+
+% ============================================================
+\section*{Nomenclature}
+% ============================================================
+
+\subsection*{Symbols}
+\begin{tabbing}
+\hspace{3.6cm}\= \kill
+$a$, $b$, $c$ \> numerical constants \\
+$A$, $B$ \> virial coefficients \\
+$A_0$, $A_1$, $A_2$, $A_3$ \> numerical constants \\
+$B_0$, $B_1$, $B_2$, $B_3$ \> numerical constants \\
+$c_p$ \> specific heat capacity (J/kg\,K) \\
+$C_1$, $C_2$, $C_3$ \> numerical constants \\
+$\mathrm{CA}_0$, $\mathrm{CA}_1$, \ldots, $\mathrm{CA}_4$ \> numerical constants \\
+$\mathrm{CV}_0$, $\mathrm{CV}_1$, $\mathrm{CV}_2$ \> numerical constants \\
+COD \> coefficient of determination \\
+$E_0$, $E_1$, $E_2$, $E_3$, $E_4$ \> numerical constants \\
+$f$ \> enhancement factor \\
+$k$ \> thermal conductivity (W/m\,K) \\
+$K_1$, $K_2$, $K_3$ \> numerical constants \\
+$\mathrm{KA}_0$, $\mathrm{KA}_1$, \ldots, $\mathrm{KA}_5$ \> numerical constants \\
+$\mathrm{KV}_0$, $\mathrm{KV}_1$, $\mathrm{KV}_2$ \> numerical constants \\
+$M$ \> molar mass (kg/kmol) \\
+$\mathrm{MA}_0$, $\mathrm{MA}_1$, \ldots, $\mathrm{MA}_4$ \> numerical constants \\
+$\mathrm{MV}_0$, $\mathrm{MV}_1$ \> numerical constants \\
+$n$ \> mole number \\
+$P$ \> pressure (Pa) \\
+$Pr$ \> Prandtl number \\
+$R$ \> universal gas constant (8.31441 J/mol\,K) \\
+$\RH$ \> relative humidity \\
+$\mathrm{SD}_0$, $\mathrm{SD}_1$, \ldots, $\mathrm{SD}_3$ \> numerical constants \\
+$\mathrm{SV}_0$, $\mathrm{SV}_1$, \ldots, $\mathrm{SV}_4$ \> numerical constants \\
+$\mathrm{SC}_0$, $\mathrm{SC}_1$, \ldots, $\mathrm{SC}_6$ \> numerical constants \\
+$\mathrm{SA}_0$, $\mathrm{SA}_1$, \ldots, $\mathrm{SA}_5$ \> numerical constants \\
+$\mathrm{SK}_0$, $\mathrm{SK}_1$, \ldots, $\mathrm{SK}_5$ \> numerical constants \\
+$\mathrm{SP}_0$, $\mathrm{SP}_1$, \ldots, $\mathrm{SP}_4$ \> numerical constants \\
+$t$ \> temperature (\degC) \\
+$T$ \> absolute temperature (K) \\
+$z$ \> compressibility factor
+\end{tabbing}
+
+\subsection*{Greek letters}
+\begin{tabbing}
+\hspace{3.6cm}\= \kill
+$\alpha$ \> thermal diffusivity (m$^2$/s) \\
+$\Delta$ \> difference \\
+$\epsilon$ \> dimensionless multiplier \\
+$\Theta$ \> interaction parameter \\
+$\mu$ \> viscosity (Ns/m$^2$) \\
+$\xi_1$, $\xi_2$ \> dimensionless multipliers \\
+$\rho$ \> density (kg/m$^3$) \\
+$\Phi$ \> interaction parameter
+\end{tabbing}
+
+\subsection*{Subscripts}
+\begin{tabbing}
+\hspace{1.6cm}\= \kill
+a  \> air \\
+i  \> ideal \\
+m  \> mixture \\
+sv \> saturated vapor \\
+tr \> monoatomic value \\
+v  \> vapor \\
+0  \> total
+\end{tabbing}
+
+% ============================================================
+\section{Introduction}
+% ============================================================
+% [Introduction prose -- pp.\ 1098-1099.  Key points: prior work
+%  targets either low temperatures (Giacomo [1], Davies [2],
+%  Zuckerwar and Meredith [3], Rasmussen [4], Hyland and Wexler
+%  [5]) or 100-200 degC (Melling et al. [6]); the 0-100 degC band
+%  matters for drying and water distillation; apart from Nelson's
+%  brief survey [7], correlations for humid-air transport
+%  properties in this range are lacking.  Substituting dry-air for
+%  moist-air properties can cause appreciable error near
+%  saturation because M_v < M_a.]
+
+% ============================================================
+\section{The evaluation of thermophysical and transport properties
+         of humid air}
+% ============================================================
+
+Humid air is regarded as a binary mixture of dry air and water
+vapor. The molar fraction of water vapor is defined as the ratio of
+water vapor moles to the total number of moles of the mixture as
+\begin{equation}
+x_\mathrm{v} = \frac{n_\mathrm{v}}{n_\mathrm{m}}
+             = \frac{n_\mathrm{v}}{n_\mathrm{a}+n_\mathrm{v}}
+             = \frac{P_\mathrm{v}}{P_0}
+\end{equation}
+The relative humidity is defined as
+\begin{equation}
+\RH = \frac{n_\mathrm{v}}{n_\mathrm{sv}}
+    = \frac{x_\mathrm{v}}{x_\mathrm{sv}}
+    = \frac{P_\mathrm{v}}{\Psv}
+\end{equation}
+from which
+\begin{equation}
+x_\mathrm{v} = x_\mathrm{sv}\cdot\RH
+\end{equation}
+
+% [Prose -- p.\ 1100, on the enhancement factor [1,8].]
+
+\noindent This is introduced to correct the molar fraction of
+saturated vapor pressure,
+\begin{equation}
+x_\mathrm{sv} = \fPT\cdot\frac{\Psv}{P_0}
+\end{equation}
+The molar fraction of water vapor is then calculated from Eqs.~(3)
+and (4) as a function of the total atmospheric pressure $P_0$ and the
+saturated vapor pressure $\Psv$ at a specific temperature by the
+following expression,
+\begin{equation}
+x_\mathrm{v} = \fPT\cdot\RH\cdot\frac{\Psv}{P_0}
+\end{equation}
+
+\noindent Its calculation was performed according to Hardy [11] by the
+following simplified fitting expression recommended by
+Greenspan [12]
+\begin{equation}
+\fPT = \exp\left[\xi_1\cdot\left(1-\frac{\Psv}{P_0}\right)
+       + \xi_2\cdot\left(\frac{P_0}{\Psv}-1\right)\right]
+\end{equation}
+with
+\begin{equation}
+\xi_1 = \sum_{i=0}^{3} A_i\cdot T^{i}
+\end{equation}
+\begin{equation}
+\xi_2 = \exp\left[\sum_{i=0}^{3} B_i\cdot T^{i}\right]
+\end{equation}
+
+\noindent The numerical values of the constants in Eqs.~(7) and (8)
+corresponding to the temperature range between 0 and 100 \degC\ are
+$A_0 = 3.53624\times10^{-4}$,
+$A_1 = 2.93228\times10^{-5}$,
+$A_2 = 2.61474\times10^{-7}$,
+$A_3 = 8.57538\times10^{-9}$,
+$B_0 = -1.07588\times10^{1}$,
+$B_1 = 6.32529\times10^{-2}$,
+$B_2 = -2.53591\times10^{-4}$ and
+$B_3 = 6.33784\times10^{-7}$.
+
+% [Prose -- p.\ 1100.  The f = 1 assumption leads to less than 0.5%
+%  maximum error at temperatures around 75 degC.]
+
+\noindent Values of $\Psv$ were derived by the following fourth degree
+polynomial, fitted to saturation vapor pressure data between 0 and
+100 \degC\ from the thermodynamic properties of water [14],
+\begin{equation}
+\Psv = E_0 + E_1\cdot t + E_2\cdot t^{2} + E_3\cdot t^{3}
+       + E_4\cdot t^{4}
+\end{equation}
+where $\Psv$ is in kPa, for the following values of numerical
+constants
+\linebreak
+$E_0 = 0.7073034146$,
+$E_1 = -2.703615165\times10^{-2}$,
+$E_2 = 4.36088211\times10^{-3}$,
+$E_3 = -4.662575642\times10^{-5}$ and
+$E_4 = 1.034693708\times10^{-6}$.\hfill\null
+
+% ------------------------------------------------------------
+\subsection{Density}
+
+\noindent The density of the binary mixture of pure water vapor and dry
+air at the corresponding partial pressures and molar fractions of
+$P_\mathrm{v}$, $x_\mathrm{v}$ and
+$P_\mathrm{a} = P_0 - P_\mathrm{v}$,
+$x_\mathrm{a} = 1 - x_\mathrm{v}$, respectively, is calculated through
+the gas equation of state by the following simple mixing correlation,
+\begin{equation}
+\rho_\mathrm{m} = \frac{1}{z_\mathrm{m}(x_\mathrm{v},T)}
+  \cdot\frac{P_0}{R\cdot T}
+  \cdot\left( M_\mathrm{a}\cdot\frac{P_0-P_\mathrm{v}}{P_0}
+            + M_\mathrm{v}\frac{P_\mathrm{v}}{P_0} \right)
+\end{equation}
+where $z_\mathrm{m}(x_\mathrm{v},T)$ is the compressibility factor for
+the gas mixture. From the above expression, the density can be derived
+as a function of the molar fraction of water vapor as
+\begin{equation}
+\rho_\mathrm{m} = \frac{1}{z_\mathrm{m}(x_\mathrm{v},T)}
+  \cdot\frac{P_0}{R\cdot T}\cdot M_\mathrm{a}
+  \cdot\left[1 - x_\mathrm{v}\cdot
+    \left(1-\frac{M_\mathrm{v}}{M_\mathrm{a}}\right)\right]
+\end{equation}
+which, combined with Eq.~(5), leads to the following expression for the
+density of the binary mixture,
+\begin{equation}
+\rho_\mathrm{m} = \frac{1}{z_\mathrm{m}(x_\mathrm{v},T)}
+  \cdot\frac{P_0}{R\cdot T}\cdot M_\mathrm{a}
+  \cdot\left[1 - \fPT\cdot\RH\cdot
+    \left(1-\frac{M_\mathrm{v}}{M_\mathrm{a}}\right)
+    \cdot\left(\frac{\Psv}{P_0}\right)\right]
+\end{equation}
+
+\noindent Melling et al.\ [6] calculated the compressibility factor of
+humid air between 100 and 200 \degC\ by the following approximate
+mixing expression,
+\begin{equation}
+z_\mathrm{m}(x_\mathrm{v},T) = 1 + x_\mathrm{v}
+  \cdot\left(\frac{a+c\cdot T}{1+b\cdot T}-1\right)
+\end{equation}
+
+\noindent For the present investigation the compressibility factor was
+evaluated from the virial equation of state according to the following
+expression,
+\begin{equation}
+z_\mathrm{v} = 1 + A\cdot \Psv + B\cdot \Psv^{2}
+\end{equation}
+which was recommended by Hyland and Wexler [8]. The second and third
+pressure series virial coefficients were calculated by
+\begin{equation}
+A = C_1 + C_2\cdot \mathrm{e}^{\frac{C_3}{T}}
+\end{equation}
+\begin{equation}
+B = K_1 + K_2\,\mathrm{e}^{\frac{K_3}{T}}
+\end{equation}
+with
+$C_1 = 0.7\times10^{-8}$ Pa$^{-1}$,
+$C_2 = -0.147184\times10^{-8}$ Pa$^{-1}$,
+$C_3 = 1734.29$ (K$^{-1}$),
+$K_1 = 0.104\times10^{-14}$ Pa$^{-2}$,
+$K_2 = -0.335297\times10^{-17}$ Pa$^{-2}$ and
+$K_3 = 3645.09$ K$^{-1}$.
+
+% [Prose -- p.\ 1101.  Fixing z_v = 1 costs about 0.38% at 50 degC
+%  and under 1.5% at 100 degC; the combined effect of fixing both
+%  z and f at unity gives an overall maximum density error between
+%  about 0.4% and 1.5% at 0 and 100 degC respectively.]
+
+% ---------------- Table 1 ----------------
+\begin{table}[htbp]
+\centering
+\footnotesize
+\caption*{Table 1\\ The calculated enhancement and compressibility
+          factors for temperatures up to 100 \degC}
+\setlength{\tabcolsep}{5pt}
+\begin{tabular}{lcccccccccc}
+\toprule
+$T$ (\degC) & 10 & 20 & 30 & 40 & 50 & 60 & 70 & 80 & 90 & 100 \\
+\midrule
+$f$            & 1.0006 & 1.0010 & 1.0016 & 1.0023 & 1.0031
+               & 1.0039 & 1.0046 & 1.0046 & 1.0034 & 1.0000 \\
+$z_\mathrm{v}$ & 0.9991 & 0.9987 & 0.9981 & 0.9972 & 0.9961
+               & 0.9947 & 0.9928 & 0.9906 & 0.9878 & 0.9844 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ------------------------------------------------------------
+\subsection{Viscosity}
+
+Reid et al.\ [15] recommended the following expression for the
+viscosity of a mixture of dilute gases with $i$ components, which was
+based on earlier investigations by Wilke [16],
+\begin{equation}
+\mu_\mathrm{m} = \sum_{i=1}^{n}
+  \frac{x_i\cdot\mu_i}{\sum_{j=1}^{n} x_j \Phi_{ij}}
+\end{equation}
+with the interaction parameters $\Phi_{ij}$ and $\Phi_{ji}$ given by
+\begin{equation}
+\Phi_{ij} = \frac{\left[1
+  + \left(\dfrac{\mu_i}{\mu_j}\right)^{1/2}
+  \cdot\left(\dfrac{M_j}{M_i}\right)^{1/4}\right]^{2}}
+  {\left[8\left(1+\dfrac{M_i}{M_j}\right)\right]^{1/2}}
+\end{equation}
+\begin{equation}
+\Phi_{ji} = \frac{\mu_j}{\mu_i}\cdot\frac{M_i}{M_j}\cdot\Phi_{ij}
+\end{equation}
+
+\noindent As derived from Eq.~(18), $\Phi_{ii} = \Phi_{jj} = 1$, which,
+combined with Eq.~(17), after its expansion, leads to the following
+expression,
+\begin{equation}
+\mu_\mathrm{m} = \frac{(1-x_\mathrm{v})\cdot\mu_\mathrm{a}}
+  {(1-x_\mathrm{v}) + x_\mathrm{v}\cdot\Phi_\mathrm{av}}
+  + \frac{x_\mathrm{v}\cdot\mu_\mathrm{v}}
+  {x_\mathrm{v} + (1-x_\mathrm{v})\cdot\Phi_\mathrm{va}}
+\end{equation}
+
+\noindent Taking into consideration Eq.~(5), the previous expression
+becomes
+\begin{equation}
+\begin{split}
+\mu_\mathrm{m} = {} &
+ \frac{\left[1-\grp\right]\cdot\mu_\mathrm{a}}
+      {\left[1-\grp\right] + \grp\,\Phi_\mathrm{av}} \\[6pt]
+ & + \frac{\grp\,\mu_\mathrm{v}}
+        {\grp + \left[1-\grp\right]\cdot\Phi_\mathrm{va}}
+\end{split}
+\end{equation}
+which offers the viscosity of a humid air mixture at a specific
+temperature and relative humidity as a function of dry air and water
+vapor viscosities for the following values of the interaction
+parameters,
+\begin{equation}
+\Phi_\mathrm{av} = \frac{\sqrt{2}}{4}
+  \cdot\left(1+\frac{M_\mathrm{a}}{M_\mathrm{v}}\right)^{-\frac{1}{2}}
+  \cdot\left[1
+  + \left(\frac{\mu_\mathrm{a}}{\mu_\mathrm{v}}\right)^{\frac{1}{2}}
+  \cdot\left(\frac{M_\mathrm{v}}{M_\mathrm{a}}\right)^{\frac{1}{4}}
+  \right]^{2}
+\end{equation}
+\begin{equation}
+\Phi_\mathrm{va} = \frac{\sqrt{2}}{4}
+  \cdot\left(1+\frac{M_\mathrm{v}}{M_\mathrm{a}}\right)^{-\frac{1}{2}}
+  \cdot\left[1
+  + \left(\frac{\mu_\mathrm{v}}{\mu_\mathrm{a}}\right)^{\frac{1}{2}}
+  \cdot\left(\frac{M_\mathrm{a}}{M_\mathrm{v}}\right)^{\frac{1}{4}}
+  \right]^{2}
+\end{equation}
+
+% ------------------------------------------------------------
+\subsection{Thermal conductivity}
+
+Reid et al.\ [15] suggests the following expression, which was
+originally proposed by Wassiljewa [17], as the basis of the
+calculation of the thermal conductivity of the mixture,
+\begin{equation}
+k_\mathrm{m} = \sum_{i=1}^{n}
+  \frac{x_i\cdot k_i}{\sum_{j=1}^{n} x_j \Theta_{ij}}
+\end{equation}
+Based also on the original investigations by Mason and Saxena [18],
+they have recommended that
+\begin{equation}
+\Theta_{ij} = \epsilon\cdot\frac{\left[1
+  + \left(\dfrac{k_{\mathrm{tr}i}}{k_{\mathrm{tr}j}}\right)^{1/2}
+  \cdot\left(\dfrac{M_i}{M_j}\right)^{1/4}\right]^{2}}
+  {\left[8\left(1+\dfrac{M_i}{M_j}\right)\right]^{1/2}}
+\end{equation}
+where the ratio of the monoatomic values of thermal conductivity in the
+previous expression is calculated according to Ref.~[15] by
+\begin{equation}
+\frac{k_{\mathrm{tr}i}}{k_{\mathrm{tr}j}}
+ = \frac{\mu_i}{\mu_j}\cdot\frac{M_j}{M_i}
+\end{equation}
+
+% [Prose -- p.\ 1101.  Mason and Saxena [18] recommend
+%  epsilon = 1.065 for non-polar gases; Tondon and Saxena [19]
+%  suggest 0.85 for polar/non-polar mixtures; Reid et al. [15]
+%  recommend unity, which is adopted here.]
+
+\noindent Under this assumption, the substitution of Eq.~(26) into
+Eq.~(25) leads to
+\begin{equation}
+\Phi_{ij} = \Theta_{ij}
+\end{equation}
+The following expression, employed for calculation of the thermal
+conductivity of mixtures, is derived from Eq.~(24),
+\begin{equation}
+k_\mathrm{m} = \frac{(1-x_\mathrm{v})\cdot k_\mathrm{a}}
+  {(1-x_\mathrm{v}) + x_\mathrm{v}\cdot\Phi_\mathrm{av}}
+  + \frac{x_\mathrm{v}\cdot k_\mathrm{v}}
+  {x_\mathrm{v} + (1-x_\mathrm{v})\cdot\Phi_\mathrm{va}}
+\end{equation}
+Taking into consideration Eq.~(5), the previous expression becomes
+\begin{equation}
+\begin{split}
+k_\mathrm{m} = {} &
+ \frac{\left[1-\grp\right]\cdot k_\mathrm{a}}
+      {\left[1-\grp\right] + \grp\,\Phi_\mathrm{av}} \\[6pt]
+ & + \frac{\grp\cdot k_\mathrm{v}}
+        {\grp + \left[1-\grp\right]\cdot\Phi_\mathrm{va}}
+\end{split}
+\end{equation}
+
+% ------------------------------------------------------------
+\subsection{Specific heat capacity}
+
+% [Prose -- p.\ 1102, on the linear mixing approach of Wong and
+%  Embelton [20] and its adoption by [3], [21], [4] and [6].]
+
+\noindent Following the same approach, the specific heat capacity of
+the ideal gas mixture can be expressed as
+\begin{equation}
+c_{p\mathrm{m}} = c_{p\mathrm{a}}\cdot x_\mathrm{a}
+  \cdot\frac{M_\mathrm{a}}{M_\mathrm{m}}
+  + c_{p\mathrm{v}}\cdot x_\mathrm{v}
+  \cdot\frac{M_\mathrm{v}}{M_\mathrm{m}}
+\end{equation}
+To account for the real gas behavior, the correction term $\Delta c_p$
+was proposed according to Reid et al.\ [15],
+\begin{equation}
+c_{p,\mathrm{m}} - c_{p,\mathrm{mi}} = \Delta c_p
+\end{equation}
+
+% [Prose -- p.\ 1102.  Delta c_p is a complex function of the
+%  deviation functions and the acentric factor; per Melling et al.
+%  [6] it gives at most a 1.5% correction, so it is neglected and
+%  c_pmi = c_pm is used.]
+
+\noindent However, taking into account Eq.~(5), the molar fraction of
+dry air is
+\begin{equation}
+x_\mathrm{a} = 1 - x_\mathrm{v}
+             = 1 - \fPT\cdot\RH\cdot\frac{\Psv}{P_0}
+\end{equation}
+and since
+\begin{equation}
+M_\mathrm{m} = M_\mathrm{a}\cdot x_\mathrm{a}
+             + M_\mathrm{v}\cdot x_\mathrm{v}
+\end{equation}
+Eq.~(30) becomes
+\begin{equation}
+c_{p\mathrm{m}} = \frac{
+   \begin{array}{c}
+   c_{p\mathrm{a}}\cdot\left[1-\grp\right]\cdot M_\mathrm{a} \\
+   + \,c_{p\mathrm{v}}\cdot\grp\cdot M_\mathrm{v}
+   \end{array}}
+  {M_\mathrm{a}\cdot\left[1-\grp\right]
+       + M_\mathrm{v}\cdot\grp}
+\end{equation}
+
+% ------------------------------------------------------------
+\subsection{Thermal diffusivity}
+
+Thermal diffusivity is calculated from its definition expression,
+\begin{equation}
+\alpha_\mathrm{m} = \frac{k_\mathrm{m}}
+  {\rho_\mathrm{m}\cdot c_{p\mathrm{m}}}
+\end{equation}
+taking into account the previously derived Eqs.~(12), (29) and (34) for
+the respective calculations of density, thermal conductivity and
+specific heat capacity of humid air.
+
+% ------------------------------------------------------------
+\subsection{Prandtl number}
+
+This dimensionless number is defined as
+$Pr_\mathrm{m} = \nu_\mathrm{m}/\alpha_\mathrm{m}$. Since the thermal
+diffusivity from Eq.~(35) and the kinematic viscosity, as derived from
+$\mu_\mathrm{m} = \rho_\mathrm{m}\cdot\nu_\mathrm{m}$, are both
+functions of density, the Prandtl number is evaluated as a function of
+known thermophysical properties $\mu_\mathrm{m}$, $c_{p\mathrm{m}}$
+and $k_\mathrm{m}$, as
+\begin{equation}
+Pr_\mathrm{m} = \frac{\mu_\mathrm{m}\cdot c_{p,\mathrm{m}}}
+                     {k_\mathrm{m}}
+\end{equation}
+with the values of properties $\mu_\mathrm{m}$, $c_{p,\mathrm{m}}$ and
+$k_\mathrm{m}$ derived from Eqs.~(21), (34) and (29), respectively.
+
+% ============================================================
+\section{The thermophysical and transport properties of dry air and
+         water vapor}
+% ============================================================
+
+% [Prose -- p.\ 1103.]
+
+\noindent As soon as the molar mass $M_{a,i}$ and the molar fraction
+$x_{a,i}$ of the $n$ individual constituent gases of dry air mixture
+are known, the molar mass of atmospheric air can be derived by the
+following expression,
+\begin{equation}
+M_\mathrm{a} = \frac{\sum_{i=1}^{n} x_{a,i}\cdot M_{a,i}}
+                    {\sum_{i=1}^{n} x_{a,i}}
+\end{equation}
+Assuming a composition similar to that of standard dry air, as
+described for example by Ref.~[22], a molar mass of
+$M_\mathrm{a} = 28.9635$ kg/kmol is derived from the previous
+expression.
+
+% [Prose -- p.\ 1103.  All properties were taken from the Handbook
+%  of Heat Transfer [23], as compiled from Irvine and Liley [24].]
+
+\noindent The viscosity of dry air in Ns/m$^2\times10^{-6}$ is offered
+by the following correlation,
+\begin{equation}
+\mu_\mathrm{a} = \mathrm{MA}_0 + \mathrm{MA}_1\cdot T
+  + \mathrm{MA}_2\cdot T^{2} + \mathrm{MA}_3\cdot T^{3}
+  + \mathrm{MA}_4\cdot T^{4}
+\end{equation}
+in the temperature range $-23\,\mdegC \leqslant t \leqslant 327\,\mdegC$,
+for the following values of the numerical constants
+$\mathrm{MA}_0 = -9.8601\times10^{-1}$,
+$\mathrm{MA}_1 = 9.080125\times10^{-2}$,
+$\mathrm{MA}_2 = -1.17635575\times10^{-4}$,
+$\mathrm{MA}_3 = 1.2349703\times10^{-7}$ and
+$\mathrm{MA}_4 = -5.7971299\times10^{-11}$.
+
+\noindent The thermal conductivity of dry air in
+W/m\,K\,$\times10^{-3}$ is expressed by the following correlation,
+% CAUTION: the "x 10^-3" in the line above is as printed, but these
+% coefficients already return W/m K directly -- Eq. (39) evaluates
+% to 0.02403 at T = 273.15 K, the correct dry-air value.  Do NOT
+% apply a further 1e-3 factor here.  Eq. (42) for water vapor DOES
+% require it.
+\begin{equation}
+k_\mathrm{a} = \mathrm{KA}_0 + \mathrm{KA}_1\cdot T
+  + \mathrm{KA}_2\cdot T^{2} + \mathrm{KA}_3\cdot T^{3}
+  + \mathrm{KA}_4\cdot T^{4} + \mathrm{KA}_5\cdot T^{5}
+\end{equation}
+for
+$\mathrm{KA}_0 = -2.276501\times10^{-3}$,
+$\mathrm{KA}_1 = 1.2598485\times10^{-4}$,
+$\mathrm{KA}_2 = -1.4815235\times10^{-7}$,
+$\mathrm{KA}_3 = 1.73550646\times10^{-10}$,
+$\mathrm{KA}_4 = -1.066657\times10^{-13}$ and
+$\mathrm{KA}_5 = 2.47663035\times10^{-17}$.
+This expression is valid at the temperature range between
+$-23\,\mdegC \leqslant t \leqslant 777\,\mdegC$.
+
+\noindent The specific heat capacity of dry air in kJ/kg\,K, which is
+valid for the same temperature range, is given by the following
+expression
+\begin{equation}
+c_{p\mathrm{a}} = \mathrm{CA}_0 + \mathrm{CA}_1\cdot T
+  + \mathrm{CA}_2\cdot T^{2} + \mathrm{CA}_3\cdot T^{3}
+  + \mathrm{CA}_4\cdot T^{4}
+\end{equation}
+for the following values of the numerical constants
+$\mathrm{CA}_0 = 0.103409\times10^{1}$,
+$\mathrm{CA}_1 = -0.284887\times10^{-3}$,
+$\mathrm{CA}_2 = 0.7816818\times10^{-6}$,
+$\mathrm{CA}_3 = -0.4970786\times10^{-9}$ and
+$\mathrm{CA}_4 = 0.1077024\times10^{-12}$.
+
+% [Prose -- p.\ 1103.  Water vapor data from the same source as
+%  compiled from Toulukian et al. [25], fitted for
+%  0 <= t <= 120 degC.]
+
+\noindent The viscosity in Ns/m$^2\times10^{-6}$ was determined by the
+following linear expression,
+\begin{equation}
+\mu_\mathrm{v} = \mathrm{MV}_0 + \mathrm{MV}_1\cdot t
+\end{equation}
+with $\mathrm{MV}_0 = 8.058131868\times10^{1}$ and
+$\mathrm{MV}_1 = 4.000549451\times10^{-1}$.
+
+\noindent The thermal conductivity in W/m\,K\,$\times10^{-3}$ was
+determined by the expression,
+\begin{equation}
+k_\mathrm{v} = \mathrm{KV}_0 + \mathrm{KV}_1 t
+  + \mathrm{KV}_2\cdot t^{2}
+\end{equation}
+where $\mathrm{KV}_0 = 1.761758242\times10^{1}$,
+$\mathrm{KV}_1 = 5.558941059\times10^{-2}$ and
+$\mathrm{KV}_2 = -1.663336663\times10^{-4}$.
+
+\noindent The specific heat capacity in (kJ/kg\,K) was determined by
+the following expression,
+\begin{equation}
+c_{p\mathrm{v}} = \mathrm{CV}_0 + \mathrm{CV}_1\cdot t
+  + \mathrm{CV}_2\cdot t^{2}
+\end{equation}
+with $\mathrm{CV}_0 = 1.86910989$,
+$\mathrm{CV}_1 = -2.578421578\times10^{-4}$ and
+$\mathrm{CV}_2 = 1.941058941\times10^{-5}$.
+
+% ============================================================
+\section{Results and discussion}
+% ============================================================
+% [Prose -- pp.\ 1103-1105.  Quantitative results:
+%  DENSITY (Fig. 1): RH 0->100% gives negligible change near
+%   freezing, about 4.8% decrease at 50 degC, about 37.5% at 100 degC.
+%  VISCOSITY (Fig. 2): about 6.8% decrease at 50 degC, about 45% at
+%   100 degC; each RH curve has a viscosity maximum that moves to
+%   higher temperature as RH falls -- about 86 degC for the
+%   2e-5 Ns/m2 maximum at RH = 20%, about 40 degC for the
+%   1.8e-5 Ns/m2 maximum at RH = 100%.
+%  THERMAL CONDUCTIVITY (Fig. 3): 3.5% decrease at 50 degC, about
+%   21.5% at 100 degC; the maximum moves from 63 degC to about
+%   94 degC as RH falls from saturation to about 40%.
+%  SPECIFIC HEAT CAPACITY (Fig. 4): increase of about 7% at
+%   50 degC and 100% at 100 degC.
+%  Figs. 5 and 6 show thermal diffusivity and Prandtl number.]
+
+\noindent The density of the saturated mixture for the temperature
+range between 0 and 100 \degC\ was fitted by the following third
+degree polynomial,
+\begin{equation}
+\rho_\mathrm{m} = \mathrm{SD}_0 + \mathrm{SD}_1\cdot t
+  + \mathrm{SD}_2\cdot t^{2} + \mathrm{SD}_3\cdot t^{3}
+\end{equation}
+
+\noindent The saturated mixture viscosity for the temperature range
+between 0 and 100 \degC\ was fitted by the following fourth degree
+polynomial,
+\begin{equation}
+\mu_\mathrm{m} = \mathrm{SV}_0 + \mathrm{SV}_1\cdot t
+  + \mathrm{SV}_2\cdot t^{2} + \mathrm{SV}_3\cdot t^{3}
+  + \mathrm{SV}_4\cdot t^{4}
+\end{equation}
+
+\noindent The thermal conductivity of the saturated mixture for the
+temperature range of interest was fitted by the following fourth
+degree polynomial,
+\begin{equation}
+k_\mathrm{m} = \mathrm{SK}_0 + \mathrm{SK}_1\cdot t
+  + \mathrm{SK}_2\cdot t^{2} + \mathrm{SK}_3\cdot t^{3}
+  + \mathrm{SK}_4\cdot t^{4}
+\end{equation}
+
+\noindent The saturated mixture specific heat capacity for the
+temperature range between 0 and 100 \degC\ was fitted by the following
+fifth degree polynomial,
+\begin{equation}
+c_{p\mathrm{m}} = \mathrm{SC}_0 + \mathrm{SC}_1\cdot t
+  + \mathrm{SC}_2\cdot t^{2} + \mathrm{SC}_3\cdot t^{3}
+  + \mathrm{SC}_4\cdot t^{4} + \mathrm{SC}_5\cdot t^{5}
+\end{equation}
+
+\noindent The corresponding saturated mixture properties for the
+temperature range of interest were fitted by the following fourth
+degree polynomial,
+\begin{equation}
+\alpha_\mathrm{m} = \mathrm{SA}_0 + \mathrm{SA}_1\cdot t
+  + \mathrm{SA}_2\cdot t^{2} + \mathrm{SA}_3\cdot t^{3}
+  + \mathrm{SA}_4\cdot t^{4}
+\end{equation}
+
+\noindent The Prandtl number for the saturated mixture for the same
+temperature range was fitted by the following fourth degree
+polynomial,
+\begin{equation}
+Pr_\mathrm{m} = \mathrm{SP}_0 + \mathrm{SP}_1\cdot t
+  + \mathrm{SP}_2\cdot t^{2} + \mathrm{SP}_3\cdot t^{3}
+  + \mathrm{SP}_4\cdot t^{4}
+\end{equation}
+with a coefficient of determination and corresponding numerical
+constants as shown in Table~4.
+
+% ---------------- Figures 1-6 ----------------
+\begin{figure}[htbp]\centering
+% \includegraphics[width=0.6\textwidth]{fig1.pdf}
+\framebox[0.6\textwidth][c]{\rule{0pt}{5cm} Fig.~1}
+\caption*{Fig.~1. The moist air density as a function of temperature
+with the relative humidity as a parameter ranging between dry air
+(top curve RH = 0\%) and saturation conditions (lower curve
+RH = 100\%) in 10\% steps.}
+\end{figure}
+
+\begin{figure}[htbp]\centering
+% \includegraphics[width=0.6\textwidth]{fig2.pdf}
+\framebox[0.6\textwidth][c]{\rule{0pt}{5cm} Fig.~2}
+\caption*{Fig.~2. The viscosity of moist air as a function of
+temperature with the relative humidity as a parameter ranging between
+dry air (top curve RH = 0\%) and saturation conditions (lower curve
+RH = 100\%) in 10\% steps.}
+\end{figure}
+
+\begin{figure}[htbp]\centering
+% \includegraphics[width=0.6\textwidth]{fig3.pdf}
+\framebox[0.6\textwidth][c]{\rule{0pt}{5cm} Fig.~3}
+\caption*{Fig.~3. The thermal conductivity of moist air as a function
+of temperature with the relative humidity as a parameter ranging
+between dry air (top curve RH = 0\%) and saturation conditions (lower
+curve RH = 100\%) in 10\% steps.}
+\end{figure}
+
+\begin{figure}[htbp]\centering
+% \includegraphics[width=0.6\textwidth]{fig4.pdf}
+\framebox[0.6\textwidth][c]{\rule{0pt}{5cm} Fig.~4}
+\caption*{Fig.~4. The specific heat capacity of moist air as a function
+of temperature with the relative humidity as a parameter ranging
+between dry air (top curve RH = 0\%) and saturation conditions (lower
+curve RH = 100\%) in 10\% steps.}
+\end{figure}
+
+\begin{figure}[htbp]\centering
+% \includegraphics[width=0.6\textwidth]{fig5.pdf}
+\framebox[0.6\textwidth][c]{\rule{0pt}{5cm} Fig.~5}
+\caption*{Fig.~5. The thermal diffusivity of moist air as a function of
+temperature with the relative humidity as a parameter ranging between
+dry air (top curve RH = 0\%) and saturation conditions (lower curve
+RH = 100\%) in 10\% steps.}
+\end{figure}
+
+\begin{figure}[htbp]\centering
+% \includegraphics[width=0.6\textwidth]{fig6.pdf}
+\framebox[0.6\textwidth][c]{\rule{0pt}{5cm} Fig.~6}
+\caption*{Fig.~6. The Prandtl number of moist air as a function of
+temperature with the relative humidity as a parameter ranging between
+dry air (lower curve RH = 0\%) and saturation conditions (top curve
+RH = 100\%) in 10\% steps.}
+\end{figure}
+
+% ============================================================
+\section{Comparisons with the results from earlier investigations}
+% ============================================================
+
+% [Prose -- p.\ 1106.  Nelson's report [7] is the single readily
+%  available source of formulae for this temperature range, but
+%  citations and derivations are largely absent from it.]
+
+\noindent The recommended expression for mixture density is
+\begin{equation}
+\rho_\mathrm{m} = (3.484 - 1.317\cdot x_\mathrm{v})
+  \cdot\frac{P_0}{273.15+t}
+\end{equation}
+
+% [Prose -- p.\ 1106.  Eq. (50) follows from Eq. (12) with
+%  z_m = f(P,T) = 1 and R = 8.314 J/mol K,
+%  M_a = 28.963 kg/kmol, M_v = 18.02 kg/kmol, giving identical
+%  results to Eq. (12).]
+
+\noindent The proposed expression for mixture viscosity is
+\begin{equation}
+\mu_\mathrm{m} = \frac{\mu_\mathrm{a}
+  + x_\mathrm{v}\cdot(0.7887\cdot\mu_\mathrm{v}-\mu_\mathrm{a})}
+  {1 - 0.2113\cdot x_\mathrm{v}}
+\end{equation}
+for which the report referred to Ref.~[26], where its derivation is
+attributed to an earlier cited work by Herning and Zipperer
+recommending the derivation of mixture viscosity as
+\begin{equation}
+\mu_\mathrm{m} = \frac{\sum_{i=1}^{n} x_i\cdot\mu_i\cdot(M_i)^{1/2}}
+                      {\sum_{i=1}^{n} x_i\cdot(M_i)^{1/2}}
+\end{equation}
+
+% [Prose -- p.\ 1106.  Applied to a two-component system this is
+%  identical to Eq. (9) in Ref. [6], as proposed by Krischer and
+%  Kast [27], and completely different from Eq. (21).]
+
+\noindent The proposed expression for the specific heat capacity,
+although of an unspecified origin is
+\begin{equation}
+c_{p\mathrm{m}} = c_{p\mathrm{a}}
+  + 0.622\cdot\frac{P_\mathrm{v}}{P_0-P_\mathrm{v}}
+\end{equation}
+
+% [Prose -- p.\ 1106.  Eq. (53) follows from Eq. (34) by omitting
+%  the vapor-pressure term of the denominator and assuming unity
+%  water vapor specific heat capacity, which actually ranges
+%  between about 1.86 and 2.03 kJ/kg K over the range of interest;
+%  hence Eq. (53) is of questionable accuracy.]
+
+\noindent The proposed thermal conductivity expression in (mW/m\,K)
+units is
+\begin{equation}
+k_\mathrm{m} = \frac{k_\mathrm{a}
+  + x_\mathrm{v}\cdot(0.8536\cdot k_\mathrm{v}-k_\mathrm{a})}
+  {1 - 0.1464\cdot x_\mathrm{v}}
+\end{equation}
+This is also attributed to the chemical engineers handbook [26] in
+which its derivation is attributed to the following expression,
+recommended by Friend and Adler [28],
+\begin{equation}
+k_\mathrm{m} = \frac{\sum_{i=1}^{n} x_i\cdot k_i\cdot(M_i)^{1/3}}
+                    {\sum_{i=1}^{n} x_i\cdot(M_i)^{1/3}}
+ = \frac{x_\mathrm{a}\cdot k_\mathrm{a}\cdot(M_\mathrm{a})^{1/3}
+       + x_\mathrm{v}\cdot k_\mathrm{v}\cdot(M_\mathrm{v})^{1/3}}
+       {x_\mathrm{a}\cdot(M_\mathrm{a})^{1/3}
+       + x_\mathrm{v}\cdot(M_\mathrm{v})^{1/3}}
+\end{equation}
+
+% [Prose -- pp.\ 1106-1108.  Discussion of the measured data:
+%  agreement with Nelson's viscosity correlation within about 4%;
+%  measurements typically under 8% above the calculated values;
+%  thermal conductivity deviations from Nelson about 1%; measured
+%  conductivities up to about 7% high at 65 degC and 10% at
+%  80 degC.  Nelson's c_p correlation gives unrealistically high
+%  values at high RH and temperature.]
+
+% ---------------- Table 2 ----------------
+\begin{table}[htbp]
+\centering
+\footnotesize
+\caption*{Table 2\\ Data corresponding to viscosity measurements from
+          various literature sources ($\times10^{-6}$ kg/m\,s)}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{llllllllllll}
+\toprule
+\multicolumn{12}{l}{\textit{From Kestin and Whitelaw} [6]} \\
+25 \degC & 18.451 & 18.446 & 18.441 & 18.419 & 18.2 & & & & & & \\
+         & 19\%   & 25.5\% & 35\%   & 51\%   & 54\% & & & & & & \\
+50 \degC & 19.593 & 19.591 & 19.575 & 19.539 & 19.474 & 19.247 & & & & & \\
+         & 15.5\% & 20\%   & 25\%   & 34\%   & 51\%   & 98\%   & & & & & \\
+75 \degC & 20.632 & 20.588 & 20.497 & 20.357 & 20.046 & 19.586 & 19.252 & 18.792 & 18.781 & & \\
+         & 14\%   & 20\%   & 25\%   & 35\%   & 51\%   & 70\%   & 83\%   & 97\%   & 100\%  & & \\
+\midrule
+\multicolumn{12}{l}{\textit{From Hochrainer and Munczak} [6]} \\
+20 \degC & 18.176 & 18.150 & 18.136 & 18.134 & & & & & & & \\
+         & 0\%    & 62\%   & 82\%   & 93\%   & & & & & & & \\
+30 \degC & 18.647 & 18.620 & 18.617 & 18.586 & 18.569 & & & & & & \\
+         & 0\%    & 41\%   & 61\%   & 81\%   & 92\%   & & & & & & \\
+40 \degC & 19.111 & 19.111 & 19.080 & 19.053 & 19.017 & 18.995 & & & & & \\
+         & 0\%    & 0\%    & 41\%   & 63\%   & 83\%   & 93\%   & & & & & \\
+50 \degC & 19.588 & 19.553 & 19.483 & 19.426 & 19.363 & 19.343 & & & & & \\
+         & 0\%    & 21\%   & 41\%   & 61\%   & 82\%   & 93\%   & & & & & \\
+\midrule
+\multicolumn{12}{l}{\textit{From Vargaftik} [6,29]} \\
+50 \degC  & 19.550 & 19.140 & & & & & & & & & \\
+          & 0\%    & 82\%   & & & & & & & & & \\
+60 \degC  & 20.01  & 19.600 & 19.04 & & & & & & & & \\
+          & 0\%    & 51\%   & 100\% & & & & & & & & \\
+70 \degC  & 20.46  & 20.05  & 19.500 & 18.800 & & & & & & & \\
+          & 0\%    & 32\%   & 65\%   & 97\%   & & & & & & & \\
+80 \degC  & 20.910 & 20.510 & 19.950 & 19.250 & 18.430 & 17.500 & & & & & \\
+          & 0\%    & 21\%   & 43\%   & 64\%   & 86\%   & 100\%  & & & & & \\
+90 \degC  & 21.350 & 20.950 & 20.350 & 19.690 & 18.870 & 17.920 & 16.890 & 15.770 & & & \\
+          & 0\%    & 14\%   & 29\%   & 43\%   & 58\%   & 72\%   & 87\%   & 100\%  & & & \\
+100 \degC & 21.800 & 21.400 & 20.840 & 20.140 & 19.310 & 18.360 & 17.320 & 16.180 & 14.990 & 13.750 & 12.470 \\
+          & 0\%    & 10\%   & 20\%   & 30\%   & 40\%   & 50\%   & 60\%   & 70\%   & 80\%   & 90\%   & 100\% \\
+\midrule
+\multicolumn{12}{l}{\textit{From Mason and Monchick} [30]} \\
+25 \degC & 18.300 & 18.000 & & & & & & & & & \\
+         & 0\%    & 100\%  & & & & & & & & & \\
+50 \degC & 19.550 & 19.100 & 19.070 & & & & & & & & \\
+         & 0\%    & 82\%   & 100\%  & & & & & & & & \\
+75 \degC & 20.850 & 20.170 & 19.660 & 19.100 & 18.400 & & & & & & \\
+         & 0\%    & 26\%   & 53\%   & 79\%   & 100\%  & & & & & & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ---------------- Table 3 ----------------
+\begin{table}[htbp]
+\centering
+\footnotesize
+\caption*{Table 3\\ Data corresponding to thermal conductivity
+          measurements from various literature sources
+          ($\times10^{-2}$ W/m\,K)}
+\setlength{\tabcolsep}{4pt}
+\begin{tabular}{lllllllllll}
+\toprule
+\multicolumn{11}{l}{\textit{From Gruss and Schmick} [31]} \\
+80 \degC & 2.9845 & 3.044 & 3.088 & 3.094 & 3.091 & 3.088 & 3.0949 & 3.062 & 3.074 & 2.9810 \\
+         & 0\%    & 15\%  & 32\%  & 37\%  & 42\%  & 48\%  & 53\%   & 65\%  & 67\%  & 95\% \\
+\midrule
+\multicolumn{11}{l}{\textit{From Vargaftik} [29]} \\
+80 \degC & 2.989 & 3.069 & 3.103 & 3.078 & 3.019 & & & & & \\
+         & 0\%   & 21\%  & 43\%  & 65\%  & 86\%  & & & & & \\
+\midrule
+\multicolumn{11}{l}{\textit{From Touloukian et al.} [32,6]} \\
+60 \degC & 2.92 & 2.96 & 2.96 & 2.92    & & & & & & \\
+         & 0\%  & 40\% & 81\% & >100\%  & & & & & & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ---------------- Figures 7-9 ----------------
+\begin{figure}[htbp]\centering
+% \includegraphics[width=0.6\textwidth]{fig7.pdf}
+\framebox[0.6\textwidth][c]{\rule{0pt}{5cm} Fig.~7}
+\caption*{Fig.~7. Comparative viscosity of moist air at various
+temperature levels according to results from the present analysis
+(curves in solid lines), Nelsons correlation (curves in broken lines)
+and discrete data from earlier measurements in the literature.}
+\end{figure}
+
+\begin{figure}[htbp]\centering
+% \includegraphics[width=0.6\textwidth]{fig8.pdf}
+\framebox[0.6\textwidth][c]{\rule{0pt}{5cm} Fig.~8}
+\caption*{Fig.~8. Comparative thermal conductivity of moist air at
+various temperature levels according to results from the present
+analysis (curves in solid lines), Nelsons correlation (curves in
+broken lines) and discrete data from earlier measurements in the
+literature.}
+\end{figure}
+
+\begin{figure}[htbp]\centering
+% \includegraphics[width=0.6\textwidth]{fig9.pdf}
+\framebox[0.6\textwidth][c]{\rule{0pt}{5cm} Fig.~9}
+\caption*{Fig.~9. Comparative specific heat capacity of moist air at
+various temperature levels according to results from the present
+analysis (curves in solid lines) and Nelsons correlation (53) (curves
+in broken lines) for a relative humidiry ranging between RH = 0\%
+(lower curves) to RH = 100\% (top curves).}
+\end{figure}
+
+% ---------------- Table 4 ----------------
+% IMPORTANT: SK2 below is printed in the original as
+% -1.788037411E-2.  That is a typo.  Substituting it makes
+% k_m = -178 W/m K at 100 degC.  The intended value is
+% -1.788037411E-7, verified numerically against Eq. (29):
+%    t (degC)      0       20       40       60       80      100
+%    Eq. (29)  0.02403  0.02547  0.02665  0.02724  0.02617  0.02147
+%    poly E-7  0.02401  0.02538  0.02646  0.02701  0.02663  0.02482
+% which also matches Fig. 3 and the stated conductivity maximum
+% near 63 degC.  The printed value is retained in the table for
+% fidelity; use the corrected one in any computation.
+\begin{landscape}
+\begin{table}[htbp]
+\centering
+\scriptsize
+\caption*{Table 4\\ The numerical constants and coefficients of
+determination (COD) for the proposed polynomial fit expressions for the
+following saturated mixture properties, density, viscosity, thermal
+conductivity, specific heat capacity, thermal diffusivity and Prandtl
+number}
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{llllll}
+\toprule
+Density (kg/m$^3$) & Viscosity (Ns/m$^2$)
+ & Thermal conductivity (W/m K) & Specific heat capacity (kJ/kg K)
+ & Thermal diffusivity (m$^2$/s) & Prandtl number \\
+COD = 0.999954 & COD = 0.999997 & COD = 0.999985
+ & COD = 0.999905 & COD = 0.999900 & COD = 0.999990 \\
+\midrule
+$\mathrm{SD}_0 = 1.293393662$
+ & $\mathrm{SV}_0 = 1.715747771$E-5
+ & $\mathrm{SK}_0 = 2.40073953$E-2
+ & $\mathrm{SC}_0 = 1.004571427$
+ & $\mathrm{SA}_0 = 1.847185729$E-5
+ & $\mathrm{SP}_0 = 0.7215798365$ \\
+$\mathrm{SD}_1 = -5.538444326$E-3
+ & $\mathrm{SV}_1 = 4.722402075$E-8
+ & $\mathrm{SK}_1 = 7.278410162$E-5
+ & $\mathrm{SC}_1 = 2.05063275$E-3
+ & $\mathrm{SA}_1 = 1.161914598$E-7
+ & $\mathrm{SP}_1 = -3.703124976$E-4 \\
+$\mathrm{SD}_2 = 3.860201577$E-5
+ & $\mathrm{SV}_2 = -3.663027156$E-10
+ & $\mathrm{SK}_2 = -1.788037411$E-2
+ & $\mathrm{SC}_2 = -1.631537093$E-4
+ & $\mathrm{SA}_2 = 2.373056947$E-10
+ & $\mathrm{SP}_2 = 2.240599044$E-5 \\
+$\mathrm{SD}_3 = -5.2536065$E-7
+ & $\mathrm{SV}_3 = 1.873236686$E-12
+ & $\mathrm{SK}_3 = -1.351703529$E-9
+ & $\mathrm{SC}_3 = 6.2123003$E-6
+ & $\mathrm{SA}_3 = -5.769352751$E-12
+ & $\mathrm{SP}_3 = -4.162785412$E-7 \\
+ & $\mathrm{SV}_4 = -8.050218737$E-14
+ & $\mathrm{SK}_4 = -3.322412767$E-11
+ & $\mathrm{SC}_4 = -8.830478888$E-8
+ & $\mathrm{SA}_4 = -6.369279936$E-14
+ & $\mathrm{SP}_4 = 4.969218948$E-9 \\
+ & & & $\mathrm{SC}_5 = 5.071307038$E-10 & & \\
+\bottomrule
+\end{tabular}
+\end{table}
+\end{landscape}
+
+% ============================================================
+\section{Conclusions}
+% ============================================================
+% [Conclusions prose -- p.\ 1109.  A complete account of moist-air
+%  thermophysical and transport properties for 0-100 degC at
+%  101.3 kPa; saturated mixture properties fitted for computerized
+%  calculation; with the exception of the specific heat capacity
+%  there is very good agreement with previous analyses, and good
+%  agreement with the scarce earlier measurements.]
+
+% ============================================================
+\begin{thebibliography}{99}
+\small
+
+\bibitem{1} Giacomo P. Equation for the determination of density of
+moist air (1981). Metrologia 1982;18:33--40.
+
+\bibitem{2} Davies RS. Equation for the determination of density of
+moist air (1981/1991). Metrologia 1992;29:67--70.
+
+\bibitem{3} Zuckerwar AJ, Meredith RW. Low-frequency absorption of
+sound in air. J Acoust Soc Am 1985;78(3).
+
+\bibitem{4} Rasmussen K. Calculation methods for the physical
+properties of air used in the calibration of microphones. Report
+PL-11b. Department of Acoustic Technology, Techn. University of
+Denmark; 1997.
+
+\bibitem{5} Hyland RW, Wexler A. Formulations for the thermodynamic
+properties of dry air from 173.15 K to 473.15 K and of saturated moist
+air from 173.15 to 372.15 K at pressures to 5 MPa. Trans ASHRAE
+1983;89(IIa):520--35.
+
+\bibitem{6} Melling A, Noppenberger S, Still M, Venzke H.
+Interpolation correlations for fluid properties of humid air in the
+temperature range 100 \degC\ to 200 \degC. J Phys Chem Ref Data
+1997;26(4):1111--23.
+
+\bibitem{7} Nelson R. Material properties in SI units, part 4. Chem
+Eng Prog 1980;76:83.
+
+\bibitem{8} Hyland RW, Wexler A. Formulations for the thermodynamic
+properties of the saturated phases of H$_2$O from 173.15 K to
+473.15 K. Trans ASHRAE 1983;89(IIa):520--35.
+
+\bibitem{9} Hyland RW, Wexler A. The second interaction (cross) virial
+coefficient for moist air. J Res NBS 1973;77A(1):133--47.
+
+\bibitem{10} Hyland RW. A correllation for the second interaction
+virial coefficients and enhancement factors for CO$_2$-free moist air
+from $-50$ to 90 \degC. J Res National Bureau Standards A Phys Chem
+1975;79A(4):551--60.
+
+\bibitem{11} Hardy B. ITS-90 formulations for vapor pressure, frost
+point temperature, dew point temperature and enhancement factors in
+the range $-100$ to 100 \degC. Proc 3rd Int Sympos Humidity Moisture.
+London: National Physical Lab (N.P.L.); 1998. p.\ 214--21.
+
+\bibitem{12} Greenspan L. Functional equations for the enhancement
+factors for CO$_2$--free moist air. J Res National Bureau
+Standards---A Phys Chem 1976;80A(1):41--4.
+
+\bibitem{13} Alduchov OA, Eskridge RE. Improved magnus form
+approximation of saturation vapor pressure. Technical report number
+DOE/ER/61011-T6/Nov. USDOE Office of Energy Research: Washington, DC;
+1997.
+
+\bibitem{14} Van Wylen GJ, Sonntag RE. Fundamentals of classical
+thermodynamics. NY: Wiley; 1973.
+
+\bibitem{15} Reid RC, Prausnitz JM, Poling BE. The properties of gases
+and liquids, Chemical Engineering Series. McGraw Hill Int. Editions;
+1988.
+
+\bibitem{16} Wilke CR. A viscosity equation for gas mixtures. J Chem
+Phys 1950;18:517.
+
+\bibitem{17} Wassiljewa A. Physik Zeitshrift 1904;5:734.
+
+\bibitem{18} Mason EA, Saxena SC. Approximate formula for the thermal
+conductivity of gas mixtures. Phys Fluids 1958;1(5):361--9.
+
+\bibitem{19} Tondon PK, Saxena SC. Calculation of thermal conductivity
+of polar--nonpolar gas mixtures. Appl Sci Res 1968;19:163--70.
+
+\bibitem{20} Wong GSK, Embleton TFW. Variation of specific heats and
+of specific heat ratio in air with humidity. J Acoust Soc Am
+1984;76(2):555--9.
+
+\bibitem{21} Durst F, Noppenberger S, Still M, Venzke H. Influence of
+humidity on hot wire measurements. Meas Sci Technol 1996;7:1517--28.
+
+\bibitem{22} U.S. Standard Atmosphere 1976. U.S. Government Printing
+Office: Washington, DC; 1976. p.\ 3--33.
+
+\bibitem{23} Rohsenow WM, Hartnett JP, Cho YI. Handbook of heat
+transfer. 3rd ed. McGraw-Hill; 1998.
+
+\bibitem{24} Irvine TF, Liley P. Steam and gas tables with computer
+equations. San Diego: Academic Press; 1984.
+
+\bibitem{25} Touloukian YS, Powell RW, Ho CY, Clemend PG.
+Thermophysical properties of matter, vol.\ 1. NY; 1970.
+
+\bibitem{26} Perry RH, Chilton CH. Chemical engineers handbook. 5th
+ed. NY: McGraw-Hill; 1973.
+
+\bibitem{27} Krischer O, Kast W. 3rd ed. Drying technology-the
+scientific background of drying technology, vol.\ 1. Berlin,
+Heidelberg: Springer; 1978.
+
+\bibitem{28} Fried C, Adler J. In: Cambel, Fenn, editors. Transport
+properties in gases. Evanston, Ill: Northwestern University Press;
+1958. p.\ 128--31.
+
+\bibitem{29} Vargaftik NB. Handbook of physical properties of liquids
+and gases-pure substances and mixtures. Washington: Hemisphere; 1983.
+
+\bibitem{30} Kestin J, Whitelaw JH. The viscosity of dry and humid
+air. Int J Heat Mass Transfer 1964:1245--55.
+
+\bibitem{31} Gruss H, Schmick H. Scientific publication of the Siemens
+Company, vol.\ 7(202); 1928.
+
+\bibitem{32} Touloukian YS, Liley PE, Saxena SC. Thermal conductivity
+non metallic liquids and gases, vol.\ 3. NY: IFI/Plenum Data
+Corporation; 1970.
+
+\end{thebibliography}
+
+\end{document}

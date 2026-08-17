@@ -182,7 +182,7 @@ class SolarModel:
 
         npv = npv_from_daily_yield(
             r.daily_yield_kg_per_m2, float(site.get("water_price_usd_per_m3", 5.0)) if site else 5.0,
-            salt_name=r.config.salt_name, salt_to_polymer_ratio=r.config.salt_to_polymer_ratio,
+            salt_name=r.config.salt_name, salt_loading=r.config.salt_loading,
             hydrogel_thickness_m=r.config.hydrogel_thickness_m, econ=r.econ, cycles_per_day=1.0,
         )
         nan = float("nan")
@@ -209,7 +209,7 @@ class WasteHeatModel:
         self.knobs = {
             "hydrogel_thickness_mm": base.hydrogel_thickness_m * 1e3,
             "vapor_gap_mm": base.vapor_gap_m * 1e3,
-            "salt_to_polymer_ratio": base.salt_to_polymer_ratio,
+            "salt_loading": base.salt_loading,
             "tau_half_min": base.tau_half_s / 60.0,
             "rh_desorber_switch": base.rh_desorber_switch,
             "tilt_deg": base.tilt_deg,
@@ -218,7 +218,7 @@ class WasteHeatModel:
         self._fields = {
             "hydrogel_thickness_mm": ("hydrogel_thickness_m", 1e-3),
             "vapor_gap_mm": ("vapor_gap_m", 1e-3),
-            "salt_to_polymer_ratio": ("salt_to_polymer_ratio", 1.0),
+            "salt_loading": ("salt_loading", 1.0),
             "tau_half_min": ("tau_half_s", 60.0),
             "rh_desorber_switch": ("rh_desorber_switch", 1.0),
             "tilt_deg": ("tilt_deg", 1.0),
@@ -239,10 +239,16 @@ class WasteHeatModel:
 
         r = simulate_daily(profile, cfg)
         cycles = float(r.n_cycles_per_day)
-        common = dict(salt_name=cfg.salt_name, salt_to_polymer_ratio=cfg.salt_to_polymer_ratio,
+        common = dict(salt_name=cfg.salt_name, salt_loading=cfg.salt_loading,
                       hydrogel_thickness_m=cfg.hydrogel_thickness_m, econ=econ, cycles_per_day=cycles)
-        lcow = lcow_from_daily_yield(r.mean_daily_yield_kg_m2, **common)
-        npv = npv_from_daily_yield(r.mean_daily_yield_kg_m2, 5.0, **common)
+        # Per cycle, not per day: mean_daily_yield_kg_m2 is already summed over all
+        # n_cycles_per_day cycles, and the economics multiply back up by cycles_per_day.
+        # Passing the daily total here counted the water `cycles` times over (18x on the
+        # datacenter baseline), understating LCOW by the same factor. cycles_per_day still
+        # has to be the true count -- it drives the per-cycle energy term.
+        yield_per_cycle = r.mean_daily_yield_kg_m2 / cycles if cycles > 0 else 0.0
+        lcow = lcow_from_daily_yield(yield_per_cycle, **common)
+        npv = npv_from_daily_yield(yield_per_cycle, 5.0, **common)
         nan = float("nan")
         return {
             "daily_yield_kg_m2": r.mean_daily_yield_kg_m2,

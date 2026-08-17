@@ -6,7 +6,7 @@ system:
   vapor_gap_mm: 40.0
   insulation_gap_mm: 5.0
   salt: LiCl
-  salt_to_polymer_ratio: 4.0
+  salt_loading: 4.0
   tilt_deg: 30.0
 
 weather:

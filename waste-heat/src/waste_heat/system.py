@@ -20,7 +20,7 @@ from waste_heat.physics import (
     P_COND_PA,
     RH_AMB,
     RH_DESORBER_SWITCH,
-    SALT_TO_POLYMER_RATIO,
+    SALT_LOADING,
     TAU_HALF_S,
     T_AMB_C,
     T_WH_IN_C,
@@ -59,7 +59,7 @@ def _build_config(args: argparse.Namespace) -> SystemConfig:
         )
     return SystemConfig(
         salt_name=args.salt,
-        salt_to_polymer_ratio=args.salt_loading,
+        salt_loading=args.salt_loading,
         hydrogel_thickness_m=args.hydrogel_thickness_mm * 1e-3,
         g_conv_m_s=args.g_conv,
         tau_half_s=args.max_half_cycle_min * 60.0,
@@ -155,7 +155,7 @@ def main() -> None:
     p = argparse.ArgumentParser(description="Waste-heat two-bed SAWH simulation")
     p.add_argument("--profile", default="datacenter-baseline")
     p.add_argument("--salt", default=DEFAULT_SALT_NAME)
-    p.add_argument("--salt-loading", type=float, default=SALT_TO_POLYMER_RATIO)
+    p.add_argument("--salt-loading", type=float, default=SALT_LOADING)
     p.add_argument("--hydrogel-thickness-mm", type=float, default=H0_M * 1e3)
     p.add_argument("--g-conv", type=float, default=G_CHAMBER_M_S)
     p.add_argument(

@@ -1,0 +1,883 @@
+% Thermodynamic Consistency of the Solubility and Vapor Pressure of a Binary
+% Saturated Salt + Water System. 1. LiCl + H2O
+% Dewen Zeng and Jun Zhou
+% J. Chem. Eng. Data 2006, 51, 315-321   DOI: 10.1021/je050322o
+%
+% LaTeX transcription. Content and numerical values reproduced as printed.
+
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage[margin=1in]{geometry}
+\usepackage{authblk}
+\usepackage[numbers]{natbib}
+
+% superscript reference style, as in the original journal article
+\newcommand{\rc}[1]{\textsuperscript{\citenum{#1}}}
+
+\title{Thermodynamic Consistency of the Solubility and Vapor Pressure of a
+Binary Saturated Salt + Water System. 1.\ LiCl + H$_2$O}
+
+\author[1]{Dewen Zeng\thanks{To whom correspondence should be addressed.
+E-mail: dewen\_zeng@hotmail.com. Fax: +86-731-8713642.}}
+\author[2]{Jun Zhou}
+\affil[1]{College of Chemistry and Chemical Engineering, Hunan University,
+410082 Changsha, PR China}
+\affil[2]{Central-South University, 410083 Changsha, People's Republic of China}
+
+\date{Received for review August 13, 2005. Accepted December 11, 2005.}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+\noindent
+Solubility data of LiCl$\cdot n$H$_2$O ($n = 0$, 1, 2) was evaluated by
+checking the consistency of evaluated vapor pressures with the experimental
+data. This process includes the following: (1) A series of vapor pressure data
+above the LiCl$\cdot n$H$_2$O saturated solution were evaluated, and reliable
+data were selected as ``standard'' data. (2) A BET model was selected to fit
+the selected experimental data of water activity at salt concentrations below
+20 mol$\cdot$kg$^{-1}$ and at temperatures ranging from 273.15 K to 428.65 K.
+(3) Vapor pressures for the solubility data given by different authors were
+calculated with the BET model and further compared with the standard data.
+(4) Those solubility data at which vapor pressures calculated with the BET
+model obviously deviate from the standard data were considered to be
+unreliable.
+\end{abstract}
+
+\section*{Introduction}
+
+A large number of experimental solubility data for the binary system
+LiCl + H$_2$O have been determined so far.\rc{ref1}\textsuperscript{--}\rc{ref4}
+However, experimental data reported by different authors at different times
+usually do not agree with each other, and the differences are quite large at
+certain temperatures. To determine a reliable set of solubility values of this
+system from a large number of experimental data, researchers have used
+different evaluation methods. Link and Seidell\rc{ref1} took the average
+values of many experimental data; however, Monnin et al.\rc{ref5} developed an
+evaluation approach by plotting experimental points in
+composition--temperature diagrams, where values outside the general trend were
+rejected. Cohen-Adad\rc{ref4} compiled the solubility data of this system, but
+as pointed out by Monnin et al., the criteria that Cohen-Adad retained for the
+data selection are not clear.
+
+However, the vapor pressures of the LiCl$\cdot n$H$_2$O saturated solution
+have been measured by many
+chemists,\rc{ref6}\textsuperscript{--}\rc{ref10} and more reliable
+data\rc{ref11}\textsuperscript{--}\rc{ref16} have been reported.
+Thermodynamically, if an experimental date of solubility (composition and
+temperature) is correct, then the vapor pressure of the corresponding
+saturated solution (composition and temperature) should also be correct. As
+long as a thermodynamic model can accurately describe the thermodynamic
+properties of a system, including water activity and solubility, one can
+calculate the water activity at a given solubility point and therefore the
+vapor pressure. Furthermore, by comparing the reliable vapor pressures with
+the calculated ones for the given experimental solubility data, one could
+evaluate the correctness of experimental solubility data.
+
+Among the thermodynamic models\rc{ref17,ref19,ref20,ref21,ref22,ref23} for
+concentrated electrolyte solution, we select the Pitzer--Simonson--Clegg
+model\rc{ref17}\textsuperscript{--}\rc{ref19} and the modified BET
+model\rc{ref20} to describe and predict the water activity of the
+LiCl + H$_2$O system. Emphasis will be placed on the check of the prediction
+ability of the models of the salt concentration range near a saturated
+solution. Then, the vapor pressure data above the LiCl$\cdot n$H$_2$O
+saturated solution will be compiled and evaluated; among them, reliable data
+will be selected as ``standard'' data. After that, the vapor pressures of the
+LiCl$\cdot n$H$_2$O saturated solution at given solubility points (components
+and temperatures) will be calculated and compared with the standard data.
+Those solubility data at which the calculated vapor pressures deviate
+obviously from the standard data will be considered to be unreliable. In this
+approach, the reliability of a series of solubility data will be evaluated.
+
+\section*{Models for Concentrated Electrolyte Solution}
+
+\subsection*{Pitzer--Simonson--Clegg Model}
+
+The Pitzer--Simonson--Clegg model\rc{ref17}\textsuperscript{--}\rc{ref19}
+expresses the excess Gibbs energy of an aqueous electrolyte system with a
+long-range electrostatic term and a short-range Margules expansion, as
+described by eq 14 in ref \citenum{ref19}.
+
+For a binary MX + H$_2$O system, they derived the expression of the water
+activity coefficient $f_1$ as
+
+% Note: in the source PDF the last term reads "x_1 x_I 2 (2 - 3x_1) V_{1,MX}";
+% the isolated "2" appears to be an OCR artifact and is omitted here.
+\begin{equation}
+\ln f_1 = \frac{2 A_x I_x^{3/2}}{1 + F I_x^{1/2}}
+- x_{\mathrm{M}} x_{\mathrm{X}} B_{\mathrm{MX}} \exp\!\left(-\alpha I_x^{1/2}\right)
++ x_{\mathrm{I}}^{2}\left( W_{1,\mathrm{MX}}
++ (x_{\mathrm{I}} - x_1) U_{1,\mathrm{MX}}
++ x_1 x_{\mathrm{I}} (2 - 3x_1) V_{1,\mathrm{MX}} \right)
+\end{equation}
+
+where $F = 2150(d_1/DT)^{1/2}$; $x_{\mathrm{I}} = x_{\mathrm{M}} +
+x_{\mathrm{X}} = 1 - x_1$; $A_x$ and $I_x$ are the Debye--H\"uckel parameter
+and ionic strength based on the mole fraction; $x_a$, $x_c$, $d_1$, $D$, and
+$T$ are the mole fractions of the anion and cation, the density of the solvent
+water, the dielectric constant of the solvent, and the thermodynamic
+temperature, respectively. $B_{\mathrm{MX}}$, $W_{1,\mathrm{MX}}$,
+$U_{\mathrm{U,MX}}$ and $V_{1,\mathrm{MX}}$ are model parameters.
+
+Setting $\alpha = 13$, we fit the model parameters in eq 1 to the experimental
+water activity\rc{ref24} at 373.15 K and at LiCl concentrations below 18.585
+mol$\cdot$kg$^{-1}$ and obtained the model parameter values in Table 1. The
+dashed line in Figure 1 shows that the Clegg--Pitzer model can represent the
+water activity at LiCl concentrations below 18.58 mol$\cdot$kg$^{-1}$ very
+well.
+
+\begin{table}[htbp]
+\centering
+\caption{Clegg--Pitzer Model Parameters of the System LiCl + H$_2$O at
+373.15 K}
+\begin{tabular}{lcccccc}
+\toprule
+solute & \begin{tabular}[c]{@{}c@{}}maximal\\ molality\end{tabular} & $\alpha$
+& $B_{\mathrm{MX}}$ & $W_{1,\mathrm{MX}}$ & $U_{1,\mathrm{MX}}$
+& $V_{1,\mathrm{MX}}$ \\
+\midrule
+LiCl & 18.585 & 13 & $-47.092$ & $-2.083$ & 14.5 & $-15.7479$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+With the parameters in Table 1, the water activity is calculated up to the
+LiCl saturated solution, as shown by the dashed line in Figure 1. Until now,
+no water activity of the LiCl saturated solution has been directly measured at
+373.15 K; however, the vapor pressures and solubility of the LiCl saturated
+solution were measured by Applebey et al.\rc{ref11} over a wide temperature
+range. Interpolating their data yields the vapor pressure of the LiCl
+saturated solution at 373.15 K (10.2 kPa) and the solubility data
+(30.39 mol$\cdot$kg$^{-1}$). Furthermore, the vapor pressure $p$ is converted
+to water activity $a_{\mathrm{w}}$ according to eq
+2\rc{ref27,ref28,ref29}
+
+\begin{equation}
+\ln a_{\mathrm{w}} = \ln\!\left( \frac{p}{p_0} \right)
++ \frac{B_T (P - P_0)}{RT}
+\end{equation}
+
+where $p_0$ is the vapor pressure of pure water at temperature $T$,
+$R = 8.314$ Pa$\cdot$m$^3\cdot$mol$^{-1}\cdot$K$^{-1}$, and $B_T$ is the
+second virial coefficient taken from ref \citenum{ref30} at different
+temperatures. The analyzed water activity and solubility data are presented in
+Figure 1. Greenspan reported that the relative humidity ($P/P_0$) over LiCl
+saturated solution is $(9.90 \pm 0.77)$ \% at 373.15 K, from which the
+analyzed $a_{\mathrm{w}}$ with eq 2 and the solubility
+data\rc{ref1,ref3,ref4,ref5} are also presented in Figure 1.
+
+One can see in Figure 1 that the predicted water activity at the saturated
+point with the Pitzer--Simonson--Clegg model parameters deviates from various
+analyzed data by about 0.01. That means that the prediction ability of the
+model is good but its prediction accuracy is not high enough to give a proper
+judgment of the correctness of different experimental data.
+
+\begin{figure}[htbp]
+\centering
+% \includegraphics[width=0.6\textwidth]{figure1}
+\caption{Water activity of the system LiCl + H$_2$O at 373.15 K:
+- - -, results recalculated with the Pitzer--Simonson--Clegg model parameters
+in Table 1; ---, results recalculated with the BET model; $\circ$,
+$T = 373.15$ K, ref \citenum{ref23}. Other symbols, water activity converted
+from Greenspan\rc{ref16} and solubility data from the literature:
+$\triangle$, ref \citenum{ref1}; right-facing triangle, ref \citenum{ref3};
+$\triangledown$, ref \citenum{ref4}; left-facing triangle,
+ref \citenum{ref5}; I, uncertainty; $\bullet$, data interpolated from
+Applebey et al.\rc{ref11}}
+\end{figure}
+
+\subsection*{BET Model}
+
+Again, we fit the BET model\rc{ref20} to the literature data of water activity
+at 373.15 K at salt concentration below 18.585 mol$\cdot$kg$^{-1}$. As shown
+in Figure 2, the linear relation of the BET equation (eq 3) holds at water
+activities below 0.4,
+
+\begin{equation}
+\frac{a_{\mathrm{w}} m}{55.51(1 - a_{\mathrm{w}})}
+= \frac{1}{cr} + \frac{(c - 1) a_{\mathrm{w}}}{cr}
+\end{equation}
+
+where $a_{\mathrm{w}}$ and $m$ are the water activity and salt concentration
+in mol$\cdot$kg$^{-1}$ and $r$ and $c$ are model parameters. The calculation
+of the slope $(c - 1)/cr$ and intercept $1/cr$ of the line yields the
+parameter values $r = 3.278$ and $c = 9.329$. With the BET parameters, we
+predict the water activity of the system up to the saturated solution (solid
+line in Figure 1). The predicted water activity of LiCl saturated solution
+deviates from different experimental data by less than 0.003. Thus, the BET
+model seems to have a stronger prediction ability than the former in very
+concentrated solution. Consequently, in the following work, we will select the
+BET model to simulate the properties of the LiCl + H$_2$O system in
+unsaturated solution and evaluate its properties in saturated solution.
+
+\begin{figure}[htbp]
+\centering
+% \includegraphics[width=0.6\textwidth]{figure2}
+\caption{BET relation in the system LiCl + H$_2$O at 373.15 K: $\circ$,
+converted values from the literature data;\rc{ref24} ---, fitted line at water
+activities below 0.4.}
+\end{figure}
+
+With the same method shown in Figure 2, we fitted the BET equation (eq 3) to
+the literature data\rc{ref24} of water activity at 273.15 K, 298.15 K,
+323.15 K, and 373.15 K and the literature data\rc{ref31} at 428.65 K and
+obtained BET parameters $r$ and $\Delta E$ as a function of temperature $T$
+(Figure 3, Figure 4, and Figure 5): $r = 4.7323 - 0.00378(T/\mathrm{K})$,
+$\Delta E/\mathrm{J}\cdot\mathrm{mol}^{-1} = R(T/\mathrm{K}) \ln c =
+-8166.6 + 3.526(T/\mathrm{K})$. With increasing temperature, the maximal
+hydration sites get slightly smaller, as well as the absolute value of the
+energy change $|\Delta E|$ accompanying the movement of 1 mol of water
+molecules from pure water onto the hydration sites of the LiCl salt. The
+predicted water activities with the above BET parameters are presented in
+Figure 6 and agree quite well with literature
+data\rc{ref3,ref4,ref9,ref24,ref31} in concentrated solution over a wide
+temperature range from 323.15 K to 428.65 K.
+
+\begin{figure}[htbp]
+\centering
+% \includegraphics[width=0.6\textwidth]{figure3}
+\caption{BET relation in the system LiCl + H$_2$O: ---, fitted to the
+reference data; $\square$, $+$, $\triangle$, $\diamond$, $\triangledown$,
+ref \citenum{ref24}; $\circ$, ref \citenum{ref31}.}
+\end{figure}
+
+If we assume that the BET linear relation (eq 3) holds over the whole
+concentration range of LiCl solution up to its saturated solution, then the
+prediction accuracy of the model should depend on the accuracy of the water
+activity data selected for the parameter fitting. Gibbard and Scatchard's
+data\rc{ref24} deviate markedly from that of Pearce and Nelson;\rc{ref7} the
+latter were obtained by a dynamic method with lower accuracy. However, Gibbard
+and Scatchard's data\rc{ref24} agree very well with Robinson and Stokes'
+data\rc{ref26} at 298.15 K and differ from Kangro and Groeneveld's osmotic
+coefficient\rc{ref25} at 298.15 K by only $\pm0.02$. The osmotic coefficients
+determined by Kangro and Groeneveld, according to their statement, have an
+accuracy of $\pm0.001$, thus it is reasonable to believe that the osmotic
+coefficient data reported by Gibbard and Scatchard\rc{ref24} have an accuracy
+of $\pm0.02$. This accuracy can be interpreted as water activity equal to
+$0.130 \pm 0.002$ for a 18.542 mol$\cdot$kg$^{-1}$ LiCl solution at 298.15 K
+or as the mass percent LiCl solubility $(40.8 \pm 0.1)$ \% at 298.15 K. With
+such accuracy, the BET model can be used to judge the reliability of
+solubility data from different sources; for example, the mass percent LiCl
+solubility reported by Woskresenskaya and Yanatieva\rc{ref39} is 38.7 \% at
+273.15 K, which is 2 \% lower than the 40.87 \% data given by Friend and
+Colley.\rc{ref37}
+
+\begin{figure}[htbp]
+\centering
+% \includegraphics[width=0.6\textwidth]{figure4}
+\caption{BET parameter $\Delta E$ vs temperature in the system
+LiCl + H$_2$O: ---, fitted line; $\square$, $+$, $\triangle$, $\diamond$,
+$\triangledown$, ref \citenum{ref24}; $\circ$, ref \citenum{ref31}.}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+% \includegraphics[width=0.6\textwidth]{figure5}
+\caption{BET parameter $r$ vs temperature in the system LiCl + H$_2$O:
+---, fitted line; $\square$, $+$, $\triangle$, $\diamond$, $\triangledown$,
+ref \citenum{ref24}; $\circ$, ref \citenum{ref31}.}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+% \includegraphics[width=0.6\textwidth]{figure6}
+\caption{Water activity vs salt concentration in the system LiCl + H$_2$O:
+---, recalculated values with the BET model. Symbols represent literature
+data: $\square$, $T = 273.15$ K, ref \citenum{ref24}; $+$, $T = 298.15$ K,
+ref \citenum{ref24}; $\triangle$, $T = 323.15$ K, ref \citenum{ref24};
+$\diamond$, $T = 348.15$ K ref \citenum{ref24}; $\triangledown$,
+$T = 373.15$ K, ref \citenum{ref24}; $\circ$, $T = 428.65$ K,
+ref \citenum{ref31}. The following data are not used for parameter fitting:
+$\blacktriangle$, $T = 323.15$ K, ref \citenum{ref9}; $\blacktriangledown$,
+$T = 373.15$ K, salt concentration taken from the solubility data\rc{ref4} and
+water activity converted with eq 2 according to vapor pressure
+data;\rc{ref11} $\bullet$, $T = 428.65$ K, salt concentration taken from the
+solubility data\rc{ref3} and water activity converted with eq 2 according to
+vapor pressure data.\rc{ref11}}
+\end{figure}
+
+\section*{Evaluation of Experimental Data of the Vapor Pressure above
+Saturated Electrolyte Solutions}
+
+Before evaluating different solubility data, one must first determine a
+``correct'' set of vapor pressure data of the LiCl$\cdot$2H$_2$O saturated
+solution. So far, many vapor pressures or relative humidity data of the
+LiCl$\cdot$2H$_2$O saturated solution have been
+reported\rc{ref6,ref8,ref10,ref12,ref15,ref16} (Figure 7). Among them, the
+data given by H\"uttig and Reuscher\rc{ref6} at low temperatures are obviously
+not accurate; for example, they obtained the same vapor pressure value of
+0.10665 kPa above the LiCl$\cdot$2H$_2$O saturated solution at 273.15 K and
+278.15 K and the same vapor pressure value of 0.2666 kPa at 285.65 K and
+288.15 K. The absolute accuracy of the relative humidity data of the LiCl
+saturated solution cited by Rockland\rc{ref8} is only 1 \%.
+Greenspan\rc{ref16} accumulated experimental data from various researchers and
+calculated ``best'' values of relative humidity, but his analyzed data differ
+remarkably from the experimental data given by Hedlin\rc{ref12} and
+Acheson\rc{ref13} (Figure 7). Hedlin et al.\rc{ref12} stated that the
+experimental uncertainty in their relative humidity is only
+$\pm0.1$ \%,\rc{ref12} and Acheson\rc{ref13} reported that their vapor
+pressure data above the LiCl saturated solution is very accurate with an
+absolute uncertainty of only 1 Pa. Thirty-four years later, Morillon
+et al.\rc{ref15} determined the vapor pressures of the LiCl$\cdot$2H$_2$O
+saturated solution again; these data have an uncertainty of 2 \% and agree
+with the data of Hedlin\rc{ref12} quite well. Therefore, the experimental data
+of Hedlin et al.,\rc{ref12} Acheson,\rc{ref13} and Morillon
+et al.\rc{ref15} are believed to be more reliable in this work and are
+consequently fitted with a temperature function of the vapor pressure above
+the LiCl$\cdot$2H$_2$O saturated solution:
+
+\begin{equation}
+p/\mathrm{kPa} = \exp\!\left( a + b/(T/\mathrm{K}) + c \ln(T/\mathrm{K}) \right)
+\end{equation}
+
+Equation 4 was derived by assuming that the heat of vaporization of water in
+the solution depends linearly on temperature.\rc{ref32} Parameter values $a$,
+$b$, and $c$ are tabulated in Table 2.
+
+\begin{figure}[htbp]
+\centering
+% \includegraphics[width=0.6\textwidth]{figure7}
+\caption{Vapor pressures of LiCl$\cdot$2H$_2$O saturated solution vs
+temperature: $\bullet$, ref \citenum{ref12}; $\blacktriangle$,
+ref \citenum{ref13}; $\blacksquare$, ref \citenum{ref15}; $\square$,
+ref \citenum{ref8}; $\circ$, ref \citenum{ref10}; $\triangle$,
+ref \citenum{ref16}; I, uncertainty; ---, standard line fitted only to the
+reference data.\rc{ref12,ref13,ref15}}
+\end{figure}
+
+\begin{table}[htbp]
+\centering
+\caption{Fitted Standard Curve of the Vapor Pressure of the
+LiCl$\cdot n$H$_2$O Saturated Solution with the Temperature}
+\footnotesize
+\begin{tabular}{llcc}
+\toprule
+phase & vapor pressure of saturated solution, $p$/kPa
+& \begin{tabular}[c]{@{}c@{}}temperature\\ range, $T$/K\end{tabular}
+& \begin{tabular}[c]{@{}c@{}}source of\\ data, refs\end{tabular} \\
+\midrule
+LiCl$\cdot$2H$_2$O(s) & $\ln(p/\mathrm{kPa}) = 133.6116 - 9278.12/(T/\mathrm{K}) - 18.19053 \ln(T/\mathrm{K})$ & 273--293 & 12, 15, 16 \\
+LiCl$\cdot$H$_2$O(s) & $\ln(p/\mathrm{kPa}) = 149.41106 - 11419.74114/(T/\mathrm{K}) - 19.68268 \ln(T/\mathrm{K})$ & 293--268 & 11, 16 \\
+LiCl(s) & $\ln(p/\mathrm{kPa}) = 70.83197 - 8611.23808/(T/\mathrm{K}) - 7.66919 \ln(T/\mathrm{K})$ & 368--453 & 11 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The vapor pressure data above or the water activity of the
+LiCl$\cdot$H$_2$O saturated solution has been reported by different
+researchers.\rc{ref6,ref7,ref8,ref9,ref11,ref12,ref16,ref33} The data
+reported by H\"uttig et al.\rc{ref6} and Applebey et al.\rc{ref11} are
+slightly scattered. As mentioned above, Pearce and Nelson's data\rc{ref7} are
+less reliable. The data cited by Rockland\rc{ref8} are not very accurate. The
+data from Hedlin et al.,\rc{ref12} Acheson,\rc{ref13} and
+Greenspan\rc{ref16} agree with each other quite well in their stated
+uncertainty ranges. These data, along with Applebey et al.'s data above
+350 K,\rc{ref11} are selected to fit the standard curve with eq 4, as shown in
+Figure 8.
+
+Unfortunately, the data for the vapor pressure above the LiCl(s) saturated
+solution is available only from Applebey et al.\rc{ref11} The uncertainty of
+their data is unknown. These data are fitted with eq 4, as shown in Figure 9.
+
+\begin{figure}[htbp]
+\centering
+% \includegraphics[width=0.6\textwidth]{figure8}
+\caption{Vapor pressures of LiCl$\cdot$H$_2$O saturated solution vs
+temperature: $\square$, ref \citenum{ref13}; $\triangle$,
+ref \citenum{ref12}; $\circ$, ref \citenum{ref16}; $\diamond$,
+ref \citenum{ref11}; I, uncertainty; literature data; ---, fitted standard
+line.}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+% \includegraphics[width=0.6\textwidth]{figure9}
+\caption{Vapor pressures of LiCl saturated solution vs temperature: $\circ$,
+ref \citenum{ref11}; ---, fitted standard line.}
+\end{figure}
+
+\section*{Comparison of Vapor Pressure and Evaluation of Solubility Data}
+
+As introduced above, various solubility data of LiCl$\cdot n$H$_2$O have been
+published. Linke and Seidell\rc{ref1} compiled all of the existing solubility
+data before 1965 and gave one set of average values of the experimental data.
+After that, Clynne and Potter\rc{ref3} measured the solubility data of this
+system again, claiming that their data have an average precision of
+$\pm0.09$ \%. Recently, Cohend-Adad\rc{ref4} and Monnin et al.\rc{ref5}
+evaluated all published solubility data again and gave results different from
+those given by Linke and Seidell\rc{ref1} and by Clynne and
+Potter.\rc{ref3} To evaluate their solubility data and other older data, we
+will calculate the water activity at each solubility data point with the BET
+model and then convert the water activity data to vapor pressure data with
+eq 2. The calculated vapor pressures will be compared with the standard curve.
+
+\subsection*{On the Solubility Data of LiCl$\cdot$2H$_2$O}
+
+The vapor pressures calculated for the typical solubility data of Linke and
+Seidell\rc{ref1}, Clynne and Potter,\rc{ref3} and Monnin et al.\rc{ref5} are
+presented in Figure 10. Also presented in this Figure are the standard curve
+and the BET model uncertainty arising from that of the experimental
+data,\rc{ref24} namely, $\pm0.02$ for the osmotic coefficient. One can see
+that most of the vapor pressures calculated for the solubility
+data\rc{ref1,ref3,ref5} fall in the estimated uncertainty range of the
+standard line, except for two points at 278.15 K and 273.15 K.\rc{ref1}
+
+Furthermore, the vapor pressures of the LiCl$\cdot$2H$_2$O saturated solution
+are calculated for solubility data given by other authors, and the comparison
+with the standard value is presented in Figure 11. It is surprising that most
+of the evaluated vapor pressures for the solubility
+data\rc{ref35,ref36,ref38,ref39,ref40,ref42} fall outside the uncertainty
+range of the standard values. The vapor pressures calculated for the
+solubility data\rc{ref38,ref40} are smaller than the standard values, whereas
+those for other solubility data\rc{ref35,ref36,ref39,ref42} are larger. An
+obvious positive deviation of the vapor pressure from the standard curve
+appears for the solubility data.\rc{ref35,ref39,ref42} The International
+Critical Tables\rc{ref42} in 1928 reported that the eutectic temperature of
+LiCl$\cdot$2H$_2$O + LiCl$\cdot$H$_2$O lies at 285.65 K, at which the
+evaluated vapor pressure deviates markedly from the standard value (Figure 11
+and Table 3). At the invariant points reported by other
+researchers\rc{ref1,ref5,ref34} the vapor pressures are also calculated. All
+of the calculated data and their differences from the standard curve are
+tabulated in Table 3.
+
+\begin{figure}[htbp]
+\centering
+% \includegraphics[width=0.6\textwidth]{figure10}
+\caption{Vapor pressures of the LiCl$\cdot$2H$_2$O saturated solution vs
+temperature: ---, standard values; \ldots, model uncertainty based on the
+standard values; $\circ$, ref \citenum{ref1}; $\square$, ref \citenum{ref3};
+$\triangle$, ref \citenum{ref5}. All symbols are BET model values evaluated
+for the solubility data of the reference literature.}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+% \includegraphics[width=0.6\textwidth]{figure11}
+\caption{Vapor pressures of LiCl$\cdot$2H$_2$O saturated solution vs
+temperature: ---, standard values; \ldots, model uncertainty basing on the
+standard values; $\circ$, ref \citenum{ref11}; $\square$ containing $\times$,
+ref \citenum{ref35}; $+$, ref \citenum{ref36}; $\triangle$,
+ref \citenum{ref37}; $\diamond$, ref \citenum{ref38}; left-facing triangle,
+ref \citenum{ref39}; $\triangledown$, ref \citenum{ref40}; $\bullet$,
+ref \citenum{ref41}; $\times$, ref \citenum{ref42}. All symbols are BET model
+values evaluated for the solubility data of the reference literature.}
+\end{figure}
+
+\begin{table}[htbp]
+\centering
+\caption{Vapor Pressures Evaluated at the LiCl$\cdot$2H$_2$O +
+LiCl$\cdot$H$_2$O Peritectic Point and Their Comparisons with the Standard
+Values}
+\begin{tabular}{cccccc}
+\toprule
+\multicolumn{2}{c}{literature data of solubility}
+& \multicolumn{2}{c}{vapor pressure, kPa} & & \\
+\cmidrule(r){1-2} \cmidrule(r){3-4}
+$m_{\mathrm{LiCl}}$/mol$\cdot$kg$^{-1}$ & $T$/K & evaluated & standard
+& deviation\textsuperscript{a}, kpa & \\
+\midrule
+19.57\textsuperscript{1}   & 291.65\textsuperscript{1}  & 0.233 & 0.236 & 0.003 & \\
+19.42\textsuperscript{34}  & 292.55\textsuperscript{34} & 0.250 & 0.246 & $-0.003$ & \\
+19.57\textsuperscript{5}   & 293.94\textsuperscript{5}  & 0.272 & 0.263 & 0.009 & \\
+17.599\textsuperscript{42} & 285.65\textsuperscript{42} & 0.187 & 0.177 & $-0.011$ & \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+\begin{minipage}{0.8\textwidth}
+\footnotesize \textsuperscript{a} Deviation = standard value minus evaluated
+value.
+\end{minipage}
+\end{table}
+
+\subsection*{On the Solubility Data of LiCl$\cdot$H$_2$O}
+
+The vapor pressures calculated for the LiCl$\cdot$H$_2$O solubility
+data\rc{ref1,ref3,ref5,ref43} and their comparison with the standard curve are
+presented in Figure 12. The calculated vapor pressures for all four sets of
+solubility data agree with the standard values very well, with the average
+percent deviation from the standard curve being smaller than 1.1 \% (Table 4).
+It is noteworthy that although these authors used different methods to
+evaluate and obtain their data they found consistent results. However, the
+deviations of the vapor pressures calculated for other experimental solubility
+data\rc{ref6,ref9,ref35,ref37,ref42} from the standard values are a little
+larger (Figure 13 and Table 4), with the average percent deviation being
+larger than 1.5 \%. The vapor pressures calculated for the most recently
+finished two sets of experimental solubility data\rc{ref3,ref43} agree better
+with the standard values than for the older experimental
+data.\rc{ref6,ref9,ref35,ref37,ref42} On account of the uncertainty
+($\pm0.02$) in the osmotic coefficient, to which the BET model parameters are
+fitted, only those sets of solubility data with average deviations larger than
+2 \% in Table 4 are believed to be unreliable.
+
+\begin{figure}[htbp]
+\centering
+% \includegraphics[width=0.6\textwidth]{figure12}
+\caption{Vapor pressures of the LiCl$\cdot$H$_2$O saturated solution vs
+temperature: ---, standard values; \ldots, model uncertainty based on the
+standard values; $\circ$, ref \citenum{ref1}; $\square$, ref \citenum{ref3};
+$\triangle$, ref \citenum{ref5}; $+$, ref \citenum{ref43}. All symbols are BET
+model values evaluated for the solubility data of the reference literature.}
+\end{figure}
+
+\begin{table}[htbp]
+\centering
+\caption{Deviation of the Vapor Pressures of the LiCl$\cdot$H$_2$O Saturated
+Solution Calculated for Different Solubility Data from the Standard Values}
+\begin{tabular}{lccc}
+\toprule
+literature of solubility data
+& \begin{tabular}[c]{@{}c@{}}temperature\\ range, $T$/K\end{tabular}
+& \begin{tabular}[c]{@{}c@{}}number of\\ data, $n$\end{tabular}
+& \begin{tabular}[c]{@{}c@{}}average\\ deviation\textsuperscript{a}\end{tabular} \\
+\midrule
+Linke and Seidell\textsuperscript{1} & 298.15--369.15 & 9 & 0.96 \\
+Farelo et al.\textsuperscript{43} & 296.7--334.5 & 10 & 0.97 \\
+Clynne and Potter\textsuperscript{3} & 297.95--365.1 & 9 & 1.04 \\
+Monnin et al.\textsuperscript{5} & 298.15--363.15 & 14 & 1.08 \\
+Friend and Colley\textsuperscript{37} & 291.15--361.15 & 13 & 1.49 \\
+Benrath\textsuperscript{35} & 298.15--363.15 & 5 & 1.72 \\
+Johnson, Jr.\ and Molstad\textsuperscript{9} & 303.15, 323.15 & 2 & 2.38 \\
+H\"uttig and Reuscher\textsuperscript{6} & 303.15--100.5 & 6 & 2.65 \\
+International Critical Tables\textsuperscript{42} & 293.15--373.65 & 10 & 4.92 \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+\begin{minipage}{0.8\textwidth}
+\footnotesize \textsuperscript{a} Average deviation
+$= \frac{1}{n} \sum_{i=1}^{n} |p_i^{\mathrm{calc}} - p_i^{\mathrm{std}}| /
+p_i^{\mathrm{std}} \times 100$.
+\end{minipage}
+\end{table}
+
+\begin{figure}[htbp]
+\centering
+% \includegraphics[width=0.6\textwidth]{figure13}
+\caption{Vapor pressures of the LiCl$\cdot$H$_2$O saturated solution vs
+temperature: ---, standard values; \ldots, model uncertainty based on the
+standard values; $\square$, ref \citenum{ref6}, $\triangle$,
+ref \citenum{ref9}; $\triangledown$, ref \citenum{ref42}; $\diamond$,
+ref \citenum{ref35}; $+$, ref \citenum{ref37}. All symbols are BET model
+values evaluated for the solubility data of the reference literature.}
+\end{figure}
+
+\subsection*{On the Solubility Data of LiCl}
+
+The solubility data of the solid-phase LiCl given by different
+authors\rc{ref1,ref3,ref5,ref6,ref11,ref35,ref42,ref44} do not agree with each
+other, as shown in Figure 14. It is also noted that the vapor pressures
+calculated for these solubility data are generally lower than the standard
+curve (Figure 15 and Table 5). This result may suggest the uncertainty of the
+model and/or the standard values of the vapor pressure. On one hand, the
+standard vapor pressure data are fitted only to the experimental data of
+Applebey et al.,\rc{ref11} the uncertainty range of which was not reported.
+One the other hand, the BET model parameters at 428.65 K are fitted to the
+experimental data of Brendler and Voigt,\rc{ref31} who experimentally
+determined the isopiestic molalities of LiCl solution with a MgCl$_2$
+reference solution and calculated the osmotic coefficients with a set of
+Pitzer model parameters\rc{ref45} for the MgCl$_2$ solution. Simultaneously,
+they also compared the model values with Dittrich's experimental
+values,\rc{ref46} yielding an average deviation of $\pm0.04$ for the osmotic
+coefficient. Thus, it can be reasonably assumed that the osmotic coefficient
+of LiCl solution determined by the isopiestic method should also have an
+uncertainty of $\pm0.04$. This uncertainty is drawn in Figure 15 on the basis
+of the standard curve. Of all of the calculated vapor pressures for the
+solubility data,\rc{ref1,ref3,ref5,ref6,ref11,ref35,ref42,ref44} only those
+pertaining to the data of Clynne et al.\rc{ref3} and Benrath\rc{ref35} fall in
+the uncertainty range of the standard curve. The exact differences between the
+calculated and standard values are presented in the last column of Table 5.
+Although Clynne et al.'s data\rc{ref3} are different from most of the others,
+their data should not be discounted when one evaluates the solubility data of
+LiCl critically. This conclusion can also find support from the visual
+measurement method of Clynne et al.,\rc{ref3,ref47} who suggested that the
+chemical analysis of the highly viscous saturated solutions gives larger
+values because of suspended crystallites. Although Friend et al.\rc{ref37}
+also employed the visual method, Clynne et al.'s data,\rc{ref3} with an
+average precision of 0.09 \%, may be more accurate than Friend et al.'s data.
+
+\begin{figure}[htbp]
+\centering
+% \includegraphics[width=0.6\textwidth]{figure14}
+\caption{Solubility of the solid-phase LiCl(s) in pure water vs temperature:
+$\circ$, ref \citenum{ref1}; $\blacktriangle$, ref \citenum{ref3};
+$\triangle$, ref \citenum{ref5}; $\diamond$, ref \citenum{ref6}; $+$,
+ref \citenum{ref11}; $\blacksquare$, ref \citenum{ref35}; $*$,
+ref \citenum{ref42}; $\times$, ref \citenum{ref44}.}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+% \includegraphics[width=0.6\textwidth]{figure15}
+\caption{Vapor pressures of the LiCl saturated solution vs temperature:
+---, standard values; \ldots, model uncertainty based on the standard values;
+$\circ$, ref \citenum{ref1}; $\blacktriangle$, ref \citenum{ref3};
+$\triangle$, ref \citenum{ref5}; $\diamond$, ref \citenum{ref6}; $+$,
+ref \citenum{ref11}; $\blacksquare$, ref \citenum{ref35}; $*$,
+ref \citenum{ref42}; $\times$, ref \citenum{ref44}. All symbols are BET model
+values evaluated for the solubility data of the reference literature.}
+\end{figure}
+
+\begin{table}[htbp]
+\centering
+\caption{Deviation of the Vapor Pressures $p$ of the LiCl Saturated Solution
+Calculated for Different Solubility Data from the Standard Values}
+\begin{tabular}{lccc}
+\toprule
+literature of solubility data
+& \begin{tabular}[c]{@{}c@{}}temperature\\ range, $T$/K\end{tabular}
+& \begin{tabular}[c]{@{}c@{}}number of\\ data, $n$\end{tabular}
+& \begin{tabular}[c]{@{}c@{}}average\\ deviation\textsuperscript{a}\end{tabular} \\
+\midrule
+Clynne and Potter\textsuperscript{3} & 385.65--428.6 & 5 & 2.718 \\
+Benrath\textsuperscript{35} & 372.65 & 1 & 1.675 \\
+Applebey et al.\textsuperscript{11} & 373.35--428.75 & 4 & 4.577 \\
+Monnin et al.\textsuperscript{5} & 373--433 & 14 & 5.672 \\
+Friend et al.\textsuperscript{44} & 374.95--427.15 & 9 & 5.697 \\
+Linke and Seidell\textsuperscript{1} & 369.15--433.15 & 7 & 5.810 \\
+International Critical Tables\textsuperscript{42} & 373.65--393.15 & 3 & 5.945 \\
+H\"uttig and Reuscher\textsuperscript{6} & 373.35--433.15 & 3 & 7.208 \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+\begin{minipage}{0.8\textwidth}
+\footnotesize \textsuperscript{a} Average deviation
+$= \frac{1}{n} \sum_{i=1}^{n} |p_i^{\mathrm{calc}} - p_i^{\mathrm{std}}| /
+p_i^{\mathrm{std}} \times 100$.
+\end{minipage}
+\end{table}
+
+\section*{Conclusions}
+
+By fitting the BET model parameters to the selected water activity data in the
+system LiCl + H$_2$O at salt concentrations below 20 mol$\cdot$kg$^{-1}$ and
+in the temperature range from 273.15 K to 428.65 K, the vapor pressures for
+solubility data given by different authors were calculated and compared with
+reliable experimental data. By comparing the consistency of calculated and
+experimental vapor pressures above LiCl$\cdot n$H$_2$O saturated solution, the
+reliability of the solubility data was evaluated. The investigation of this
+work indicated that the vapor pressures evaluated for the solubility data of
+LiCl$\cdot$2H$_2$O given by Clynne et al., Monnin et al., Linke and Seidell,
+except that at two Linke and Seidell points at 273.15 K and 278.15 K, are
+generally in good agreement with the experimental data within the model
+estimated error. For all other LiCl$\cdot$2H$_2$O solubility data cited in the
+work, the calculated vapor pressures are scattered. A comparison of the
+calculated and experimental vapor pressures also indicated that all of the
+solubility data for LiCl$\cdot$H$_2$O from Linke and Seidell, Clynne and
+Potter, and Monnin et al. are reliable. However, the calculated vapor
+pressures above the LiCl saturated solution are systematically lower than the
+experimental data. Among them, only the vapor pressures calculated using
+Clynne and Potter's solubility data are consistent with the experimental
+values in the error range of the model. Consequently, Clynne and Potter's
+solubility data for LiCl should not be discounted, although their data are
+different from most of the others' data.
+
+\begin{thebibliography}{99}
+\footnotesize
+
+\bibitem{ref1} Linke, W. F.; Seidell, A. \textit{Solubilities: Inorganic and
+Metal--Organic Compounds}, 4th ed.; American Chemical Society: Washington, DC,
+1965.
+
+\bibitem{ref2} Schimmel, F. A. Solubility of lithium chloride and lithium
+thiocyanate at low temperatures. \textit{J. Chem. Eng. Data} \textbf{1960},
+\textit{5}, 519--520.
+
+\bibitem{ref3} Clynne, M. A.; Potter, R. W., II. Solubility of some alkali and
+alkaline earth chlorides in water at moderate temperatures. \textit{J. Chem.
+Eng. Data} \textbf{1979}, \textit{24}, 338--340.
+
+\bibitem{ref4} Cohen-Adad, R.; Lorimer, J. W. \textit{Alkali Metal and
+Ammonium Chlorides in Water and Heavy Water}; Pergamon: New York, 1991.
+
+\bibitem{ref5} Monnin, C.; Dubois, M.; Papaiconomou, N.; Simonin, J.-P.
+Thermodynamics of the LiCl--H$_2$O system. \textit{J. Chem. Eng. Data}
+\textbf{2002}, \textit{47}, 1331--1336.
+
+\bibitem{ref6} H\"uttig, G. H.; Reuscher, F. Study on the chemistry of
+Lithium. I. On the hydration of LiCl and LiBr. \textit{Z. Anorg. Allg. Chem.}
+\textbf{1924}, \textit{137}, 155--159.
+
+\bibitem{ref7} Pearce, J. N.; Nelson, A. F. The vapour pressures of aqueous
+solution of lithium nitrate and activity coefficients of some alkali salts in
+solutions of high concentration at 25 $^{\circ}$C. \textit{J. Am. Chem. Soc.}
+\textbf{1932}, \textit{54}, 3544--3555.
+
+\bibitem{ref8} Rockland, L. B. Saturated salt solutions for static control of
+relative humidity between 5 $^{\circ}$C and 40 $^{\circ}$C. \textit{Anal.
+Chem.} \textbf{1960}, \textit{32}, 1375--1376.
+
+\bibitem{ref9} Johnson, E. F., Jr.; Molstad, M. C. Thermodynamic properties of
+aqueous lithium chloride solutions. \textit{J. Phys. Colloid Chem.}
+\textbf{1951}, \textit{55}, 257--281.
+
+\bibitem{ref10} \textit{Gmelings Handbuch Der Anorganischen Chemie}; Lithium,
+supplemental band, system number 20; Verlag Chemie, GmbH: Weinheim, Germany,
+1960.
+
+\bibitem{ref11} Applebey, M. P.; Crawford, F. H.; Gordon, K. Vapour pressures
+of saturated solutions. Lithium chloride and lithium sulphate. \textit{J.
+Chem. Soc.} \textbf{1934}, 1665--1671.
+
+\bibitem{ref12} Hedlin, C. P.; Trofimenkoff, F. N. In \textit{Humidity and
+Moisture}; Wexler, A., Ed.; Reinhold Publishing: New York, 1965; Vol. 3,
+pp 519--520.
+
+\bibitem{ref13} Acheson, D. T. In \textit{Humidity and Moisture}; Wexler, A.,
+Ed.; Reinhold Publishing: New York, 1965; Vol. 3, pp 521--530.
+
+\bibitem{ref14} Stokes, R. H.; Robinson, R. A. Standard solutions for humidity
+control at 25 $^{\circ}$C. \textit{Ind. Eng. Chem.} \textbf{1949},
+\textit{41}, 3013.
+
+\bibitem{ref15} Morillon, V.; Debeaufort, F.; Jose, J. Tharrault, J. F.;
+Capelle, M.; Blond, G.; Voilley, A. Water vapour pressure above saturated salt
+solutions at low temperatures. \textit{Fluid Phase Equilib.} \textbf{1999},
+\textit{155}, 297--309.
+
+\bibitem{ref16} Greenspan, L. Humidity fixed points of binary saturated
+aqueous solutions, \textit{J. Res. Natl. Bur. Stand. (U.S.)} \textbf{1977},
+\textit{81A}, 89--96.
+
+\bibitem{ref17} Clegg, S. L.; Pitzer, K. S. Thermodynamics of multicomponent,
+miscible, ionic solutions: generalized equations for systemetrical
+electrolytes. \textit{J. Phys. Chem.} \textbf{1992}, \textit{96}, 3513--3520.
+
+\bibitem{ref18} Clegg, S. L.; Pitzer, K. S.; Brimblecombe, P. Thermodynamics
+of multicomponent, miscible, ionic solutions. 2. Mixtures including
+unsymmetrical electrolytes. \textit{J. Phys. Chem.} \textbf{1992}, \textit{96},
+9470--9479.
+
+\bibitem{ref19} Pitzer, K. S.; Simonson, J. M. Thermodynamics of
+multicomponent, miscible, ionic systems: theory and equations. \textit{J. Phys.
+Chem.} \textbf{1986}, \textit{90}, 3005--3009.
+
+\bibitem{ref20} Stokes, R. H.; Robinson, R. A. Ionic hydration and activity in
+electrolyte solutions. \textit{J. Am. Chem. Soc.} \textbf{1948}, \textit{70},
+1870--1878.
+
+\bibitem{ref21} Sander, B.; Rasmussen, P.; Fredenslund, A. Calculation of
+solid/liquid equilibria in aqueous solution of nitrate salts using an extended
+uniquac equation. \textit{Chem. Eng. Sci.} \textbf{1986}, \textit{41},
+1197--1202.
+
+\bibitem{ref22} Chen, C.-C.; Mathias, P. M.; Orbey, H. Use of hydration and
+dissociation chemistries with the electrolyte-NRTL model. \textit{AIChE J.}
+\textbf{1999}, \textit{45}, 1576--1586.
+
+\bibitem{ref23} Simonin, J.-P. Real ionic solution in the mean spherical
+approximation. 2. Pure strong electrolyte up to very high concentrations, and
+mixtures, in the primitive model. \textit{J. Phys. Chem. B} \textbf{1997},
+\textit{101}, 4313--4320.
+
+\bibitem{ref24} Gibbard, H. F., Jr.; Scatchard, G. Liquid--vapor equilibrium
+of aqueous Lithium chloride, from 25 $^{\circ}$C to 100 $^{\circ}$C and from
+1.0 to 18.5 mole, and related properties. \textit{J. Chem. Eng. Data}
+\textbf{1973}, \textit{18}, 293--298.
+
+\bibitem{ref25} Kangro, W.; Groeneveld, A. \textit{Z. Phys. Chem. N. F.}
+\textbf{1962}, \textit{32}, 110--126.
+
+\bibitem{ref26} Robinson, R. A.; Stokes, R. H. \textit{Electrolyte Solution},
+2nd ed.; Butterworths: London, 1959.
+
+\bibitem{ref27} Staples, B. R. Activity and osmotic coefficients of aqueous
+sulphuric acid at 298.15 K. \textit{J. Chem. Ref. Data} \textbf{1981},
+\textit{10}, 779--798.
+
+\bibitem{ref28} Sako, T.; Hakuta, T.; Yoshitome, H. Vapor pressures of binary
+(H$_2$O--HCl, --MgCl$_2$, and --CaCl$_2$) and ternary
+(H$_2$O--MgCl$_2$--CaCl$_2$) aqueous solutions. \textit{J. Chem. Eng. Data}
+\textbf{1985}, \textit{30}, 224--228.
+
+\bibitem{ref29} Rard, J. A.; Wijesinghe, A. M.; Wolery, T. J. Review of the
+thermodynamic properties of Mg(NO$_3$)$_2$(aq) and their representation with
+the standard and extended ion-interaction (Pitzer) models at 298.15 K.
+\textit{J. Chem. Eng. Data} \textbf{2004}, \textit{49}, 1127--1140.
+
+\bibitem{ref30} Hill, P. G. A unified Fundamental equation for the
+thermodynamic properties of H$_2$O. \textit{J. Phys. Chem. Ref. Data}
+\textbf{1990}, \textit{19}, 1233--1274.
+
+\bibitem{ref31} Brendler, V.; Voigt, W. Isopiestic measurements at high
+temperatures. 1. Aqueous solutions of LiCl, CsCl, and CaCl$_2$ at
+155 $^{\circ}$C. \textit{J. Solution Chem.} \textbf{1994}, \textit{23},
+1061--1072.
+
+\bibitem{ref32} Apelbat, A.; Korin, E. Vapour pressures of saturated aqueous
+solutions of ammonium iodide, potassium iodide, potassium nitrate, strontium
+chloride, lithium sulphate, sodium thiosulphate, magnesium nitrate, and uranyl
+nitrate from $T = (278$ to 323) K. \textit{J. Chem. Thermodyn.} \textbf{1998},
+\textit{30}, 459--471.
+
+\bibitem{ref33} Stokes, R. H.; Robinson, R. A. Standard solutions for humidity
+control at 25 $^{\circ}$C. \textit{Ind. Eng. Chem.} \textbf{1949},
+\textit{41}, 2013.
+
+\bibitem{ref34} Kessis, J. J. Syst\`eme eau-chlorure de lithium. Mesures de
+solubilit\'e entre $-65$ et $+60$ $^{\circ}$C. \textit{Bull. Soc. Chim. Fr.}
+\textbf{1961}, 1503--1504.
+
+\bibitem{ref35} Benrath, H. Die polythermen der tern\"aren systeme:
+CuCl$_2$--(LiCl)$_2$--H$_2$O und NiCl$_2$--(LiCl)$_2$--H$_2$O. \textit{Z.
+Anorg. Allg. Chem.} \textbf{1932}, \textit{205}, 417--424.
+
+\bibitem{ref36} Moran, H. E., Jr. System lithium chloride--water. \textit{J.
+Phys. Chem.} \textbf{1956}, \textit{60}, 1666--1667.
+
+\bibitem{ref37} Friend, J. A. N.; Colley, A. T. W. The solubility of lithium
+chloride in water. \textit{J. Chem. Soc.} \textbf{1931}, \textit{31},
+48--3149.
+
+\bibitem{ref38} Bassett, H.; Sanderson, I. The compounds of lithium chloride
+with cobalt chloride. Water as a linking agent in polynuclear cations.
+\textit{J. Chem. Soc.} \textbf{1932}, 1855--1864.
+
+\bibitem{ref39} Woskresenskaya, N. K.; Yanatieva, O. K. \textit{Izv. Akad.
+Nauk SSSR, Ser. Khim.} \textbf{1937}, 97--121.
+
+\bibitem{ref40} Novoselova, A. V.; Sosnovskaya, I. G. \textit{Zh. Obshchei.
+Khim.} \textbf{1951}, \textit{21}, 813--817.
+
+\bibitem{ref41} Benrath, H. Das system
+kobaltchlorid-lithiumchlorid-wasser. \textit{Z. Anorg. Allg. Chem.}
+\textbf{1939}, \textit{240}, 87--96.
+
+\bibitem{ref42} \textit{International Critical Tables}, 1st ed.; McGraw-Hill:
+New York, 1928; Vol. 3, p 368.
+
+\bibitem{ref43} Farelo, F.; Fernandes, C.; Avelino, A. Solubilities for six
+ternary systems: NaCl + NH$_4$Cl + H$_2$O, KCl + NH$_4$Cl + H$_2$O,
+NaCl + LiCl + H$_2$O, KCl + LiCl + H$_2$O, NaCl + AlCl$_3$ + H$_2$O, and
+KCl + AlCl$_3$ + H$_2$O at $T = (298$ to 333) K. \textit{J. Chem. Eng. Data}
+\textbf{2005}, \textit{50}, 1470--1477.
+
+\bibitem{ref44} Friend, J. N.; Hale, R. W.; Ryder, E. A. The solubility of
+lithium chloride in water between 70$^{\circ}$ and 160$^{\circ}$. \textit{J.
+Chem. Soc.} \textbf{1937}, 970.
+
+\bibitem{ref45} Valyashko, V. M.; Urosova, M. A.; Voigt, W.; Emons, H.-H.
+Properties of the system MgCl$_2$--H$_2$O in a wide range of temperature and
+concentration. \textit{Zh. Neorg. Khim.} \textbf{1988}, \textit{33},
+228--232.
+
+\bibitem{ref46} Dittrich, A. Ph.D. Thesis, Bergakademie Freiberg, 1986.
+
+\bibitem{ref47} \textit{CODATA Thermodynamic Tables: Selections for Some
+Compounds of Calcium and Related Mixtures: A Prototype Set of Tables}; Gavin,
+D., Parker, V. B., White, H. J., Jr., Eds.; Hemisphere Publishing Corporation:
+Washington, DC, 1987.
+
+\end{thebibliography}
+
+\end{document}

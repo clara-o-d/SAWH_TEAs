@@ -37,13 +37,31 @@ def daily_profiles(df) -> DailyProfiles:
     """Every calendar day in *df* as its own profile, in chronological order."""
     from solar_lumped.weather import real_weather_days_from_df
 
-    days = real_weather_days_from_df(df)
+    # No POA here even though it is the weather.py default: these profiles are shared by
+    # every design in a batch, but ``tilt_deg`` is a swept dimension, so a single POA tilt
+    # would be wrong for all but one of them. Complex mode rebuilds per design and does
+    # transpose -- see ``evaluator._profiles_for_design``.
+    days = real_weather_days_from_df(df, poa_tilt_deg=None)
     return [(d.timetuple().tm_yday, prof) for d, prof, _group in days]
 
 
 def fetch_daily_profiles(site: SiteSpec, *, cache_dir: str | Path) -> DailyProfiles:
     """Fetch *site*'s full year of weather and split it into per-day profiles."""
     return daily_profiles(fetch_site_frame(site, cache_dir=cache_dir))
+
+
+def fetch_site_elevations(sites, *, cache_dir: str | Path) -> dict[str, float]:
+    """name -> site elevation (m), off the same cached year frames the profiles come from.
+
+    Elevation is a site property, not a design variable, so it is resolved once per run
+    rather than per design point. Costs no extra request: the frames are already in the
+    requests-cache, and archive responses never expire.
+    """
+    from solar_lumped.weather import site_elevation_m
+
+    return {
+        s.name: site_elevation_m(fetch_site_frame(s, cache_dir=cache_dir)) for s in sites
+    }
 
 
 def fetch_site_frame(site: SiteSpec, *, cache_dir: str | Path):

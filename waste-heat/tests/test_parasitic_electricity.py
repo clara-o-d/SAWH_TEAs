@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from waste_heat.economics import (
-    C_PATENT_BOM_USD as C_SYSTEM_USD,
-    PATENT_BOM_USD_PER_M2 as SYSTEM_BOM_USD_PER_M2,
+    C_SYSTEM_USD,
+    SYSTEM_BOM_USD_PER_M2,
 )
 from waste_heat.economics import lcow_from_daily_yield
 from waste_heat.economics import HYDROGEL_THICKNESS_M, LCOEconomicParams
@@ -34,7 +34,7 @@ def test_lcow_includes_parasitic_electricity():
     without = lcow_from_daily_yield(
         yield_kg,
         salt_name="LiCl",
-        salt_to_polymer_ratio=4.0,
+        salt_loading=4.0,
         hydrogel_thickness_m=HYDROGEL_THICKNESS_M,
         econ=econ,
         electric_heat_w_per_m2=0.0,

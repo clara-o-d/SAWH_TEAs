@@ -18,6 +18,7 @@ import pandas as pd
 import requests
 import retry_requests
 
+from solar_lumped._parameters_xlsx import physics_value as _pv
 from waste_heat.physics import (
     H_AMB_W_M2_K,
     M_WH_KG_S_M2,
@@ -155,7 +156,7 @@ def _raise_for_openmeteo_error(response: requests.Response) -> None:
         f"Open-Meteo API error {response.status_code}: {detail}",
         response=response,
     )
-PROFILE_DT_S = 60.0
+PROFILE_DT_S = _pv("Waste-heat: weather profile time step")
 
 
 @dataclass(frozen=True, slots=True)

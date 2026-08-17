@@ -80,6 +80,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "infinite-cooling-capacity limit, not a physical design.",
     )
     p.add_argument(
+        "--instant-equilibrium", action="store_true",
+        help="g -> infinity: absorption and desorption are instantaneous and the gel "
+        "stays on its equilibrium isotherm, so desorption is energy-limited rather "
+        "than transport-limited. An upper bound on sorption kinetics.",
+    )
+    p.add_argument(
         "--cw-floor", choices=("hydrate", "drh"), default="hydrate",
         help="Which limit stops desorption. hydrate (default): crystal-hydrate water, "
         "n*c_s. drh: the wetter, more conservative equilibrium c_w at the salt's "
@@ -152,9 +158,13 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, client: WeatherCl
     except Exception:
         df = client.get_historical(lat, lon, start, end)
 
-    from solar_lumped.weather import real_weather_days_from_df
+    from solar_lumped.weather import real_weather_days_from_df, site_elevation_m
 
-    days = [prof for _d, prof, _g in real_weather_days_from_df(df)]
+    # One scalar per site, straight off the Open-Meteo response. Thinner air at altitude
+    # both diffuses vapour faster and insulates the collector better, so this is not a
+    # cosmetic correction -- see physics.pressure_from_elevation_m.
+    elevation_m = site_elevation_m(df)
+    days = [prof for _d, prof, _g in real_weather_days_from_df(df, poa_tilt_deg=args.tilt_deg)]
     if not days:
         print(f"  ({lat:+.4f}, {lon:+.4f}): no usable weather days, skipping.", flush=True)
         return 0
@@ -185,6 +195,7 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, client: WeatherCl
             c, salt=args.salt, salt_loading=args.salt_loading, insulation_gap_mm=args.insulation_gap_mm,
             tilt_deg=args.tilt_deg, eps_abs=args.eps_abs, tau_glass=args.tau_glass,
             eps_abs_ir=args.eps_abs_ir, eps_glass_ir=args.eps_glass_ir,
+            site_elevation_m=elevation_m,
         )
         for c in combos
     ]
@@ -194,17 +205,23 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, client: WeatherCl
         configs = [dataclasses.replace(cfg, condenser_tracks_ambient=True) for cfg in configs]
     if args.cw_floor != "hydrate":
         configs = [dataclasses.replace(cfg, c_w_floor_mode=args.cw_floor) for cfg in configs]
+    if args.instant_equilibrium:
+        configs = [dataclasses.replace(cfg, instant_equilibrium=True) for cfg in configs]
 
     # Batch axis is the combo list; every combo walks the same year in lockstep, one
     # vmapped step per day, so days stay sequential and combos run in parallel.
     t0 = time.perf_counter()
     dt, n_abs_max, n_des_max = year_padding([days])
-    system = build_system_arrays(configs, complex_mode=args.complex)
+    system = build_system_arrays(
+        configs, complex_mode=args.complex,
+        instant_equilibrium=args.instant_equilibrium,
+    )
     step_fn = make_year_step_fn(
         system, dt, n_abs_max, n_des_max, complex_mode=args.complex,
         condenser_tracks_ambient=args.condenser_ambient,
+        instant_equilibrium=args.instant_equilibrium,
     )
-    day_weathers = [build_day_weather([d] * len(configs), n_abs_max, n_des_max) for d in days]
+    day_weathers =[build_day_weather([d] * len(configs), n_abs_max, n_des_max) for d in days]
 
     mean_yield, mean_eta = run_year_batched(
         step_fn, day_weathers,
@@ -218,7 +235,7 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, client: WeatherCl
         gps._append_row(
             args.output_csv,
             {
-                "lat": lat, "lon": lon,
+                "lat": lat, "lon": lon, "elevation_m": f"{elevation_m:.1f}",
                 "mean_rh_frac": f"{mean_rh:.6f}", "mean_t_amb_c": f"{mean_t_amb:.4f}", "mean_solar_w_m2": f"{mean_solar:.2f}",
                 "salt": args.salt,
                 "hydrogel_thickness_mm": combo.hydrogel_thickness_mm, "eps_abs": args.eps_abs,
@@ -230,6 +247,7 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, client: WeatherCl
                 "warmup_method": "aitken-gpu-fixed-round", "resolution": "annual",
                 "condenser_mode": "ambient" if args.condenser_ambient else "ode",
                 "c_w_floor_mode": args.cw_floor,
+                "kinetics": "instant" if args.instant_equilibrium else "finite_g",
                 "mean_yield_kg_m2": f"{mean_yield[ci]:.6f}", "mean_eta_thermal": f"{mean_eta[ci]:.6f}",
                 "n_periods": len(days),
                 # Complex settings are recorded per row, not just in the invocation:

@@ -112,7 +112,10 @@ def design_vector_hash(
     can never collide with these.
     """
     rounded = tuple(_round_sig(float(v)) for v in np.asarray(x, dtype=float).reshape(-1))
-    payload = {"x": rounded, "sites": sorted(sites), "resolution": "annual"}
+    # "annual+elev" retires every pre-elevation entry. Site pressure changes yield by
+    # ~+2.4%/1000 m, and h_amb's density factor moves even sea-level sites (it tracks
+    # ambient temperature as well as pressure), so those results are not comparable.
+    payload = {"x": rounded, "sites": sorted(sites), "resolution": "annual+elev"}
     if case != "case1":
         payload["case"] = case
     blob = json.dumps(payload, sort_keys=True)
@@ -205,6 +208,7 @@ def _run_jax_year(
     initial_loading,
     complex_mode: bool = False,
     condenser_tracks_ambient: bool = False,
+    instant_equilibrium: bool = False,
 ) -> tuple[dict[tuple[int, int], float], dict[tuple[int, int], float], str | None]:
     """Run a full 365-day year for every (design, site) instance and reduce to mean daily
     yield/eta per pair. Returns (yield, eta, error); on a raised jax/diffrax call, error is
@@ -219,10 +223,14 @@ def _run_jax_year(
     try:
         jdc = _load_jax_daily_cycle()
         dt, n_abs_max, n_des_max = jdc.year_padding(instance_profiles)
-        system = jdc.build_system_arrays(instance_configs, complex_mode=complex_mode)
+        system = jdc.build_system_arrays(
+            instance_configs, complex_mode=complex_mode,
+            instant_equilibrium=instant_equilibrium,
+        )
         step_fn = jdc.make_year_step_fn(
             system, dt, n_abs_max, n_des_max, complex_mode=complex_mode,
             condenser_tracks_ambient=condenser_tracks_ambient,
+            instant_equilibrium=instant_equilibrium,
         )
 
         # Instances can disagree on year length (leap years, gaps in the weather record);
@@ -285,6 +293,7 @@ def evaluate_for_config(xs, *, cfg, cache, econ, site_profiles=None, site_frames
         case=cfg.case,
         complex_mode=cfg.complex_mode,
         condenser_tracks_ambient=cfg.condenser_tracks_ambient,
+        instant_equilibrium=cfg.instant_equilibrium,
         site_frames=site_frames,
         backend=cfg.backend,
     )
@@ -321,9 +330,11 @@ def _run_cpu_year(
     initial_loading,
     complex_mode: bool = False,
     condenser_tracks_ambient: bool = False,
+    instant_equilibrium: bool = False,
 ) -> tuple[dict[tuple[int, int], float], dict[tuple[int, int], float], str | None]:
-    """CPU equivalent of :func:`_run_jax_year`. ``condenser_tracks_ambient`` is unused here
-    (already baked into each ``instance_configs`` entry) -- kept for signature parity with
+    """CPU equivalent of :func:`_run_jax_year`. ``condenser_tracks_ambient`` and
+    ``instant_equilibrium`` are unused here (already baked into each ``instance_configs``
+    entry) -- kept for signature parity with
     :func:`_run_jax_year`, which needs it explicitly to build the JAX vector field.
 
     The JAX fast path is LiCl-hardcoded (``water_activity_licl_from_c_w``,
@@ -370,7 +381,11 @@ def evaluate_batch(
     case: str = "case2",
     complex_mode: bool = False,
     condenser_tracks_ambient: bool = False,
+    instant_equilibrium: bool = False,
     site_frames: dict[str, object] | None = None,
+    # name -> elevation (m), from sites.fetch_site_elevations. None leaves every site at
+    # sea level, which is the previous behaviour.
+    site_elevations: dict[str, float] | None = None,
     backend: Backend = "jax",
 ) -> list[DesignEvalResult]:
     """Evaluate every x in *xs* not already in *cache*. Each (design, site) instance runs
@@ -386,6 +401,8 @@ def evaluate_batch(
     key_case = f"{case}+complex" if complex_mode else case
     if condenser_tracks_ambient:
         key_case = f"{key_case}+ambient_cond"
+    if instant_equilibrium:
+        key_case = f"{key_case}+instant_eq"
     if backend != "jax":
         key_case = f"{key_case}+{backend}"
     keys = [design_vector_hash(x, sites=site_names, case=key_case) for x in xs]
@@ -406,6 +423,7 @@ def evaluate_batch(
             **design_space.to_system_config_kwargs(
                 xs[i], case=case, complex_mode=complex_mode,
                 condenser_tracks_ambient=condenser_tracks_ambient,
+                instant_equilibrium=instant_equilibrium,
             )
         )
         for i in to_run
@@ -431,7 +449,11 @@ def evaluate_batch(
                 no_weather.add((i, si))
                 continue
             instance_profiles.append([prof for _doy, prof in profiles])
-            instance_configs.append(configs[i])
+            # One config per (design, site), not per design: elevation is a site property,
+            # so the shared config has to be specialised here or every site would run at
+            # whichever elevation happened to be on it.
+            elev = 0.0 if site_elevations is None else site_elevations.get(spec.name, 0.0)
+            instance_configs.append(dataclasses.replace(configs[i], site_elevation_m=elev))
             owner.append((i, si))
 
     run_year = _run_cpu_year if backend == "cpu" else _run_jax_year
@@ -440,6 +462,7 @@ def evaluate_batch(
         instance_profiles, instance_configs, owner,
         initial_loading=initial_loading, complex_mode=complex_mode,
         condenser_tracks_ambient=condenser_tracks_ambient,
+        instant_equilibrium=instant_equilibrium,
     )
     wall = time.perf_counter() - t0
 
@@ -470,7 +493,7 @@ def evaluate_batch(
             lcow = lcow_from_daily_yield(
                 mean_yield,
                 salt_name=cfg.salt_name,
-                salt_to_polymer_ratio=cfg.salt_to_polymer_ratio,
+                salt_loading=cfg.salt_loading,
                 hydrogel_thickness_m=cfg.hydrogel_thickness_m,
                 econ=econ,
                 # Complex mode prices the design itself: B1/B2/B3/B4 move the BOM and

@@ -21,6 +21,7 @@ from solar_lumped.physics import (
     FABRICATION_EQUILIBRIUM_RH,
     H0_M,
     H_AMB_W_M2_K,
+    TILT_DEG,
     c_w_from_water_in_gel_l_m2,
     equilibrium_c_w_from_dvs_at_rh,
     wind_to_h_amb_w_m2_k,
@@ -156,7 +157,33 @@ class WeatherClient:
                 pass
         df["latitude"] = data.get("latitude", latitude)
         df["longitude"] = data.get("longitude", longitude)
+        # Carried as a column because the index is usually tz-naive: with timezone=auto
+        # Open-Meteo returns a *fixed-offset* local clock (no DST step -- an entire year
+        # is exactly 24 samples/day), so tz_localize raises on the DST transition and
+        # leaves the index naive. Solar-position code that then asked the index for its
+        # UTC offset silently got zero and put the sun hours off; this is the real offset.
+        df["utc_offset_s"] = float(data["utc_offset_seconds"])
+        # Grid-cell elevation (m). Open-Meteo returns it on every response body -- no extra
+        # variable to request, and already present in cached responses, so nothing needs
+        # refetching. Carried as a column for the same reason as latitude: it is a scalar
+        # site property and there is nowhere else on a DataFrame that survives a reindex.
+        # Sets the site's ambient pressure, hence every gap air property and the h_amb
+        # density derate (see physics.pressure_from_elevation_m).
+        df["elevation_m"] = float(data.get("elevation", 0.0))
         return df
+
+
+def site_elevation_m(df: pd.DataFrame) -> float:
+    """Site elevation (m) from a weather frame, 0.0 if the frame has no elevation column.
+
+    Falling back to sea level rather than raising is deliberate: a hand-built test frame or
+    a frame from an older cache should keep working at the previous behaviour, and sea level
+    is exactly the no-op for everything downstream.
+    """
+    if "elevation_m" not in df.columns or df.empty:
+        return 0.0
+    value = float(df["elevation_m"].iloc[0])
+    return value if math.isfinite(value) else 0.0
 
 
 def _raise_for_openmeteo_error(response: requests.Response) -> None:
@@ -289,35 +316,39 @@ def grid_land_points(
 
 # --- Weather profile builders: baseline, replay, and real per-day series ---
 
-PHASE_DT_S = 100.0  # Wilson Note S1 / COMSOL time step (s)
-PHASE_HOURS = 12.0
+PHASE_DT_S = _pv("Baseline phase time step")  # Wilson Note S1 / COMSOL time step (s)
+PHASE_HOURS = _pv("Baseline half-cycle duration")
 STEPS_PER_PHASE = int(round(PHASE_HOURS * 3600.0 / PHASE_DT_S))
-SOLAR_NIGHT_THRESHOLD_W_M2 = 5.0
+SOLAR_NIGHT_THRESHOLD_W_M2 = _pv("Solar night threshold")
 
-# --- Optional plane-of-array (POA) irradiance transposition ---
+# --- Plane-of-array (POA) irradiance transposition ---
 #
-# OFF BY DEFAULT. Wilson's Eq. 4 drives the absorber with Q_solar taken straight
-# from the site's horizontal irradiance (GHI), and ``tilt_deg`` enters the model
-# *only* through the Hollands tilted-plate Nusselt correlation for the two air
-# gaps (physics.py::hollands_vapor_gap_h_conv_w_m2_k). That makes tilt a pure
-# internal-natural-convection knob: tilting the system changes gap convection but
-# not the solar energy it collects, which is backwards for a solar collector.
+# ON BY DEFAULT at ``POA_DEFAULT_TILT_DEG``; pass ``poa_tilt_deg=None`` to get raw
+# GHI back. Wilson's Eq. 4 drives the absorber with Q_solar taken straight from
+# horizontal irradiance (GHI), with ``tilt_deg`` entering *only* through the
+# Hollands tilted-plate Nusselt correlation for the two air gaps
+# (physics.py::vapor_gap_h_conv_w_m2_k) -- tilt as a pure internal-convection knob,
+# which is backwards for a solar collector. Transposing GHI onto the tilted
+# aperture makes one ``tilt_deg`` trade solar gain against gap convection at once.
 #
-# Enabling POA (``profile_from_day_df(..., poa_tilt_deg=...)``) transposes GHI
-# onto the tilted aperture, so a single ``tilt_deg`` then trades solar gain
-# against gap convection simultaneously -- the coupling needed to optimize tilt
-# for real. Left opt-in because switching it on changes every real-weather yield
-# number, so all existing GHI-based results stay reproducible untouched.
+# Wilson recreation stays on GHI (``poa_tilt_deg=None``): the paper's field tests
+# were driven by measured weather-station flux with no transposition, so replaying
+# them through POA would not reproduce their numbers. Callers with their own tilt
+# knob should pass it through rather than inherit the default.
 #
 # Method: Erbs et al. (1982) diffuse-fraction decomposition of GHI into DNI/DHI,
+#
 # then Liu & Jordan isotropic-sky transposition. Isotropic is the conservative
 # choice (it ignores circumsolar/horizon brightening, so it slightly *under*-
 # predicts POA for tilted surfaces facing the sun) and needs no extra inputs.
-POA_DEFAULT_ALBEDO: float = 0.2  # generic ground reflectance (Duffie & Beckman)
-_SOLAR_CONSTANT_W_M2: float = 1367.0
+POA_DEFAULT_TILT_DEG: float = TILT_DEG
+# Site geometry + the clock the timestamps are on; all three come from Open-Meteo.
+_POA_COLUMNS = frozenset({"latitude", "longitude", "utc_offset_s"})
+POA_DEFAULT_ALBEDO: float = _pv("Ground albedo (POA transposition)")
+_SOLAR_CONSTANT_W_M2: float = _pv("Solar constant (G_sc)")
 # Below ~3 deg solar elevation the DNI = (GHI - DHI)/cos(zenith) division blows
 # up on near-zero cos(zenith); clamp rather than emit a spurious POA spike.
-_MIN_COS_ZENITH: float = 0.05
+_MIN_COS_ZENITH: float = _pv("Minimum cos(zenith) for DNI division")
 
 
 def plane_of_array_w_m2(
@@ -326,11 +357,17 @@ def plane_of_array_w_m2(
     *,
     latitude_deg: float,
     longitude_deg: float,
+    utc_offset_h: float,
     tilt_deg: float,
     surface_azimuth_deg: float | None = None,
     albedo: float = POA_DEFAULT_ALBEDO,
 ) -> np.ndarray:
     """Transpose horizontal irradiance (GHI) onto a tilted aperture.
+
+    ``index`` is the local clock ``utc_offset_h`` is measured against -- required rather
+    than read off the index, which Open-Meteo frames leave tz-naive (see
+    ``_series_to_dataframe``). Getting it wrong slides apparent solar noon by an hour per
+    unit and mis-times the whole beam term.
 
     ``surface_azimuth_deg`` is measured clockwise from north (180 = due south);
     ``None`` picks the equator-facing orientation from the latitude's sign, which
@@ -351,10 +388,6 @@ def plane_of_array_w_m2(
     # raw clock time would bias the apparent solar noon by up to ~1 h and therefore
     # bias the optimal tilt/azimuth.
     eot_min = 9.87 * np.sin(2.0 * b) - 7.53 * np.cos(b) - 1.5 * np.sin(b)
-    utc_offset_h = np.asarray(
-        [(ts.utcoffset().total_seconds() / 3600.0) if ts.utcoffset() is not None else 0.0 for ts in index],
-        dtype=float,
-    )
     clock_h = np.asarray(index.hour, dtype=float) + np.asarray(index.minute, dtype=float) / 60.0
     solar_h = clock_h + (4.0 * (longitude_deg - 15.0 * utc_offset_h) + eot_min) / 60.0
     hour_angle = np.radians(15.0 * (solar_h - 12.0))
@@ -425,7 +458,7 @@ FIXED_H_AMB_W_M2_K = BASELINE_H_AMB_W_M2_K
 def profile_from_day_df(
     day_df: pd.DataFrame,
     *,
-    poa_tilt_deg: float | None = None,
+    poa_tilt_deg: float | None = POA_DEFAULT_TILT_DEG,
     poa_surface_azimuth_deg: float | None = None,
     poa_albedo: float = POA_DEFAULT_ALBEDO,
     seal_offset_h: float = 0.0,
@@ -435,11 +468,12 @@ def profile_from_day_df(
     """Split one calendar day into absorption (night) + desorption (day), each running its
     true real-time duration at PHASE_DT_S resolution rather than a fixed 12 h/12 h split.
 
-    ``poa_tilt_deg`` is opt-in (see the POA block above): when set, the profile's solar
-    series becomes plane-of-array irradiance on an aperture at that tilt instead of raw
-    GHI, so ``tilt_deg`` drives solar gain as well as gap natural convection. Requires the
-    ``latitude``/``longitude`` columns Open-Meteo responses already carry. The day/night
-    split itself stays keyed on GHI, so which samples land in which phase is unchanged.
+    ``poa_tilt_deg`` (see the POA block above) makes the profile's solar series
+    plane-of-array irradiance on an aperture at that tilt instead of raw GHI, so
+    ``tilt_deg`` drives solar gain as well as gap natural convection; ``None`` keeps raw
+    GHI, which is what Wilson recreation wants. Requires the ``latitude``/``longitude``
+    columns Open-Meteo responses already carry. The day/night split itself stays keyed on
+    GHI, so which samples land in which phase is unchanged.
 
     Complex mode (A1) shifts that split: ``seal_offset_h`` moves the moment the system is
     sealed and desorption begins relative to GHI sunrise, and ``open_offset_h`` moves the
@@ -455,9 +489,9 @@ def profile_from_day_df(
     native_dt_s = float(deltas.median()) if len(deltas) else PHASE_DT_S
     solar = day_df.get("shortwave_radiation", pd.Series(0.0, index=day_df.index)).astype(float)
     if poa_tilt_deg is not None:
-        if "latitude" not in day_df or "longitude" not in day_df:
+        if not _POA_COLUMNS.issubset(day_df.columns):
             raise ValueError(
-                "POA transposition needs 'latitude'/'longitude' columns on the weather "
+                f"POA transposition needs {sorted(_POA_COLUMNS)} columns on the weather "
                 "frame (Open-Meteo responses carry them; synthetic frames may not)."
             )
         day_df = day_df.assign(
@@ -466,6 +500,7 @@ def profile_from_day_df(
                 day_df.index,
                 latitude_deg=float(day_df["latitude"].iloc[0]),
                 longitude_deg=float(day_df["longitude"].iloc[0]),
+                utc_offset_h=float(day_df["utc_offset_s"].iloc[0]) / 3600.0,
                 tilt_deg=float(poa_tilt_deg),
                 surface_azimuth_deg=poa_surface_azimuth_deg,
                 albedo=poa_albedo,
@@ -646,7 +681,9 @@ def replay_profile(
             lat, lon, day.isoformat(), day.isoformat()
         )
         day_df = _single_day_df(df_h, day)
-    return profile_from_day_df(day_df)
+    # Wilson recreation: their Q_solar is the MIT weather station's measured flux, with
+    # no transposition onto the 35 deg aperture. Raw GHI is what reproduces Fig. 3.
+    return profile_from_day_df(day_df, poa_tilt_deg=None)
 
 
 def _single_day_df(
@@ -666,7 +703,7 @@ def real_day_profile(
     day: date,
     *,
     cache_dir: str | None = None,
-    poa_tilt_deg: float | None = None,
+    poa_tilt_deg: float | None = POA_DEFAULT_TILT_DEG,
 ) -> DailyWeatherProfile:
     """One real calendar day's weather at a site -- no averaging of any kind.
 
@@ -680,6 +717,21 @@ def real_day_profile(
     return profile_from_day_df(day_df, poa_tilt_deg=poa_tilt_deg)
 
 
+def real_site_elevation_m(
+    lat: float,
+    lon: float,
+    year: int,
+    *,
+    cache_dir: str | None = None,
+) -> float:
+    """Site elevation for the same fetch ``real_day_profile`` makes.
+
+    Costs no extra request in practice: the year frame is already in the requests-cache
+    from building the profile, and archive responses never expire.
+    """
+    return site_elevation_m(fetch_year_weather(lat, lon, year, cache_dir=cache_dir))
+
+
 def real_weather_days_from_df(
     df: pd.DataFrame,
     *,
@@ -687,16 +739,20 @@ def real_weather_days_from_df(
     seal_offset_h: float = 0.0,
     open_offset_h: float = 0.0,
     condenser_air_speed_m_s: float = 0.0,
-    poa_tilt_deg: float | None = None,
+    poa_tilt_deg: float | None = POA_DEFAULT_TILT_DEG,
 ) -> list[tuple[date, DailyWeatherProfile, pd.DataFrame]]:
     """Build per-day profiles from a pre-fetched year of Open-Meteo data.
 
-    The keyword arguments are complex mode's profile-level design variables (A1
-    schedule shift, B4 forced condenser air, and opt-in POA transposition so tilt
-    drives solar gain). They make the profile set design-dependent, so a caller
-    sweeping designs must rebuild per design point rather than fetching once --
-    see ``sawh_bayesopt.sites.profiles_for_design``.
+    The keyword arguments are profile-level design variables (A1 schedule shift, B4
+    forced condenser air, and POA transposition so tilt drives solar gain). They make
+    the profile set design-dependent, so a caller sweeping any of them must rebuild
+    per design point rather than fetching once -- see
+    ``sawh_bayesopt.evaluator._profiles_for_design``.
     """
+    # Checked here, not per day: the loop swallows ValueError to skip malformed days,
+    # so a frame with no coordinates would silently yield zero days instead of erroring.
+    if poa_tilt_deg is not None and not _POA_COLUMNS.issubset(df.columns):
+        raise ValueError(f"POA transposition needs {sorted(_POA_COLUMNS)} columns on the frame.")
     days_out: list[tuple[date, DailyWeatherProfile, pd.DataFrame]] = []
     for idx, (day_key, group) in enumerate(df.groupby(df.index.date)):
         if stride > 1 and idx % stride != 0:

@@ -17,6 +17,7 @@ dependencies = [
     "pandas>=2.0",
     "matplotlib>=3.8",
     "requests>=2.31",
+    "solar-lumped-sawh",  # parameters.xlsx loader: the repo-wide parameter source
     "requests-cache>=1.2",
     "retry-requests>=2.0",
 ]
@@ -35,7 +36,6 @@ package-dir = {"" = "src"}
 where = ["src"]
 
 [tool.setuptools.package-data]
-"waste_heat.data.economics" = ["*.csv"]
 "waste_heat.data.materials" = ["*.csv"]
 "waste_heat.weather" = ["*.csv"]
 

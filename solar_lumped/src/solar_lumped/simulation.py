@@ -4,6 +4,7 @@ plotting, water-inventory accounting, site feasibility, and annual yield."""
 from __future__ import annotations
 
 import csv
+import dataclasses
 import math
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -19,7 +20,6 @@ from scipy.optimize import brentq
 
 from solar_lumped._parameters_xlsx import physics_value as _pv
 from solar_lumped.complex_model import ComplexOptions
-from solar_lumped.economics import LCOEconomicParams, lcow_from_daily_yield
 from solar_lumped.physics import (
     FABRICATION_EQUILIBRIUM_RH,
     CP_AL_J_KG_K,
@@ -36,7 +36,7 @@ from solar_lumped.physics import (
     L_G_M,
     L_INS_M,
     RHO_AL_KG_M3,
-    SALT_TO_POLYMER_RATIO_DEFAULT,
+    SALT_LOADING_DEFAULT,
     SaltProperties,
     TAU_GLASS,
     TILT_DEG,
@@ -46,13 +46,20 @@ from solar_lumped.physics import (
     MassTransferParams,
     ThermalState,
     clamp_temperature_c,
+    # Private, deliberately: this is the exact a_w the desorption ODE differences against
+    # c_r, DVS/ZSR branches included. Re-deriving it here would let the plot drift.
+    _mass_transfer_driving_force,
+    concentration_ratio_desorption,
     condenser_h_conv_w_m2_k,
-    desorption_water_activity,
+    h_amb_density_factor,
+    pressure_from_elevation_m,
+    dc_w_dt,
+    deliquescence_rh,
     evaluate_mass_rates,
     get_salt,
     dilution_ceiling_c_w,
     drh_floor_c_w,
-    hollands_vapor_gap_h_conv_w_m2_k,
+    vapor_gap_h_conv_w_m2_k,
     hydrate_floor_c_w,
     initial_loading,
     inventory_ylabel,
@@ -60,6 +67,8 @@ from solar_lumped.physics import (
     parallel_plate_emissivity,
     radiative_exchange_w_m2,
     salt_molarity_from_composite,
+    ISOSTERIC_H_DES_SALTS,
+    brine_salt_fraction_from_c_w,
     solve_steady_thermal,
     water_in_sorbent_l_m2,
 )
@@ -70,8 +79,13 @@ from solar_lumped.weather import DailyWeatherProfile, PhaseProfile, day_weather_
 
 @dataclass(frozen=True, slots=True)
 class SystemConfig:
+    # "isosteric" derives h_des(xi, T) from the salt's own isotherm by
+    # Clausius-Clapeyron (physics.isosteric_h_des_j_per_kg); "constant" keeps the
+    # tabulated scalar. Only LiCl/CaCl2 have temperature-dependent isotherms, so
+    # every other salt falls back to the constant regardless of this setting.
+    h_des_mode: str = "isosteric"
     salt_name: str = "LiCl"
-    salt_to_polymer_ratio: float = SALT_TO_POLYMER_RATIO_DEFAULT
+    salt_loading: float = SALT_LOADING_DEFAULT
     hydrogel_thickness_m: float = H0_M
     vapor_gap_m: float = L_G_M
     insulation_gap_m: float = L_INS_M
@@ -87,7 +101,7 @@ class SystemConfig:
     # Override catalog salt formula weight (g/mol) for sensitivity sweeps.
     salt_formula_weight_g_mol: float | None = None
     # Scales MW_salt in gravimetric uptake only (DVS cap during absorption).
-    salt_weight_factor: float = 1.0
+    salt_weight_factor: float = _pv("Salt weight factor (DVS-cap MW scaling)")
     # Uniform surface/gel temperature at desorption start. None → algebraic steady
     # state (quasi_steady solves Eqs 1/3/4 algebraically each ODE step).
     segregated_initial_temp_c: float | None = None
@@ -110,6 +124,23 @@ class SystemConfig:
     # correlations stop describing a real solution. "drh" is the wetter, more
     # conservative bound and yields less. See physics.hydrate_floor_c_w / drh_floor_c_w.
     c_w_floor_mode: Literal["hydrate", "drh"] = "hydrate"
+    # Third ideal case, alongside perfect optics and condenser_tracks_ambient. True:
+    # the g -> infinity limit -- absorption and desorption are instantaneous and the
+    # gel is on its equilibrium isotherm at every instant (a_w == RH absorbing,
+    # a_w == c_r(T_gel, T_cond) desorbing). Desorption becomes energy-limited rather
+    # than transport-limited: m_des is whatever Eqs. 1-4 can pay h_des for. An upper
+    # bound on sorption kinetics, not a physical design. See
+    # physics.mass_transfer_g_m_s.
+    instant_equilibrium: bool = False
+    # Site elevation (m). Thins the air: D_air rises as 1/p (more desorption) while h_amb
+    # falls as rho^n (a hotter condenser, less desorption), so the net is a competition
+    # rather than a free gain. 0.0 -- sea level -- reproduces the previous behaviour
+    # bit-for-bit. Real sites should set it; site_pressure_pa() is what physics consumes.
+    site_elevation_m: float = 0.0
+
+    def site_pressure_pa(self) -> float:
+        """ISA ambient pressure for this site's elevation."""
+        return pressure_from_elevation_m(self.site_elevation_m)
 
     def desorption_surface_ic_c(self) -> tuple[float, float, float, float] | None:
         """Configured (T_gel, T_abs, T_glass, T_cond) at desorption start, if any."""
@@ -122,6 +153,44 @@ class SystemConfig:
 
     def salt(self) -> SaltProperties:
         return get_salt(self.salt_name)
+
+    def hydrogel_floor_thickness_m(self) -> float:
+        """Thinnest the gel can get: the thickness at the hydrate floor ``c_w_min``.
+
+        The floor used to be H₀ itself, which is the *as-cast* thickness at the
+        fabrication equilibrium (~20% RH) -- but desorption drives the gel well below
+        that, and a hydrogel that has lost water is thinner than as-cast. Pinning it at
+        H₀ made the gel shed water at constant volume for up to half the desorption
+        window, and left dH/dt bounded in a different coordinate than dc_w/dt (which
+        physics.dc_w_dt already clamps at c_w_min/c_w_max), so the two states could
+        disagree about whether the gel was still drying.
+
+        No new parameter: Eq. 6 is dH/dt = dc_w/dt·(MW·H₀/ρ_sol), i.e. the gel's volume
+        changes by the volume of water it gains or loses. Integrating from (H₀, c_w,fab)
+        -- which run_daily_cycle pairs by construction -- and evaluating at the hydrate
+        floor gives H₀·[1 + (c_w_min − c_w,fab)·MW/ρ_sol]. For baseline LiCl that is
+        2.373 mm, 59.3% of H₀.
+
+        This is a bound on how thin, not a prediction: it extrapolates a relation
+        linearized about the fabrication state, and a real PAM network resists collapse
+        before the brine-volume argument says it must. The 1e-4 backstop is numerical
+        only -- U_gel = k/H divides by this -- and is unreachable for any real brine,
+        where the bracket stays above ~0.44 even at c_w_min = 0.
+
+        Capped at H₀: for a salt whose hydrate floor sits *above* the fabrication water
+        content (CaCl₂ at these loadings), the relation would put the floor above the
+        as-cast thickness, and ``max(h0, h_min)`` in the integrators would silently
+        inflate the initial gel. Such a salt simply cannot dry below its fabrication
+        state, so H₀ is the floor and behaviour is unchanged from before this bound
+        existed.
+        """
+        mass = self.mass_params()
+        shrink = 1.0 + (
+            (mass.c_w_min_mol_m3 - initial_loading(self))
+            * WATER_MOLAR_MASS_KG_MOL
+            / mass.rho_solution_kg_m3
+        )
+        return min(self.hydrogel_thickness_m, max(1e-4, self.hydrogel_thickness_m * shrink))
 
     def mass_params(self) -> MassTransferParams:
         s = self.salt()
@@ -157,9 +226,10 @@ class SystemConfig:
                 if math.isfinite(fw_blend):
                     fw = fw_blend
         c_s = salt_molarity_from_composite(
-            self.salt_to_polymer_ratio, self.hydrogel_density_kg_m3, fw
+            self.salt_loading, self.hydrogel_density_kg_m3, fw
         )
         return MassTransferParams(
+            p_atm_pa=self.site_pressure_pa(),
             g_conv_m_s=self.g_conv_m_s,
             h0_ref_m=self.hydrogel_thickness_m,
             vapor_gap_m=self.vapor_gap_m,
@@ -183,27 +253,47 @@ class SystemConfig:
             ),
             salt_name=s.name,
             formula_weight_g_mol=fw,
-            salt_to_polymer_ratio=self.salt_to_polymer_ratio,
+            salt_loading=self.salt_loading,
             salt_weight_factor=self.salt_weight_factor,
             blend_weights=blend_weights,
             use_dvs_cap=self.complex is None,
+            instant_equilibrium=self.instant_equilibrium,
         )
 
     def thermal_params(self) -> SystemThermalParams:
         if self.thermal is not None:
-            return self.thermal
+            # site_elevation_m is the single source of truth for pressure, so an explicit
+            # thermal override gets it applied rather than returned untouched. site_sweep's
+            # build_system_config ALWAYS passes a thermal, so returning it as-is ran every
+            # site in the global sweep at sea level no matter what elevation was set.
+            return dataclasses.replace(self.thermal, p_atm_pa=self.site_pressure_pa())
         if self.salt_name == "LiCl":
             # Wilson Table S3 COMSOL value (2320 kJ/kg), not the broader Díaz-Marín
             # literature range in salt_heat_of_desorption.csv (~2850 kJ/kg).
             h_des = H_DES_J_PER_KG
         else:
             h_des = self.salt().h_des_j_per_kg
+        # Isosteric h_des(xi, T) needs a Conde-backed isotherm; anything else keeps the
+        # tabulated constant. Blends are excluded: ZSR gives a mixture a_w, and the
+        # per-salt Clausius-Clapeyron slope is not defined on it.
+        # Restricted to the simple path on purpose. Complex mode routes a_w through the
+        # ZSR mixture (even for a single-weight "blend"), and the per-salt
+        # Clausius-Clapeyron slope is not defined on a mixture activity -- taking it from
+        # self.salt_name there would silently pair LiCl's slope with, say, MgCl2's a_w.
+        h_des_salt = (
+            self.salt_name
+            if self.h_des_mode == "isosteric"
+            and self.complex is None
+            and self.salt_name in ISOSTERIC_H_DES_SALTS
+            else None
+        )
         if self.complex is not None:
             cx = self.complex
             # B1 puts eps_abs_ir under continuous optimizer control (it is a priced
             # coating choice, not a fixed case flag); B2 sets the stack's
             # transmittance and pane count.
             return SystemThermalParams(
+                p_atm_pa=self.site_pressure_pa(),
                 insulation_gap_m=self.insulation_gap_m,
                 vapor_gap_m=self.vapor_gap_m,
                 eps_abs=EPS_ABS,
@@ -212,6 +302,7 @@ class SystemConfig:
                 eps_al=EPS_AL,
                 tilt_deg=self.tilt_deg,
                 h_des_j_per_kg=h_des,
+                h_des_salt_name=h_des_salt,
                 eps_abs_ir=cx.eps_abs_ir,
                 has_glass=cx.has_glass,
                 n_glazing_panes=cx.n_glazing_panes,
@@ -221,6 +312,7 @@ class SystemConfig:
         # is Case 2 (selective surface). Pass thermal=SystemThermalParams(eps_abs_ir=1.0,
         # eps_glass_ir=1.0) for Case 1's original Wilson blackbody/cavity approximation.
         return SystemThermalParams(
+            p_atm_pa=self.site_pressure_pa(),
             insulation_gap_m=self.insulation_gap_m,
             vapor_gap_m=self.vapor_gap_m,
             eps_abs=EPS_ABS,
@@ -229,6 +321,7 @@ class SystemConfig:
             eps_al=EPS_AL,
             tilt_deg=self.tilt_deg,
             h_des_j_per_kg=h_des,
+            h_des_salt_name=h_des_salt,
         )
 
     def condenser_thermal_mass_j_m2_k(self) -> float:
@@ -240,8 +333,13 @@ class SystemConfig:
 
     @classmethod
     def comsol_table_s3(cls, **overrides: object) -> SystemConfig:
-        """Wilson Table S3 / Note S1 COMSOL SAWH system defaults."""
-        return cls(**overrides)  # type: ignore[arg-type]
+        """Wilson Table S3 / Note S1 COMSOL SAWH system defaults.
+
+        Pins ``h_des_mode="constant"``: Table S3 is a recreation target, and its
+        2320 kJ/kg is the number COMSOL was actually run with."""
+        base: dict[str, object] = {"h_des_mode": "constant"}
+        base.update(overrides)
+        return cls(**base)  # type: ignore[arg-type]
 
     @classmethod
     def baseline(cls, **overrides: object) -> SystemConfig:
@@ -267,7 +365,7 @@ class SystemConfig:
 
 CyclePhase = Literal["absorption", "desorption"]
 
-_M_DES_BRACKET_MAX = 0.01  # kg/m²/s upper search bound for brentq bracket
+_M_DES_BRACKET_MAX = _pv("Desorption mass-flux bracket upper")  # kg/m²/s brentq bracket
 
 
 @dataclass(frozen=True, slots=True)
@@ -310,6 +408,17 @@ def _m_des_calc(
         h_m=h_m,
         t_guess=t_guess,
         vapor_gap_m=vapor_gap_m,
+        brine_salt_fraction=(
+            None
+            if thermal.h_des_salt_name is None
+            else brine_salt_fraction_from_c_w(
+                loading,
+                c_s_mol_m3=mass.c_s_mol_m3,
+                h0_ref_m=mass.h0_ref_m,
+                formula_weight_g_mol=mass.formula_weight_g_mol,
+                salt_weight_factor=mass.salt_weight_factor,
+            )
+        ),
     )
     dc, dh, m_calc = evaluate_mass_rates(
         loading=loading,
@@ -355,8 +464,8 @@ def evaluate_coupled_rates(
     if phase == "absorption":
         # Note S1 Eq. S1: fast gel thermal storage → T_gel ≈ T_amb during open absorption
         t_gel = t_amb_c
-        h_conv_g = hollands_vapor_gap_h_conv_w_m2_k(
-            gap_eff, t_gel, t_cond_c, tilt_deg=thermal.tilt_deg
+        h_conv_g = vapor_gap_h_conv_w_m2_k(
+            gap_eff, t_gel, t_cond_c, tilt_deg=thermal.tilt_deg, p_atm_pa=thermal.p_atm_pa
         ) if gap_eff > 0.0 else 0.0
         state = ThermalState(
             t_gel_c=t_gel,
@@ -437,7 +546,11 @@ def evaluate_coupled_rates(
     elif m_at_zero <= 0.0:
         m_des, t_gel, dc, state = 0.0, t_gel0, dc0, state0
     else:
-        hi = max(m_at_zero * 2.0, 1e-8)
+        # Cap at the documented search bound. Without it, instant_equilibrium's
+        # 1e6-scaled g makes m_at_zero ~1e4 kg/s/m2, and brentq on a bracket seven
+        # orders wide -- flat at -m over all but its first 1e-4 -- returns a point
+        # nowhere near the real root, which then feeds the ODE a nonsense rate.
+        hi = min(max(m_at_zero * 2.0, 1e-8), _M_DES_BRACKET_MAX)
         while hi < _M_DES_BRACKET_MAX and _m_des_residual(hi) > 0.0:
             hi *= 2.0
         if _m_des_residual(hi) >= 0.0:
@@ -462,6 +575,25 @@ def evaluate_coupled_rates(
                     config=config,
                     t_guess=(state0.t_gel_c, state0.t_abs_c, state0.t_glass_c),
                 )
+                # brentq only guarantees a SIGN CHANGE in [0, hi], and with
+                # instant_equilibrium's 1e6-scaled g this residual has a jump: m_calc is
+                # enormous below the crossing and plummets past it. Bisection then returns
+                # the jump rather than a root, and m_des here -- which is m_calc at that
+                # point, not m_star -- came back at 2.4e3 kg/s/m2 against a 1e-2 bracket.
+                # A "root" the bracket cannot contain is not a root. Feeding it to the ODE
+                # integrates a yield the gel inventory cannot support (446 L/m2 against a
+                # 3.9 L/m2 c_w drop, which is what _integrate_desorption's conservation
+                # guard then trips on), so take the same no-desorption fallback the other
+                # failure branches here use.
+                if not math.isfinite(m_des) or m_des > hi * (1.0 + 1e-6):
+                    # dc = 0 too, NOT dc0. The sibling fallbacks above can keep dc0 because
+                    # they only fire when the gel is not desorbing anyway (m_at_zero <= 0),
+                    # so dc0 is already consistent with m_des = 0. Here dc0 is strongly
+                    # negative, and keeping it drains the gel while crediting no yield --
+                    # water vanishes. At 4000 m that opened a 5% gap between the yield
+                    # integral and the c_w inventory and tripped _integrate_desorption's
+                    # conservation guard. Freezing both is the self-consistent state.
+                    m_des, t_gel, dc, state = 0.0, t_gel0, 0.0, state0
 
     _, dh, _ = evaluate_mass_rates(
         loading=c_w,
@@ -483,6 +615,12 @@ def evaluate_coupled_rates(
     if h_amb_cond is None and config.complex is not None:
         h_amb_cond = config.complex.condenser_h_amb_w_m2_k()
     h_amb_for_cond = h_amb if h_amb_cond is None else h_amb_cond
+    # Same thinner-air derate _residuals applies to the absorber side. The condenser is
+    # where it bites hardest: it rejects the latent load to ambient, so weaker convection
+    # means a hotter condenser and a smaller desorption driving force -- the offset that
+    # stops elevation's D_air gain from being one-sided. A fan-forced condenser is not
+    # exempt: the fan sets air SPEED, and thin air still carries less heat per m/s.
+    h_amb_for_cond = h_amb_for_cond * h_amb_density_factor(t_amb_c, p_atm_pa=thermal.p_atm_pa)
     # Complex mode (B3) supplies fin geometry, which derates the added fin area by
     # its efficiency; without it this stays Wilson's ideal A_r * h_amb.
     cx = config.complex
@@ -513,9 +651,12 @@ def evaluate_coupled_rates(
 
 # --- SciPy LSODA integration for Wilson half-cycles (coupled Eqs. 1-6 + Eq. 2) ---
 
-_ODE_RTOL = 1e-4
-_ODE_ATOL = 1e-7
+_ODE_RTOL = _pv("ODE relative tolerance")
+_ODE_ATOL = _pv("ODE absolute tolerance")
 WATER_BALANCE_TOL: float = _pv("Desorption water-balance closure tolerance")
+INSTANT_EQUILIBRIUM_RESIDUAL_TOL: float = _pv(
+    "Instant-equilibrium residual driving-force tolerance"
+)
 
 
 @dataclass
@@ -534,6 +675,10 @@ class PhaseResult:
     # Raw RHS rate at each output point, kept only for the conservation_drift_series
     # self-consistency check below -- not used by anything upstream.
     dT_cond_dt: np.ndarray | None = None
+    # Cumulative collected water along the trajectory, the integrated W state. Desorption
+    # only; None from absorption, which collects nothing. Plots read this rather than
+    # re-trapezoiding m_des, so the curve and water_collected_kg_m2 agree exactly.
+    water_cumulative_kg_m2: np.ndarray | None = None
 
 
 def _profile_index(t: float, dt_s: float, n: int) -> int:
@@ -552,7 +697,7 @@ def _integrate_absorption(
     dt = profile.dt_s
     t_span = (0.0, dt * n)
     t_eval = np.linspace(0.0, t_span[1], n + 1)
-    h_min = config.hydrogel_thickness_m
+    h_min = config.hydrogel_floor_thickness_m()
     # Gel cannot swell into the condenser; keep ≥7 mm effective gap (Wilson §2.2).
     h_max = max(
         config.vapor_gap_m - VAPOR_GAP_TRANSPORT_MIN_M,
@@ -608,6 +753,7 @@ def _integrate_absorption(
         raise RuntimeError(f"Absorption integration failed: {sol.message}")
 
     t_gel_hist: list[float] = []
+    dc_w_dt_hist: list[float] = []
     guess: tuple[float, float, float] | None = None
     for k in range(len(sol.t)):
         i = _profile_index(float(sol.t[k]), dt, n)
@@ -631,6 +777,51 @@ def _integrate_absorption(
         )
         guess = _thermal_guess(rates.thermal)
         t_gel_hist.append(rates.t_gel_c)
+        dc_w_dt_hist.append(rates.dc_w_dt)
+
+    # Absorption's counterpart to _integrate_desorption's water-balance guard. There is
+    # no independent yield integral on this half-cycle (nothing is condensed), so the
+    # invariant is the weaker but still binding one: the trapezoid of the dc_w/dt the
+    # solver claims it integrated must match the c_w it actually returned. Costs no extra
+    # RHS evaluations -- the loop above already computes every term.
+    #
+    # This half was never the one that broke: T_gel is just T_amb here, so there is no
+    # thermal Newton solve and none of desorption's non-differentiable kink. That is an
+    # argument, not a check, and it is the same argument that would have sounded fine for
+    # desorption before Radau was tried on it -- hence the check. Measured closure on a
+    # sound integration is <=2.5e-4 across RH 0-0.95, H0 1-10 mm and the ZSR blends, two
+    # orders inside WATER_BALANCE_TOL.
+    #
+    # instant_equilibrium gets a different invariant rather than no invariant. It scales g
+    # by 1e6, and absorption *starts* off-equilibrium (gel at the fabrication RH, air at
+    # the profile RH), so dc_w/dt spikes and decays entirely inside the first output
+    # interval; the trapezoid on the reporting grid cannot resolve that and reads ~2.6e3x
+    # high while the integration itself is fine. What that mode asserts instead is its own
+    # definition -- the gel ends at equilibrium, so the residual driving force is zero.
+    # That needs no closed-form target for the equilibrium c_w, which matters because
+    # which ceiling binds (brine isotherm vs DVS uptake cap) changes with RH: at RH 0.8
+    # the DVS cap sets the endpoint, at 0.95 the brine isotherm does.
+    # Desorption needs neither special case: it starts from where absorption ended, i.e.
+    # already at equilibrium, so it has no opening spike.
+    if config.instant_equilibrium:
+        residual, opening = abs(dc_w_dt_hist[-1]), abs(dc_w_dt_hist[0])
+        if residual > INSTANT_EQUILIBRIUM_RESIDUAL_TOL * max(opening, 1e-30):
+            raise RuntimeError(
+                f"Instant-equilibrium absorption did not reach equilibrium: |dc_w/dt| "
+                f"{residual:.3e} mol/m3/s at end vs {opening:.3e} at start "
+                f"(ratio {residual / max(opening, 1e-30):.3e}, "
+                f"tol {INSTANT_EQUILIBRIUM_RESIDUAL_TOL:.0e}); "
+                f"c_w {sol.y[0, 0]:.1f} -> {sol.y[0, -1]:.1f} mol/m3"
+            )
+    else:
+        state_change = float(sol.y[0, -1] - sol.y[0, 0])
+        rhs_integral = float(np.trapezoid(dc_w_dt_hist, sol.t))
+        if abs(rhs_integral - state_change) > WATER_BALANCE_TOL * max(abs(state_change), 1e-12):
+            raise RuntimeError(
+                f"Absorption integration did not conserve water: dc_w/dt integral "
+                f"{rhs_integral:.1f} mol/m3 vs c_w state change {state_change:.1f} mol/m3 "
+                f"(c_w {sol.y[0, 0]:.1f} -> {sol.y[0, -1]:.1f} mol/m3)"
+            )
 
     c_w_out = np.asarray(sol.y[0], dtype=float)
     h_out = np.clip(sol.y[1], h_min, h_max)
@@ -660,7 +851,7 @@ def _integrate_desorption(
     dt = profile.dt_s
     t_span = (0.0, dt * n)
     t_eval = np.linspace(0.0, t_span[1], n + 1)
-    h_min = config.hydrogel_thickness_m
+    h_min = config.hydrogel_floor_thickness_m()
     surface_ic = config.desorption_surface_ic_c()
     if surface_ic is not None:
         t_gel_ic, t_abs_ic, t_glass_ic, t_cond_ic = (
@@ -708,22 +899,46 @@ def _integrate_desorption(
         dc = min(0.0, rates.dc_w_dt)
         dh = min(0.0, dh)
         t_guess = _thermal_guess(rates.thermal)
+        # Cumulative collected water as a state, dW/dt = m_des, mirroring the JAX backend's
+        # y = [c_w, H, T_cond, W]. Derived from the CLIPPED dc rather than from
+        # rates.m_des_kg_s_m2, so W integrates exactly the rate c_w integrates and the two
+        # cannot disagree by construction.
+        dw = m_des_kg_s_m2_from_dc_w(dc, h0_ref_m=mass.h0_ref_m)
         if ambient_condenser:
-            return np.array([dc, dh])
-        return np.array([dc, dh, rates.dT_cond_dt])
+            return np.array([dc, dh, dw])
+        return np.array([dc, dh, rates.dT_cond_dt, dw])
 
+    # W starts at 0: it accumulates this phase's yield only.
+    w_idx = 2 if ambient_condenser else 3
     y0 = (
-        np.array([c_w0, max(h0, h_min)])
+        np.array([c_w0, max(h0, h_min), 0.0])
         if ambient_condenser
-        else np.array([c_w0, max(h0, h_min), t_cond0])
+        else np.array([c_w0, max(h0, h_min), t_cond0, 0.0])
     )
-    # LSODA, not Radau: this RHS is not differentiable where the thermal Newton solve
-    # clamps T_gel at TEMP_CLAMP_HI_C (dc_w/dt kinks ~15x, then goes exactly flat in
-    # T_cond above the clamp). Implicit methods form a Jacobian across that kink and
-    # diverge -- Radau and BDF both threw the state to c_w ~ -1e5..-2e6 mol/m3 while
-    # returning success=True, silently understating the yield by 67-99%. Everything
-    # that does not build a Jacobian agrees with the JAX backend to <=0.4%: LSODA (it
-    # stays in non-stiff Adams mode here), RK45, DOP853, and diffrax's Tsit5.
+    # LSODA, not Radau. The obstacle is a step discontinuity in the RHS itself, at the
+    # hydrate floor: dc_w_dt returns exactly 0.0 once c_w reaches params.c_w_min_mol_m3
+    # (physics.py, the `c_w <= c_w_min and rate < 0` clip), so crossing the floor jumps
+    # dc_w/dt from a finite negative value to zero with nothing in between -- measured
+    # -0.1998 -> 0.0 across 0.01 mol/m3, i.e. 1e-6 relative. A Jacobian there is
+    # meaningless: the finite difference reports -0.2 or 0 purely by which side the
+    # perturbation lands on. Implicit methods diverge or stall; the 2-pane evacuated case,
+    # whose trajectory reaches the floor exactly, fails on Radau with "required step size
+    # is less than spacing between numbers".
+    #
+    # This is not about T_gel. An earlier version of this comment blamed the thermal
+    # Newton solve clamping T_gel at TEMP_CLAMP_HI_C, which was true when that clamp sat
+    # at 120 C; it is now 373.9 C (the Saul-Wagner critical-point ceiling) and never
+    # binds -- the hottest configuration here reaches 158 C. The salt isotherm caps that
+    # *are* crossed (LiCl BET at 155.5 C, Conde at 100 C for CaCl2) are only C1 breaks:
+    # dc_w/dt stays continuous across them and its slope bends ~9%, which implicit
+    # methods handle fine. Radau reproduces LSODA to the last digit on any case whose
+    # trajectory stays off the floor -- test_implicit_and_explicit_solvers_agree_off_the_
+    # hydrate_floor pins that, and is the control that isolates the floor as the cause.
+    #
+    # Everything that does not build a Jacobian agrees with the JAX backend to <=0.4%:
+    # LSODA (it stays in non-stiff Adams mode here), RK45, DOP853, and diffrax's Tsit5.
+    # LSODA switching to its own BDF mode would hit the same wall, which is what the
+    # water-balance guard below exists to catch rather than assume away.
     sol = solve_ivp(
         rhs,
         t_span,
@@ -783,17 +998,25 @@ def _integrate_desorption(
         m_des_hist.append(rates.m_des_kg_s_m2)
         dT_cond_hist.append(rates.dT_cond_dt)
 
-    water = float(cumulative_desorption_yield_l_m2(sol.t, m_des_hist)[-1])
+    # Yield is the integrated W state, not a trapezoid over the sampled m_des history.
+    # The trapezoid was a second, coarser quadrature of the same flux, and it diverged from
+    # the c_w trajectory by ~5% on fast trajectories -- high-elevation sites (thin air =>
+    # more diffusivity and a better-insulated collector) desorb quickly enough that the
+    # sampled-history quadrature broke the 1% conservation tolerance below, on runs whose
+    # trajectories were fine. LSODA controls error on W as it does on any other state, so
+    # that error source is gone rather than tolerated.
+    water = float(sol.y[w_idx, -1])
 
-    # Every kg of water in the yield integral must have left the gel, so the trapezoid
-    # of m_des has to match the drop in c_w (both on the H0 basis -- Note S1's
-    # m_des = -dc_w/dt * MW * H0). Radau does not report failure on this RHS: the
-    # thermal Newton solve clamps T_gel at TEMP_CLAMP_HI_C, and where that binds
-    # dc_w/dt kinks ~15x and then goes exactly flat, so the implicit step gets a
-    # Jacobian inconsistent with its residual and can throw the state (observed:
-    # T_cond -> 1799 C, c_w -> -131000) while still returning success=True. The
-    # yield then freezes and is silently understated -- 67-99% low on the cases that
-    # trip it, vs <=0.09% trapezoid error when the integration is sound.
+    # The guard's role has changed with W. dW/dt is derived from the same clipped dc that
+    # c_w integrates, so this is now an invariant assertion (both states, one rate) rather
+    # than the cross-check between two independent quadratures it used to be: it still
+    # catches a thrown state or a basis mismatch, but it can no longer detect a quadrature
+    # error, because there is no second quadrature left to be wrong.
+    #
+    # Retained history, since it is what motivated the guard: Radau does not report failure
+    # on this RHS -- the floor discontinuity documented above gives the implicit step a
+    # Jacobian inconsistent with its residual, and it could throw the state (observed:
+    # T_cond -> 1799 C, c_w -> -131000) while still returning success=True.
     inventory_drop = float(sol.y[0, 0] - sol.y[0, -1]) * mass.h0_ref_m * WATER_MOLAR_MASS_KG_MOL
     if abs(water - inventory_drop) > WATER_BALANCE_TOL * max(abs(inventory_drop), 1e-12):
         t_cond_note = "" if ambient_condenser else f", T_cond -> {sol.y[2, -1]:.1f} C"
@@ -806,6 +1029,7 @@ def _integrate_desorption(
     c_w_out = np.asarray(sol.y[0], dtype=float)
     h_out = np.maximum(sol.y[1], h_min)
     return PhaseResult(
+        water_cumulative_kg_m2=np.asarray(sol.y[w_idx], dtype=float),
         time_s=sol.t,
         c_w=c_w_out,
         H=h_out,
@@ -964,6 +1188,14 @@ class DetailedSeries:
     relative_humidity: np.ndarray
     solar_w_m2: np.ndarray
     h_amb_w_m2_k: np.ndarray
+    # Desorption-only (NaN during absorption): the condenser/gel vapour-pressure ratio
+    # driving desorption, the brine activity at the current gel loading, their difference
+    # (the Eq. 5 driving force), and the salt's DRH at the gel temperature -- desorption
+    # stalls once c_r drops to DRH, since a_w cannot fall below it.
+    c_r: np.ndarray
+    a_w: np.ndarray
+    driving_force: np.ndarray
+    drh: np.ndarray
 
 
 def _phase_weather(
@@ -1004,7 +1236,7 @@ def detailed_series(
         abs_profile = profile.absorption
         n = len(abs_profile.temperature_c)
         dt = abs_profile.dt_s
-        h_min = config.hydrogel_thickness_m
+        h_min = config.hydrogel_floor_thickness_m()
         t_abs: list[float] = []
         t_glass: list[float] = []
         t_cond: list[float] = []
@@ -1059,7 +1291,7 @@ def detailed_series(
         des_profile = profile.desorption
         n = len(des_profile.temperature_c)
         dt = des_profile.dt_s
-        h_min = config.hydrogel_thickness_m
+        h_min = config.hydrogel_floor_thickness_m()
         t_abs: list[float] = []
         t_glass: list[float] = []
         guess: tuple[float, float, float] | None = None
@@ -1118,6 +1350,31 @@ def detailed_series(
         dtype=object,
     )
 
+    des_c_r = np.array(
+        [
+            concentration_ratio_desorption(float(tg), float(tc))
+            for tg, tc in zip(des_t_gel, des_t_cond)
+        ]
+    )
+    des_drh = np.array(
+        [deliquescence_rh(config.salt().name, float(tg)) for tg in des_t_gel]
+    )
+    des_mass = config.mass_params()
+    des_driving = np.array(
+        [
+            _mass_transfer_driving_force(
+                float(c),
+                t_gel_c=float(tg),
+                c_r=float(cr),
+                params=des_mass,
+                h_m=max(float(h), config.hydrogel_floor_thickness_m()),
+                phase="desorption",
+            )
+            for c, h, tg, cr in zip(des_res.c_w, des_res.H, des_t_gel, des_c_r)
+        ]
+    )
+    nan_abs = np.full(len(abs_res.time_s), np.nan)
+
     return DetailedSeries(
         time_s=time_s,
         phase=phase,
@@ -1130,6 +1387,10 @@ def detailed_series(
         relative_humidity=_join(abs_weather[1], des_weather[1]),
         solar_w_m2=_join(abs_weather[2], des_weather[2]),
         h_amb_w_m2_k=_join(abs_weather[3], des_weather[3]),
+        c_r=_join(nan_abs, des_c_r),
+        a_w=_join(nan_abs, des_c_r - des_driving),
+        driving_force=_join(nan_abs, des_driving),
+        drh=_join(nan_abs, des_drh),
     )
 
 
@@ -1150,6 +1411,10 @@ def write_detailed_csv(path: Path, series: DetailedSeries) -> None:
                 "relative_humidity",
                 "solar_w_m2",
                 "h_amb_w_m2_k",
+                "c_r",
+                "a_w",
+                "driving_force",
+                "drh",
             ]
         )
         for k in range(len(series.time_s)):
@@ -1166,6 +1431,10 @@ def write_detailed_csv(path: Path, series: DetailedSeries) -> None:
                     f"{float(series.relative_humidity[k]):.6f}",
                     f"{float(series.solar_w_m2[k]):.2f}",
                     f"{float(series.h_amb_w_m2_k[k]):.4f}",
+                    f"{float(series.c_r[k]):.6f}",
+                    f"{float(series.a_w[k]):.6f}",
+                    f"{float(series.driving_force[k]):.6f}",
+                    f"{float(series.drh[k]):.6f}",
                 ]
             )
 
@@ -1197,8 +1466,46 @@ def plot_detailed_diagnostics(
     )
     ax_t.axvline(phase_mark_h, color="k", linewidth=0.8, linestyle="--", alpha=0.45)
     ax_t.set_ylabel("Temperature (°C)")
-    ax_t.legend(loc="upper left", fontsize=8, ncol=2)
     ax_t.grid(True, alpha=0.3)
+
+    # c_r vs a_w vs DRH on an RH axis: the shaded c_r - a_w gap is the Eq. 5 driving
+    # force, and desorption stalls where c_r meets DRH.
+    ax_cr = ax_t.twinx()
+    ax_cr.plot(time_h, series.c_r * 100.0, color="#1b9e77", linewidth=1.6, label="c_r")
+    ax_cr.plot(
+        time_h,
+        series.a_w * 100.0,
+        color="#1b9e77",
+        linewidth=1.4,
+        linestyle="--",
+        label="a_w (gel brine)",
+    )
+    ax_cr.fill_between(
+        time_h,
+        series.a_w * 100.0,
+        series.c_r * 100.0,
+        color="#1b9e77",
+        alpha=0.15,
+        linewidth=0,
+        label="driving force (c_r − a_w)",
+    )
+    ax_cr.plot(
+        time_h,
+        series.drh * 100.0,
+        color="#1b9e77",
+        linewidth=1.4,
+        linestyle=":",
+        label="DRH (at T_gel)",
+    )
+    ax_cr.set_ylabel("RH (%)", color="#1b9e77")
+    ax_cr.tick_params(axis="y", labelcolor="#1b9e77")
+    # Autoscaled, not 0-100: c_r and DRH both sit in the low-RH corner, and the gap
+    # between them is the whole point.
+    ax_cr.set_ylim(bottom=0.0)
+
+    lines_l, labels_l = ax_t.get_legend_handles_labels()
+    lines_r, labels_r = ax_cr.get_legend_handles_labels()
+    ax_t.legend(lines_l + lines_r, labels_l + labels_r, loc="upper left", fontsize=8, ncol=2)
 
     ax_wx.plot(time_h, series.t_amb_c, color="#d95f02", linewidth=1.6, label="T_amb")
     ax_wx.axvline(phase_mark_h, color="k", linewidth=0.8, linestyle="--", alpha=0.45)
@@ -1294,8 +1601,12 @@ def water_inventory_series(
         ["absorption"] * len(w_abs) + ["desorption"] * (len(w_des) - 1),
         dtype=object,
     )
-    collected_des = cumulative_desorption_yield_l_m2(
-        des_res.time_s, des_res.m_des_kg_s_m2
+    # The integrated W state where available, so the plotted curve ends exactly on the
+    # reported yield; the trapezoid only as a fallback for hand-built PhaseResults.
+    collected_des = (
+        des_res.water_cumulative_kg_m2
+        if des_res.water_cumulative_kg_m2 is not None
+        else cumulative_desorption_yield_l_m2(des_res.time_s, des_res.m_des_kg_s_m2)
     )
     collected_water_l_m2 = np.zeros(len(time_s), dtype=float)
     collected_water_l_m2[len(w_abs) - 1 :] = collected_des
@@ -1356,6 +1667,83 @@ def conservation_drift_series(
     )
 
 
+# --- How hard the desorption one-way clamp is working.
+#
+# evaluate_mass_rates pins dc_w/dt <= 0 during desorption (physics.py). That clamp is
+# the correct quasi-steady limit, not a hack: the vapor gap holds only ~0.9 L/m2 x
+# 23 g/m3 ~ 0.9 g/m2 of vapor against daily yields of 1-4 kg/m2, and the model tracks
+# no gas-phase inventory, so unclamped reverse flow would draw on a reservoir that does
+# not exist and book the water with no counter-entry.
+#
+# What the clamp hides is that it binds at all -- and it binds at both ends of the
+# sealed window, where T_gel -> T_cond drives c_r -> 1 above any reachable a_w. Those
+# are hours the device is sealed at zero rate that could have been absorption hours, so
+# a widening window looks free to a schedule optimizer. ``discarded_l_m2`` is the
+# unbounded demand for that reverse flow: an upper bound on the re-absorption the clamp
+# refuses, since the real ceiling is the un-drained condensate film (Wilson's 131 g gel
+# loss vs. 130 mL collected puts that at ~13 g/m2, i.e. tens of times smaller).
+#
+# Reported as an uncertainty band, never subtracted -- same rule as the drift series.
+
+@dataclass(frozen=True, slots=True)
+class ReversalDiagnostics:
+    time_s: np.ndarray
+    driving: np.ndarray  # c_r - a_w at each point; > 0 means the gel would re-absorb
+    reversed_time_fraction: float  # share of the sealed window pinned at zero rate
+    discarded_l_m2: float  # upper bound on re-absorption the clamp discarded
+
+
+def reversal_diagnostics(
+    des_res: PhaseResult, *, config: SystemConfig
+) -> ReversalDiagnostics:
+    """Where and how much the desorption ``dc_w/dt <= 0`` clamp binds.
+
+    Recomputed from the stored trajectory rather than tallied inside the RHS: LSODA
+    evaluates the RHS at rejected and intermediate stages too, so an accumulator there
+    would count evaluations that never made it into the solution.
+    """
+    mass = config.mass_params()
+    h_min = config.hydrogel_floor_thickness_m()
+    assert des_res.t_cond_c is not None, "desorption result must carry condenser temps"
+
+    driving = np.zeros(len(des_res.time_s), dtype=float)
+    dc_discarded = np.zeros(len(des_res.time_s), dtype=float)
+    for k, (c, h, tg, tc) in enumerate(
+        zip(des_res.c_w, des_res.H, des_res.t_gel_c, des_res.t_cond_c)
+    ):
+        h_m = max(float(h), h_min)
+        c_r = concentration_ratio_desorption(float(tg), float(tc))
+        driving[k] = _mass_transfer_driving_force(
+            float(c), t_gel_c=float(tg), c_r=c_r, params=mass, h_m=h_m, phase="desorption"
+        )
+        dc = dc_w_dt(
+            float(c),
+            t_gel_c=float(tg),
+            c_r=c_r,
+            params=mass,
+            h_m=h_m,
+            phase="desorption",
+            t_cond_c=float(tc),
+        )
+        # Keyed on dc, not on driving: below the 7 mm transport cutoff g is zero, so the
+        # driving force can be positive while there is no rate for the clamp to bite on.
+        #
+        # Negated through the model's own flux conversion rather than multiplying by
+        # MW*H by hand: forward yield is booked on the H0 basis (Note S1's dH/dt ~ 0
+        # limit), so using the live thickness here would inflate this by up to h/H0 and
+        # make the bound incommensurable with the yield it qualifies.
+        dc_discarded[k] = m_des_kg_s_m2_from_dc_w(-dc, h0_ref_m=mass.h0_ref_m)
+
+    return ReversalDiagnostics(
+        time_s=des_res.time_s,
+        driving=driving,
+        reversed_time_fraction=float((dc_discarded > 0.0).mean()),
+        discarded_l_m2=float(
+            cumulative_desorption_yield_l_m2(des_res.time_s, dc_discarded)[-1]
+        ),
+    )
+
+
 def write_water_inventory_csv(path: Path, series: WaterInventorySeries) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="") as f:
@@ -1407,182 +1795,6 @@ def plot_water_inventory(
     fig.savefig(path, dpi=150)
     plt.close(fig)
 
-# --- Site-level salt feasibility and LCOW simulation helpers for global maps ---
-
-FAIL_LCO: float = 1e30
-
-
-@dataclass(slots=True)
-class SaltSimResult:
-    feasible: bool
-    lcow: float
-    yield_kg_m2: float
-    eta_thermal: float
-    gel_temperature_c: float
-    desorption_aw: float
-    failure_reason: str = ""
-
-
-def profile_diagnostics(profile: DailyWeatherProfile) -> dict[str, float]:
-    """Extract absorption/desorption extrema from a daily weather profile."""
-    rh_abs = max(profile.absorption.relative_humidity)
-    rh_des = max(profile.desorption.relative_humidity)
-    rh_high = max(rh_abs, rh_des)
-    rh_low = min(
-        min(profile.absorption.relative_humidity),
-        min(profile.desorption.relative_humidity),
-    )
-    temp_high = max(max(profile.desorption.temperature_c), max(profile.absorption.temperature_c))
-    temp_low = min(min(profile.desorption.temperature_c), min(profile.absorption.temperature_c))
-    solar_max = max(profile.desorption.solar_w_m2)
-    return {
-        "rh_high": float(rh_high),
-        "rh_low": float(rh_low),
-        "temp_high_c": float(temp_high),
-        "temp_low_c": float(temp_low),
-        "solar_irradiance_w_per_m2": float(solar_max),
-    }
-
-
-def passive_gel_temperature_c(profile: DailyWeatherProfile, config: SystemConfig) -> float:
-    """Passive sun-only gel temperature at peak desorption conditions."""
-    des = profile.desorption
-    i_peak = int(np.argmax(des.solar_w_m2))
-    thermal = config.thermal_params()
-    state = solve_steady_thermal(
-        t_cond_c=des.temperature_c[i_peak],
-        t_amb_c=des.temperature_c[i_peak],
-        q_solar_w_m2=des.solar_w_m2[i_peak],
-        m_des_kg_s_m2=0.0,
-        h_amb=des.h_amb_w_m2_k[i_peak],
-        params=thermal,
-        h_m=config.hydrogel_thickness_m,
-        vapor_gap_m=config.vapor_gap_m,
-    )
-    return float(state.t_gel_c)
-
-
-def salt_climate_feasible(
-    salt: SaltProperties,
-    rh_abs: float,
-    t_cond_c: float,
-    t_gel_c: float,
-) -> tuple[bool, str]:
-    """Check DRH window on absorption RH and desorption water activity."""
-    if not (salt.rh_min <= rh_abs <= salt.rh_max):
-        return False, f"absorption RH {rh_abs:.3f} outside [{salt.rh_min}, {salt.rh_max}]"
-    aw_des = desorption_water_activity(t_cond_c, t_gel_c)
-    if not math.isfinite(aw_des):
-        return False, "desorption a_w undefined"
-    if not (salt.rh_min <= aw_des <= salt.rh_max):
-        return False, f"desorption a_w {aw_des:.3f} outside [{salt.rh_min}, {salt.rh_max}]"
-    return True, ""
-
-
-def simulate_salt_lcow(
-    profile: DailyWeatherProfile,
-    config: SystemConfig,
-    econ: LCOEconomicParams | None = None,
-    *,
-    rh_abs: float | None = None,
-    skip_feasibility: bool = False,
-    cyclic_initial: bool = True,
-    cyclic_warmup_cycles: int = 1,
-    verbose: bool = True,
-) -> SaltSimResult:
-    """Run one cyclic daily simulation and return LCOW plus diagnostics."""
-    econ = econ or LCOEconomicParams()
-    salt = get_salt(config.salt_name)
-    diag = profile_diagnostics(profile)
-    rh_uptake = rh_abs if rh_abs is not None else diag["rh_high"]
-    t_cond = diag["temp_high_c"]
-    t_gel_passive = passive_gel_temperature_c(profile, config)
-
-    if not skip_feasibility:
-        ok, reason = salt_climate_feasible(salt, rh_uptake, t_cond, t_gel_passive)
-        if not ok:
-            return SaltSimResult(
-                feasible=False,
-                lcow=FAIL_LCO,
-                yield_kg_m2=float("nan"),
-                eta_thermal=float("nan"),
-                gel_temperature_c=t_gel_passive,
-                desorption_aw=desorption_water_activity(t_cond, t_gel_passive),
-                failure_reason=reason,
-            )
-
-    if verbose:
-        if cyclic_initial:
-            msg = (
-                f"running ODE ({cyclic_warmup_cycles} warmup day(s) + 1 reporting day, "
-                f"~30–90s/salt)…"
-            )
-        else:
-            msg = "running ODE (1 day, ~30s/salt)…"
-        print(msg, end="", flush=True)
-
-    try:
-        yield_kg, eta, _, des_res = run_daily_cycle(
-            profile,
-            config,
-            cyclic_initial=cyclic_initial,
-            cyclic_warmup_cycles=cyclic_warmup_cycles,
-        )
-    except Exception as exc:
-        return SaltSimResult(
-            feasible=False,
-            lcow=FAIL_LCO,
-            yield_kg_m2=float("nan"),
-            eta_thermal=float("nan"),
-            gel_temperature_c=t_gel_passive,
-            desorption_aw=desorption_water_activity(t_cond, t_gel_passive),
-            failure_reason=str(exc).split("\n", 1)[0][:240],
-        )
-
-    if not math.isfinite(yield_kg) or yield_kg <= 0.0:
-        t_gel = float(np.mean(des_res.t_gel_c)) if len(des_res.t_gel_c) else t_gel_passive
-        t_cond_mean = float(np.mean(des_res.t_cond_c)) if des_res.t_cond_c is not None else t_cond
-        return SaltSimResult(
-            feasible=False,
-            lcow=FAIL_LCO,
-            yield_kg_m2=max(0.0, yield_kg),
-            eta_thermal=eta,
-            gel_temperature_c=t_gel,
-            desorption_aw=desorption_water_activity(t_cond_mean, t_gel),
-            failure_reason="zero or invalid yield",
-        )
-
-    lcow = lcow_from_daily_yield(
-        yield_kg,
-        salt_name=config.salt_name,
-        salt_to_polymer_ratio=config.salt_to_polymer_ratio,
-        hydrogel_thickness_m=config.hydrogel_thickness_m,
-        econ=econ,
-    )
-    t_gel = float(np.mean(des_res.t_gel_c))
-    t_cond_mean = float(np.mean(des_res.t_cond_c)) if des_res.t_cond_c is not None else t_cond
-    aw_des = desorption_water_activity(t_cond_mean, t_gel)
-
-    if not math.isfinite(lcow) or lcow <= 0.0:
-        return SaltSimResult(
-            feasible=False,
-            lcow=FAIL_LCO,
-            yield_kg_m2=yield_kg,
-            eta_thermal=eta,
-            gel_temperature_c=t_gel,
-            desorption_aw=aw_des,
-            failure_reason="invalid LCOW",
-        )
-
-    return SaltSimResult(
-        feasible=True,
-        lcow=lcow,
-        yield_kg_m2=yield_kg,
-        eta_thermal=eta,
-        gel_temperature_c=t_gel,
-        desorption_aw=aw_des,
-    )
-
 # --- Annual yield aggregation over real weather days ---
 
 @dataclass(frozen=True, slots=True)
@@ -1613,6 +1825,11 @@ class DailySimulationRecord:
     t_glass_peak_c: float
     t_cond_peak_c: float
     t_gel_peak_c: float
+    # Desorption dc_w/dt <= 0 clamp, per day (see reversal_diagnostics). Carried on
+    # every row rather than a run-level summary because the clamp binds seasonally --
+    # a year's mean would hide the winter days where the sealed window overruns worst.
+    clamp_reversed_frac: float
+    clamp_discarded_l_m2: float
 
 
 DAILY_SUMMARY_COLUMNS: tuple[str, ...] = (
@@ -1633,6 +1850,8 @@ DAILY_SUMMARY_COLUMNS: tuple[str, ...] = (
     "t_glass_peak_c",
     "t_cond_peak_c",
     "t_gel_peak_c",
+    "clamp_reversed_frac",
+    "clamp_discarded_l_m2",
 )
 
 
@@ -1665,6 +1884,7 @@ def simulate_annual_year(
         )
         detailed = detailed_series(profile, abs_res, des_res, config)
         inventory = water_inventory_series(abs_res, des_res, config=config)
+        reversal = reversal_diagnostics(des_res, config=config)
         weather = day_weather_stats(day_df)
 
         abs_mask = inventory.time_s <= inventory.absorption_end_s + 1e-9
@@ -1691,6 +1911,8 @@ def simulate_annual_year(
             t_glass_peak_c=float(detailed.t_glass_c.max()),
             t_cond_peak_c=float(detailed.t_cond_c.max()),
             t_gel_peak_c=float(detailed.t_gel_c.max()),
+            clamp_reversed_frac=reversal.reversed_time_fraction,
+            clamp_discarded_l_m2=reversal.discarded_l_m2,
         )
         return record, cycle_end_state(des_res), detailed, inventory
 
@@ -1762,5 +1984,7 @@ def write_daily_summary_csv(
                     "t_glass_peak_c": f"{rec.t_glass_peak_c:.4f}",
                     "t_cond_peak_c": f"{rec.t_cond_peak_c:.4f}",
                     "t_gel_peak_c": f"{rec.t_gel_peak_c:.4f}",
+                    "clamp_reversed_frac": f"{rec.clamp_reversed_frac:.6f}",
+                    "clamp_discarded_l_m2": f"{rec.clamp_discarded_l_m2:.6f}",
                 }
             )

@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import dataclasses
 from dataclasses import dataclass, replace
 from datetime import date
 from pathlib import Path
@@ -35,6 +36,7 @@ from solar_lumped.weather import (
     baseline_initial_c_w,
     baseline_profile,
     real_day_profile,
+    real_site_elevation_m,
     replay_profile,
 )
 from solar_lumped.physics import TILT_DEG
@@ -62,7 +64,7 @@ def _initial_loading_from_water_l_m2(water_l_m2: float, config: SystemConfig) ->
 def _config_overrides(config: SystemConfig) -> dict:
     out = {
         "salt_name": config.salt_name,
-        "salt_to_polymer_ratio": config.salt_to_polymer_ratio,
+        "salt_loading": config.salt_loading,
         "hydrogel_thickness_m": config.hydrogel_thickness_m,
         "vapor_gap_m": config.vapor_gap_m,
         "insulation_gap_m": config.insulation_gap_m,
@@ -108,6 +110,7 @@ def build_system_config(
     tilt_deg: float = 30.0,
     fin_area_ratio: float = 7.1,
     g_conv_m_s: float | None = None,
+    site_elevation_m: float = 0.0,
 ) -> SystemConfig:
     """Construct a ``SystemConfig`` (shared by this CLI's ``_build_config`` and
     ``analysis/performance/physics/run_annual.py``).
@@ -118,12 +121,13 @@ def build_system_config(
     get_salt(salt)
     kwargs: dict[str, object] = {
         "salt_name": salt,
-        "salt_to_polymer_ratio": salt_loading,
+        "salt_loading": salt_loading,
         "hydrogel_thickness_m": hydrogel_thickness_mm * 1e-3,
         "vapor_gap_m": vapor_gap_mm * 1e-3,
         "insulation_gap_m": insulation_gap_mm * 1e-3,
         "tilt_deg": tilt_deg,
         "fin_area_ratio": fin_area_ratio,
+        "site_elevation_m": site_elevation_m,
     }
     if g_conv_m_s is not None:
         kwargs["g_conv_m_s"] = g_conv_m_s
@@ -153,7 +157,7 @@ class HydrogelChamberParams:
     """Open-chamber hydrogel kinetics (Díaz-Marín Eqs. 5 + 8); no SAWH system."""
 
     salt_name: str
-    salt_to_polymer_ratio: float
+    salt_loading: float
     h0_m: float
     g_conv_m_s: float
     c_s_mol_m3: float
@@ -189,7 +193,7 @@ def build_hydrogel_chamber_params(
         )
     return HydrogelChamberParams(
         salt_name=salt,
-        salt_to_polymer_ratio=salt_loading,
+        salt_loading=salt_loading,
         h0_m=h0_m,
         g_conv_m_s=g_conv_m_s,
         c_s_mol_m3=c_s,
@@ -212,7 +216,7 @@ def chamber_equilibrium_c_w(
         temperature_c=temperature_c,
         salt_name=params.salt_name,
         formula_weight_g_mol=params.formula_weight_g_mol,
-        salt_to_polymer_ratio=params.salt_to_polymer_ratio,
+        salt_loading=params.salt_loading,
         h0_ref_m=params.h0_m,
     )
 
@@ -222,7 +226,7 @@ def _dry_uptake_g_g(c_w: float, params: HydrogelChamberParams) -> float:
     h = params.h0_m
     mass_water = max(0.0, c_w) * h * WATER_MOLAR_MASS_KG_MOL
     mass_salt = params.c_s_mol_m3 * h * params.formula_weight_g_mol / 1000.0
-    mass_polymer = mass_salt / max(params.salt_to_polymer_ratio, 1e-9)
+    mass_polymer = mass_salt / max(params.salt_loading, 1e-9)
     dry_mass = mass_salt + mass_polymer
     if dry_mass <= 0.0:
         return 0.0
@@ -254,7 +258,7 @@ def chamber_dc_w_dt(
         temperature_c=temperature_c,
         salt_name=params.salt_name,
         formula_weight_g_mol=params.formula_weight_g_mol,
-        salt_to_polymer_ratio=params.salt_to_polymer_ratio,
+        salt_loading=params.salt_loading,
         h0_ref_m=params.h0_m,
     )
     if not np.isfinite(aw):
@@ -610,6 +614,15 @@ def run_solar_simulation(
             args.day,
             cache_dir=args.cache_dir,
         )
+        # Only --weather-mode real gets its elevation from the feed. The replay modes are
+        # Antofagasta and Cambridge, both effectively at sea level, so their pinned
+        # profiles already sit at the 0.0 default.
+        config = dataclasses.replace(
+            config,
+            site_elevation_m=real_site_elevation_m(
+                args.lat, args.lon, args.year, cache_dir=args.cache_dir
+            ),
+        )
         day_str = args.day.isoformat()
         inventory_note = (
             f" (cycled initial state; real weather for {day_str}; Aitken-converged steady state)"
@@ -636,7 +649,7 @@ def run_solar_simulation(
     lcow = lcow_from_daily_yield(
         yield_kg,
         salt_name=config.salt_name,
-        salt_to_polymer_ratio=config.salt_to_polymer_ratio,
+        salt_loading=config.salt_loading,
         hydrogel_thickness_m=config.hydrogel_thickness_m,
         econ=econ,
         simplified=simplified,
@@ -644,7 +657,7 @@ def run_solar_simulation(
     breakdown = lcow_cost_breakdown_from_daily_yield(
         yield_kg,
         salt_name=config.salt_name,
-        salt_to_polymer_ratio=config.salt_to_polymer_ratio,
+        salt_loading=config.salt_loading,
         hydrogel_thickness_m=config.hydrogel_thickness_m,
         econ=econ,
         simplified=simplified,

@@ -26,7 +26,7 @@ system design parameters, and report water yield + thermal efficiency.**
   hydrogel thickness (1.0/3.25/5.5/7.75/10.0 mm), absorber solar absorptivity
   `eps_abs` (0.85/0.90/0.95), glass transmittance `tau_glass` (0.80/0.85/0.90),
   condenser fin area ratio (3.0/7.1/12.0).
-- **Fixed**: salt = LiCl, salt:polymer ratio = 4.0, insulation gap = 5mm, vapor
+- **Fixed**: salt = LiCl, salt loading = 4.0, insulation gap = 5mm, vapor
   gap = 40mm, tilt = 35°, `h_amb` = 10 W/m²K (flat constant).
 - **Time resolution**: 12 monthly representative mean days per site
   (day-weighted), each solved to its steady periodic state via Aitken Δ²

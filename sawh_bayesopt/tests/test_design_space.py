@@ -27,9 +27,13 @@ def test_to_system_config_kwargs_maps_in_order():
     # Every case (including the default, "case2") now gets an explicit
     # "thermal" override -- see design_space.py::CASE_EPS_IR. The condenser mode is
     # always passed explicitly rather than left to SystemConfig's default, so a
-    # sweep cannot silently fall back to the ODE condenser.
-    assert list(kwargs.keys()) == [*VAR_ORDER, "condenser_tracks_ambient", "thermal"]
+    # sweep cannot silently fall back to the ODE condenser -- same for the sorption
+    # kinetics limit.
+    assert list(kwargs.keys()) == [
+        *VAR_ORDER, "condenser_tracks_ambient", "instant_equilibrium", "thermal"
+    ]
     assert kwargs["condenser_tracks_ambient"] is False
+    assert kwargs["instant_equilibrium"] is False
     assert kwargs[VAR_ORDER[0]] == 0.0
     assert kwargs[VAR_ORDER[-1]] == len(VAR_ORDER) - 1
 
@@ -62,7 +66,7 @@ def test_is_gap_degenerate_true_when_gap_too_small():
             "insulation_gap_m": 0.005,
             "fin_area_ratio": 7.0,
             "tilt_deg": 30.0,
-            "salt_to_polymer_ratio": 4.0,
+            "salt_loading": 4.0,
         }
     )
     assert is_gap_degenerate(x)
@@ -76,7 +80,7 @@ def test_is_gap_degenerate_false_when_gap_ample():
             "insulation_gap_m": 0.005,
             "fin_area_ratio": 7.0,
             "tilt_deg": 30.0,
-            "salt_to_polymer_ratio": 4.0,
+            "salt_loading": 4.0,
         }
     )
     assert not is_gap_degenerate(x)

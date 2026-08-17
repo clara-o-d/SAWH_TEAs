@@ -1,0 +1,1234 @@
+% ============================================================
+%  J. Patek, J. Klomfar, "A computationally effective formulation
+%  of the thermodynamic properties of LiBr-H2O solutions from
+%  273 to 500 K over full composition range"
+%  International Journal of Refrigeration 29 (2006) 566-578
+%  doi:10.1016/j.ijrefrig.2005.10.007
+%
+%  LaTeX transcription: structure, nomenclature, all numbered
+%  equations, all coefficient tables, all data-source tables,
+%  and the reference list.  Body prose is marked with
+%  placeholder comments -- see the note accompanying this file.
+%
+%  Compile: pdflatex patek2006.tex   (twice, for cross-refs)
+% ============================================================
+
+\documentclass[11pt]{article}
+
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{mathptmx}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{caption}
+\usepackage{array}
+\usepackage{longtable}
+\usepackage{pdflscape}
+\usepackage[margin=1in]{geometry}
+\usepackage{fancyhdr}
+\usepackage[hidelinks]{hyperref}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[C]{\itshape J. P\'atek, J. Klomfar / International Journal of Refrigeration 29 (2006) 566--578}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0pt}
+
+% --- notation shortcuts -------------------------------------
+% The paper uses \varrho for molar density; \rho appears in the
+% figure captions for mass density.  Both kept distinct here.
+\newcommand{\dens}{\varrho}
+\newcommand{\Hbar}{\overline{H}}
+\newcommand{\Sbar}{\overline{S}}
+\newcommand{\Vbar}{\overline{V}}
+\newcommand{\Jmol}{J\,mol$^{-1}$}
+\newcommand{\JmolK}{J\,mol$^{-1}$\,K$^{-1}$}
+\newcommand{\kJkg}{kJ\,kg$^{-1}$}
+\newcommand{\kJkgK}{kJ\,kg$^{-1}$\,K$^{-1}$}
+\newcommand{\molm}{mol\,m$^{-3}$}
+\newcommand{\wtpc}{wt\%}
+\newcommand{\frcaption}[1]{\begin{center}\itshape #1\end{center}}
+
+\begin{document}
+
+\title{A computationally effective formulation of the thermodynamic
+       properties of LiBr--H$_2$O solutions from 273 to 500 K over
+       full composition range}
+\author{J. P\'atek\thanks{Corresponding author. Tel.: +420 266 053 163;
+        fax: +420 2858 4695. \textit{E-mail address:}
+        patek@it.cas.cz (J. P\'atek).},
+        \ J. Klomfar \\[4pt]
+        \small\itshape Institute of Thermomechanics, Academy of Sciences
+        of the Czech Republic, \\
+        \small\itshape Dolej\v{s}kova 5, CZ 182 00 Prague 8, Czech Republic}
+\date{\small Received 4 January 2005; received in revised form
+      22 September 2005; accepted 10 October 2005 \\
+      Available online 4 January 2006 \\[6pt]
+      \normalsize International Journal of Refrigeration
+      \textbf{29} (2006) 566--578}
+\maketitle
+
+% ------------------------------------------------------------
+\begin{abstract}
+% [Abstract text -- paste from the original, p.\ 566]
+\end{abstract}
+
+\noindent\textit{Keywords:} Absorption system; Water-Lithium bromide;
+Calculation; Thermodynamic properties; Aqueous solution
+
+\vspace{1em}
+\begin{center}
+\large\bfseries Formulation permettant le calcul des propri\'et\'es
+thermodynamiques des solutions de LiBr-H$_2$O pour une plage allant
+de 273 \`a 500 K et une gamme compl\`ete de compositions
+\end{center}
+
+\noindent\textit{Mots cl\'es :} Syst\`eme \`a absorption ;
+Eau-bromure de lithium ; Calcul ; Propri\'et\'es thermodynamiques ;
+Solution aqueuse
+
+% ============================================================
+\section*{Nomenclature}
+% ============================================================
+
+\subsection*{Symbols}
+\begin{tabbing}
+\hspace{2.0cm}\= \kill
+$c_p$ \> molar isobaric heat capacity (\JmolK) \\
+$g$   \> molar Gibbs free energy (\Jmol) \\
+$H$   \> enthalpy (J) \\
+$\Hbar$ \> partial enthalpy of water in solution (\Jmol) \\
+$h$   \> molar enthalpy (\Jmol) \\
+$M$   \> molar mass (kg\,mol$^{-1}$) \\
+$m$   \> mass (kg) \\
+$N$   \> number of points \\
+$n$   \> amount of substance (mol) \\
+$p$   \> pressure (Pa) \\
+$\Delta H_\mathrm{vap}$ \> molar enthalpy of evaporation (\Jmol) \\
+$\Delta H_\mathrm{dil}$ \> molar enthalpy of dilution (\Jmol) \\
+$S$   \> entropy (J\,K$^{-1}$) \\
+$\Sbar$ \> partial entropy of water in solution (\JmolK) \\
+$s$   \> molar entropy (\JmolK) \\
+$T$   \> temperature (K) \\
+$T_0$ \> constant (K), Eqs.~(3)--(5) \\
+$V$   \> volume (m$^3$) \\
+$\Vbar$ \> partial volume of water in solution (m$^3$\,mol$^{-1}$) \\
+$v$   \> molar volume (m$^3$\,mol$^{-1}$) \\
+$w$   \> mass fraction ($w = m_\mathrm{LiBr}/(m_\mathrm{LiBr}+m_\mathrm{w})$) \\
+$x$   \> molar fraction ($x = n_\mathrm{LiBr}/(n_\mathrm{LiBr}+n_\mathrm{w})$) \\
+$\dens$ \> molar density (\molm) \\
+$'$   \> saturated liquid state \\
+MR    \> mean relative deviation (\%),
+         $\mathrm{MR} = (100/N)\sum(z_\mathrm{exp}/z_\mathrm{cal}-1)$ \\
+RMS   \> root mean square relative deviation (\%),
+         $\mathrm{RMS} = 100\left[(1/N)\sum(z_\mathrm{exp}/z_\mathrm{cal}-1)^2\right]^{1/2}$
+\end{tabbing}
+
+\subsection*{Subscripts}
+\begin{tabbing}
+\hspace{1.4cm}\= \kill
+c    \> at the critical point \\
+cal  \> calculated \\
+exp  \> experimental \\
+g    \> superheated vapor states of pure water \\
+l    \> subcooled liquid states of pure water \\
+LiBr \> lithium bromide \\
+p    \> isobaric \\
+s    \> denotes a state on the vapor-pressure curve \\
+t    \> at the triple point \\
+w    \> water
+\end{tabbing}
+
+\subsection*{Physical constants and characteristic properties of
+             H$_2$O and LiBr}
+\begin{tabbing}
+\hspace{2.4cm}\= \kill
+\textit{Molar mass} \> \\
+$M_\mathrm{LiBr}$ \> 0.08685 kg\,mol$^{-1}$ \\
+$M_{\mathrm{H_2O}}$ \> 0.018015268 kg\,mol$^{-1}$ \\[4pt]
+\textit{Critical point of pure water} \> \\
+$T_\mathrm{c}$ \> 647.096 K \\
+$p_\mathrm{c}$ \> $22.064\times10^{6}$ Pa \\
+$\dens_\mathrm{c}$ \> 17,873 \molm\ (322 kg\,m$^{-3}$) \\[4pt]
+\textit{Triple point of pure water} \> \\
+$T_\mathrm{t}$ \> 273.16 K \\
+$p_\mathrm{t}$ \> 611.657 Pa \\
+$\dens'_\mathrm{t}$ \> 55,496.8 \molm\ (999.789 kg\,m$^{-3}$)
+\end{tabbing}
+
+% ============================================================
+\section{Introduction}
+% ============================================================
+% [Introduction prose -- pp.\ 566-567.
+%  Key points: absorption cycles use water/LiBr and ammonia/water;
+%  calculations are usually run from 273 to 500 K and 40-70 wt%
+%  LiBr [1]; modern EOS are usually explicit in Helmholtz energy
+%  [9]; no Helmholtz formulation exists for LiBr-H2O comparable to
+%  Tillner-Roth and Friend's ammonia-water work [10]; Herold and
+%  Moran [3] gave a Gibbs-energy description, the only
+%  thermodynamically consistent one by form; McNeely [2] (15-166 degC)
+%  is the most-used formulation.  Objective: a set of explicit
+%  separate functions of T and composition valid from 273 K (or the
+%  crystallization line) to 500 K over the full composition range.
+%  Pure-steam and saturated-water properties from IAPWS 95 [11].]
+
+% ============================================================
+\section{Methodology}
+% ============================================================
+
+\subsection{Property equations and their fitting to data}
+
+% [Prose -- p.\ 568.  Saturated pure liquid water properties are
+%  denoted by an apostrophe; solution quantities carry no
+%  apostrophe.]
+
+\noindent The resulting functions best reproducing the selected
+experimental data show the following form:
+\begin{equation}
+p(T,x) = p_\mathrm{s}(\theta), \qquad
+\theta = T - \sum_{i=1}^{8} a_i x^{m_i}(0.4-x)^{n_i}
+         \left(\frac{T}{T_\mathrm{c}}\right)^{t_i}
+\end{equation}
+\begin{equation}
+\dens(T,x) = (1-x)\dens'(T) + \dens_\mathrm{c}
+  \sum_{i=1}^{2} a_i x^{m_i}
+  \left(\frac{T}{T_\mathrm{c}}\right)^{t_i},
+\end{equation}
+\begin{equation}
+c_p(T,x) = (1-x)c'_p(T) + c_{p,\mathrm{t}}
+  \sum_{i=1}^{8} a_i x^{m_i}(0.4-x)^{n_i}
+  \left(\frac{T_\mathrm{c}}{T-T_0}\right)^{t_i},
+\end{equation}
+\begin{equation}
+h(T,x) = (1-x)h'(T) + h_\mathrm{c}
+  \sum_{i=1}^{30} a_i x^{m_i}(0.4-x)^{n_i}
+  \left(\frac{T_\mathrm{c}}{T-T_0}\right)^{t_i},
+\end{equation}
+\begin{equation}
+s(T,x) = (1-x)s'(T) + s_\mathrm{c}
+  \sum_{i=1}^{29} a_i x^{m_i}(0.4-x)^{n_i}
+  \left(\frac{T_\mathrm{c}}{T-T_0}\right)^{t_i},
+\end{equation}
+where $T_0 = 221$ K is a nonlinear parameter of the equations.
+
+% [Prose -- p.\ 568, on the use of molar fraction x rather than
+%  mass fraction w.]
+
+\noindent Specific quantities and mass fraction $w$ used in common
+computational practice are related to the molar quantities by the
+following relations:
+\begin{equation}
+w = \frac{x M_\mathrm{LiBr}}{x M_\mathrm{LiBr} + (1-x)M_\mathrm{w}},
+\end{equation}
+\begin{equation}
+x = \frac{w/M_\mathrm{LiBr}}{w/M_\mathrm{LiBr} + (1-w)/M_\mathrm{w}},
+\end{equation}
+\begin{equation}
+\frac{h(w)}{\mathrm{J\,kg^{-1}}}
+ = \frac{1}{x M_\mathrm{LiBr} + (1-x)M_\mathrm{w}}
+   \frac{h(x)}{\mathrm{J\,mol^{-1}}},
+\end{equation}
+and similarly for density, entropy and isobaric heat capacity.
+
+% [Prose -- p.\ 568, on the fitting procedure.]
+
+\noindent If a certain functional form $f(T,x,\mathbf{a})$ has been
+selected for a given property, the unknown coefficients $a_i$
+(expressed as the vector $\mathbf{a}$) are determined by minimizing
+the following sum of squares:
+\begin{equation}
+\chi^{2} = \sum_{j=1}^{J} f_j \sum_{i=1}^{M_j}
+  \left[ z^{(j)}_{\mathrm{exp},i}
+       - z^{(j)}_{\mathrm{cal}}(T_{\mathrm{exp},i},
+         x_{\mathrm{exp},i}, \mathbf{a}) \right]^{2},
+\end{equation}
+where $M_j$ is the number of data points used for the $j$th property,
+$z^{(j)}_{\mathrm{exp},i}$ is the $i$th experimental value for the
+property and $z^{(j)}_{\mathrm{cal},i}$ is the value calculated from
+the equation for $f$ with the parameter vector $\mathbf{a}$ at
+$T_{\mathrm{exp},i}$ and $x_{\mathrm{exp},i}$. The weighting factors
+$f_j$ are introduced to equalize the effect of various properties on
+the regression matrix. The optimum set of regressors was selected
+using a step regression method [12].
+
+\subsection{Vapor pressure}
+
+% [Prose -- p.\ 569, on Duhring's rule.]
+
+\noindent The corresponding inverse function is also linear:
+\begin{equation}
+T_\mathrm{s}(p) = C(x)\,T(p,x) + D(x),
+\end{equation}
+and therefore,
+\begin{equation}
+p(T,x) = p_\mathrm{s}\!\left[C(x)T + D(x)\right].
+\end{equation}
+
+% [Prose -- p.\ 569.  For temperatures theta below the triple
+%  point, the pressure of saturated steam above subcooled liquid
+%  water was used, from IAPWS 95.]
+
+\noindent The enthalpy of dilution is defined as the change in
+enthalpy of the water after being added to the solution:
+\begin{equation}
+\Delta H_\mathrm{dil} = \Hbar - h_\mathrm{l}.
+\end{equation}
+
+\noindent The partial enthalpy of water in mixture liquid phase
+$\Hbar$ can be calculated from a Clausius--Clapeyron-like equation
+which follows from the condition of phase equilibrium (i.e.\ equality
+of chemical potentials of water in coexisting phases):
+\begin{equation}
+\Hbar = h_\mathrm{g} - T(v_\mathrm{g}-\Vbar)
+        \frac{\partial p(T,x)}{\partial T}.
+\end{equation}
+
+\noindent From Eqs.~(12) and (13) the temperature derivative of
+pressure can be expressed as
+\begin{equation}
+\left(\frac{\partial p}{\partial T}\right)_{\!x}
+ = \frac{h_\mathrm{g}-h_\mathrm{l}-\Delta H_\mathrm{dil,exp}}
+        {T(v_\mathrm{g}-\Vbar)}.
+\end{equation}
+
+% [Prose -- p.\ 569, on the iterative treatment of the enthalpy of
+%  dilution and on which side of Eq. (14) supplies z_exp vs z_cal.]
+
+\noindent The partial volume of water in the solution $\Vbar$ is
+given by the molar density $\dens(T,x)$ of the solution:
+\begin{equation}
+\Vbar = \frac{1}{\dens(T,x)}
+  \left( 1 + \frac{x}{\dens(T,x)}
+  \frac{\partial \dens(T,x)}{\partial x} \right).
+\end{equation}
+
+\subsection{Enthalpy}
+
+Values of enthalpy $H(T,p,n_\mathrm{LiBr},n_\mathrm{w})$ of the system
+consisting of $n_\mathrm{LiBr}$ moles LiBr and $n_\mathrm{w}$ moles of
+water are defined by the differential
+\begin{equation}
+\mathrm{d}H
+ = \left(\frac{\partial H}{\partial T}\right)_{\!p,n_\mathrm{w}}\!\mathrm{d}T
+ + \left(\frac{\partial H}{\partial p}\right)_{\!T,n_\mathrm{w}}\!\mathrm{d}p
+ + \left(\frac{\partial H}{\partial n_\mathrm{w}}\right)_{\!T,p}\!\mathrm{d}n_\mathrm{w}
+\end{equation}
+and by its reference value chosen by convention in an arbitrary
+reference state. The molar enthalpy $h(T,x)$ of the liquid phase on
+the vapor--liquid equilibrium surface as a function of the LiBr molar
+fraction $x$ is defined as:
+\begin{equation}
+h(T,x) = \frac{1}{n_\mathrm{LiBr}+n_\mathrm{w}}
+         H\!\left[T,p(T,x),n_\mathrm{LiBr},n_\mathrm{w}\right].
+\end{equation}
+
+\noindent Based on Eqs.~(16) and (17) and standard thermodynamic
+relations the temperature dependence of the molar enthalpy $h(T,x)$ is
+given by the equation
+\begin{equation}
+\frac{\partial h(T,x)}{\partial T}
+ = c_p(T,x)
+ + \left(\frac{\partial h}{\partial p}\right)_{\!T,x}
+   \frac{\partial p(T,x)}{\partial T},
+\end{equation}
+where
+\begin{equation}
+\left(\frac{\partial h}{\partial p}\right)_{\!T,x}
+ = v(T,x) - T\frac{\partial v(T,x)}{\partial T},
+\end{equation}
+or, when expressed in terms of the molar density $\dens(T,x)$:
+\begin{equation}
+\left(\frac{\partial h}{\partial p}\right)_{\!T,x}
+ = \frac{1}{\dens(T,x)}
+   \left( 1 + \frac{T}{\dens(T,x)}
+   \frac{\partial \dens(T,x)}{\partial T} \right).
+\end{equation}
+
+\noindent By differentiating Eq.~(17) with respect to
+$n_\mathrm{w}$ a differential equation is obtained, after some
+manipulations, describing the dependence of the enthalpy $h(T,x)$ on
+the mixture composition $x$:
+\begin{equation}
+h(T,x) - x\frac{\partial h(T,x)}{\partial x}
+ = \Hbar - x\left(\frac{\partial h}{\partial p}\right)_{\!T,x}
+   \frac{\partial p(T,x)}{\partial x}
+\end{equation}
+
+% [Prose -- pp.\ 569-571.  Notes that the enthalpy is determined up
+%  to an arbitrary linear function of x; by convention h = 0 for
+%  50 wt% LiBr at 273.15 K, the absolute term being fixed by the
+%  pure-water reference state (Section 5).  Also notes the second
+%  term of Eq. (18) is a correction of at most a few tenths of a
+%  percent of c_p, and that Vbar does not exceed 2% of v_g.]
+
+\subsection{Entropy}
+
+Entropy $s(T,x)$ of the LiBr--H$_2$O solutions, in analogy to the
+enthalpy, is determined up to an additive linear function of
+composition by its derivatives:
+\begin{equation}
+\frac{\partial s(T,x)}{\partial T}
+ = \frac{c_p(T,x)}{T}
+ + \left(\frac{\partial s}{\partial p}\right)_{\!T,x}
+   \left(\frac{\partial p}{\partial T}\right)_{\!x},
+\end{equation}
+\begin{equation}
+s(T,x) - x\frac{\partial s}{\partial x}
+ = \Sbar - x\left(\frac{\partial s}{\partial p}\right)_{\!T,x}
+   \frac{\partial p(T,x)}{\partial x},
+\end{equation}
+where for the partial entropy $\Sbar$ of water in the solution it
+follows from the Clausius--Clapeyron equation
+\begin{equation}
+\Sbar = s_\mathrm{g} - (v_\mathrm{g}-\Vbar)
+        \frac{\partial p(T,x)}{\partial T},
+\end{equation}
+where
+\begin{equation}
+\left(\frac{\partial s}{\partial p}\right)_{\!T,x}
+ = -\frac{\partial v(T,x)}{\partial T},
+\end{equation}
+and therefore,
+\begin{equation}
+\left(\frac{\partial s}{\partial p}\right)_{\!T,x}
+ = \frac{1}{\dens(T,x)^{2}}\frac{\partial \dens(T,x)}{\partial T}.
+\end{equation}
+
+\noindent An additional independent information concerning the partial
+entropy is contained in the experimental data on the enthalpy of
+dilution:
+\begin{equation}
+\Sbar = s_\mathrm{l} - \frac{\Delta H_\mathrm{dil}}{T}
+        + \frac{g_\mathrm{l}-g_\mathrm{v}}{T}.
+\end{equation}
+
+\noindent The arbitrary additive linear function of composition is
+chosen so that the entropy equals zero for the mixture composition
+$w = 0.5$ at temperature 273.15 K, while for $x = 0$ it is consistent
+with the reference state of pure water.
+
+% ============================================================
+\section{Data selection}
+% ============================================================
+% [Prose -- pp.\ 571-572.  All data for each property were
+%  preliminarily fitted simultaneously with weights equal to the
+%  reciprocal of the number of points in each set, dividing the data
+%  into primary (used for fitting) and secondary (comparison only)
+%  categories.  30 experimental works, 1904 data points collected,
+%  1449 selected as primary; for comparison Tillner-Roth and Friend
+%  [10] had 61 studies and 5559 points for ammonia-water.  c_p data
+%  of Feuerecker et al. [5] were available only as a polynomial, so
+%  generated values were used at high concentrations.]
+
+% ---------------- Table 1 ----------------
+\begin{landscape}
+\footnotesize
+\setlength{\tabcolsep}{4pt}
+\begin{longtable}{llllllllll}
+\caption*{Table 1\\ Sources of data on $p$-$T$-$x$ relation of
+          LiBr--H$_2$O solutions at vapor--liquid equilibrium} \\
+\toprule
+Author(s) & Year & Experimental
+ & \multicolumn{3}{c}{Range of values}
+ & \multicolumn{2}{c}{No.\ of data points}
+ & \multicolumn{2}{c}{Deviation (\%)} \\
+\cmidrule(lr){4-6}\cmidrule(lr){7-8}\cmidrule(lr){9-10}
+ & & method & Temperature (K) & Pressure (kPa) & Mass fraction (\wtpc)
+ & All & Used & RMS & MR \\
+\midrule
+\endfirsthead
+\toprule
+Author(s) & Year & Method & $T$ (K) & $p$ (kPa) & $w$ (\wtpc)
+ & All & Used & RMS & MR \\
+\midrule
+\endhead
+Tamman [15]              & 1885 & Static still      & 298--373 & 1.7--102     & 4--58  & 115 & 87  & 1.33  & 0.23 \\
+Lannung [16]             & 1934 & Static still      & 291      & 0.07--2.0    & 0.7--15 & 30 & 0   & 3.76  & 1.6 \\
+Pennington [17]          & 1955 & Static still      & 405--427 & 98.8--100.1  & 50--60 & 10  & 10  & 1.01  & 0.00 \\
+                         &      & Ebulliometry      & 353--417 & 13.5--72.1   & 50--60 & 25  & 25  & 1.80  & 0.33 \\
+                         &      & Gas transport     & 303      & 0.3--1.1     & 50--61 & 11  & 11  & 1.73  & $-1.73$ \\
+L\"ower [18]             & 1960 & Static still      & 273--403 & 0.08--265    & 0--70  & 185 & 178 & 1.98  & $-0.45$ \\
+Boryta et al.\ [19]      & 1975 & Static still      & 273--348 & 0.2--21      & 40--60 & 15  & 0   & 7.02  & $-5.44$ \\
+                         &      & Gas transport     & 298--448 & 0.2--84      & 40--70 & 17  & 0   & 6.40  & $-1.86$ \\
+Sada et al.\ [20]        & 1975 & Static still      & 348      & 11--38       & 35--46 & 6   & 0   & 18.23 & 9.67 \\
+Fedorov et al.\ [21]     & 1976 & Static still      & 423--623 & 110--15,000  & 8--56  & 35  & 11  & 1.58  & $-1.12$ \\
+Felli and Mattiucci [22] & 1979 & Static still      & 298--366 & 0.2--26      & 40--50 & 8   & 0   & 7.80  & $-3.63$ \\
+Matsuda et al.\ [23]     & 1980 & Static still      & 273--345 & 0.05--7      & 44--58 & 119 & 119 & 2.91  & $-0.59$ \\
+Renz [24]                & 1980 & Static still      & 273--448 & 1.2--95      & 25--70 & 96  & 95  & 1.83  & 0.72 \\
+Iyoki and Uemura [25]    & 1989 & Boiling-point     & 362--452 & 10--281      & 39--70 & 39  & 39  & 3.57  & $-0.36$ \\
+Patil et al.\ [26]       & 1990 & Differential static & 303--343 & 0.4--29    & 15--58 & 40  & 0   & 4.76  & 1.91 \\
+Lenard et al.\ [27]      & 1992 & Static still      & 398--483 & 112--785     & 44--65 & 24  & 24  & 1.31  & 0.41 \\
+Feuerecker et al.\ [5]   & 1993 & Gas transport     & 318--462 & 4.5--180     & 40--75 & 78  & 78  & 1.79  & 1.32 \\
+Murakami et al.\ [28]    & 1993 & Bubble-point      & 310--413 & 0.5--316     & 20--60 & 44  & 0   & 6.44  & 3.09 \\
+\bottomrule
+\end{longtable}
+
+% ---------------- Table 2 ----------------
+\begin{longtable}{llllllllll}
+\caption*{Table 2\\ Sources of data on $\dens$-$T$-$x$ relation of
+          LiBr--H$_2$O solutions at vapor--liquid equilibrium} \\
+\toprule
+Author(s) & Year & Experimental
+ & \multicolumn{3}{c}{Range of values}
+ & \multicolumn{2}{c}{No.\ of data points}
+ & \multicolumn{2}{c}{Deviation (\%)} \\
+\cmidrule(lr){4-6}\cmidrule(lr){7-8}\cmidrule(lr){9-10}
+ & & method & Temperature (K) & Density (kg\,m$^{-3}$)
+ & Mass fraction (\wtpc) & All & Used & RMS & MR \\
+\midrule
+\endfirsthead
+\toprule
+Author(s) & Year & Method & $T$ (K) & $\rho$ (kg\,m$^{-3}$)
+ & $w$ (\wtpc) & All & Used & RMS & MR \\
+\midrule
+\endhead
+Kremers [29]                    & 1858 & Pycnometer     & 292      & 1117--1542 & 15--60  & 10  & 0   & 1.64 & 1.41 \\
+R\"ontgen and Schneider [30]    & 1886 & Piezometer     & 291      & 1042--1089 & 6--12   & 2   & 2   & 0.11 & $-0.11$ \\
+Heydweiller [31]                & 1909 & --             & 291      & 1003--1243 & 0.4--26 & 7   & 7   & 0.86 & $-0.58$ \\
+Baxter et al.\ [32]             & 1911 & Pycnometer     & 298      & 998--1289  & 0.2--30 & 18  & 18  & 0.66 & $-0.28$ \\
+Grufki [33]                     & 1913 & --             & 291      & 1028--1241 & 4--26   & 4   & 4   & 1.03 & $-0.75$ \\
+L\"ubben [34]                   & 1913 & --             & 291      & 1030--1241 & 4--26   & 4   & 4   & 1.04 & $-0.77$ \\
+Gropp [35]                      & 1915 & --             & 273--391 & 1423--1480 & 41      & 6   & 0   & 4.90 & 4.90 \\
+Baxter and Wallace [36]         & 1913 & Pycnometer     & 273--343 & 998--1798  & 3--64   & 23  & 22  & 0.26 & $-0.13$ \\
+De Block [37]                   & 1925 & --             & 289      & 1207--1700 & 25--62  & 3   & 0   & 1.22 & 1.10 \\
+Scott et al.\ [38]              & 1934 & Pycnometer     & 308      & 1058--1721 & 8--60   & 11  & 11  & 0.28 & $-0.10$ \\
+Scott and Bridger [39]          & 1935 & Pycnometer     & 308      & 1139--1450 & 18--45  & 4   & 4   & 0.08 & 0.04 \\
+L\"ower [18]                    & 1960 & Pycnometer     & 273--373 & 958--1900  & 0--70   & 152 & 137 & 0.50 & 0.17 \\
+Hasaba et al.\ [14]             & 1961 & Pycnometer     & 273--353 & 1061--1705 & 10--59  & 28  & 27  & 0.56 & $-0.41$ \\
+Bogatykh and Evnovitch [40]     & 1965 & Pycnometer     & 283--373 & 1288--1760 & 35--62  & 111 & 109 & 0.42 & $-0.15$ \\
+Mashovets et al.\ [41]          & 1971 & Pycnometer     & 213--273 & 1038--1556 & 5--50   & 23  & 6   & 0.63 & $-0.57$ \\
+Lee et al.\ [42]                & 1990 & Pycnometer     & 301--473 & 1378--1721 & 45--60  & 39  & 39  & 0.57 & $-0.25$ \\
+Wimby and Berntsson [43]        & 1994 & Vibrating tube & 298--343 & 1100--1750 & 30--61  & 48  & 47  & 0.39 & $-0.14$ \\
+Murakami [44]                   & 2002 & Vibrating tube & 284--422 & 1003--1810 & 10--65  & 113 & 110 & 0.51 & $-0.09$ \\
+\bottomrule
+\end{longtable}
+\end{landscape}
+
+% ---------------- Table 3 ----------------
+\begin{table}[htbp]
+\centering
+\scriptsize
+\caption*{Table 3\\ Sources of data on $c_p$-$T$-$x$ relation of
+          LiBr--H$_2$O solutions at vapor--liquid equilibrium}
+\setlength{\tabcolsep}{3pt}
+\begin{tabular}{lllllllll}
+\toprule
+Author(s) & Year & Experimental
+ & \multicolumn{2}{c}{Range of values}
+ & \multicolumn{2}{c}{No.\ of data points}
+ & \multicolumn{2}{c}{Deviation (\%)} \\
+\cmidrule(lr){4-5}\cmidrule(lr){6-7}\cmidrule(lr){8-9}
+ & & method & Temperature (K) & Mass fraction (\wtpc)
+ & All & Used & RMS & MR \\
+\midrule
+Jauch [45]                 & 1921 & --  & 291      & 3--28  & 5   & 5   & 1.01 & $-0.68$ \\
+Lange and Schwartz [13]    & 1928 & --  & 299      & 0--60  & 39  & 39  & 1.01 & $-0.66$ \\
+L\"ower [18]               & 1960 & --  & 273--403 & 0--60  & 168 & 140 & 1.89 & $-0.27$ \\
+Hasaba et al.\ [47]        & 1960 & --  & 298--403 & 10--66 & 33  & 0   & 4.98 & 3.18 \\
+Iyoki and Uemura [46]      & 1989 & Twin isothermal calorimeter
+                                        & 335--424 & 44--65 & 64  & 41  & 2.55 & $-0.77$ \\
+Jeter et al.\ [48]         & 1992 & Drop calorimeter
+                                        & 335--424 & 44--65 & 64  & 0   & 5.34 & $-0.81$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================
+\section{Results}
+% ============================================================
+% [Prose -- p.\ 572.  The coefficients a_i and exponents m_i, n_i,
+%  t_i of Eqs. (1)-(5) are given in Tables 4-8; the number of
+%  significant figures given is necessary and sufficient for the
+%  stated accuracy.  Table 9 gives values for verifying a computer
+%  implementation.  Figs. 1, 3, 5 show deviations of the fitted
+%  data; Figs. 2, 4, 6 those of the rejected data; Fig. 7 compares
+%  Eq. (1) with Fedorov et al. [21] above 500 K.]
+
+% ---------------- Table 4 ----------------
+\begin{table}[htbp]
+\centering
+\caption*{Table 4\\ Coefficients and exponents of Eq.~(1)}
+\begin{tabular}{ccccr@{}l}
+\toprule
+$i$ & $m_i$ & $n_i$ & $t_i$ & \multicolumn{2}{c}{$a_i$} \\
+\midrule
+1 & 3 & 0 & 0 & $-2.41303$ & $\times10^{2}$ \\
+2 & 4 & 5 & 0 & $1.91750$   & $\times10^{7}$ \\
+3 & 4 & 6 & 0 & $-1.75521$ & $\times10^{8}$ \\
+4 & 8 & 3 & 0 & $3.25430$   & $\times10^{7}$ \\
+5 & 1 & 0 & 1 & $3.92571$   & $\times10^{2}$ \\
+6 & 1 & 2 & 1 & $-2.12626$ & $\times10^{3}$ \\
+7 & 4 & 6 & 1 & $1.85127$   & $\times10^{8}$ \\
+8 & 6 & 0 & 1 & $1.91216$   & $\times10^{3}$ \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+\footnotesize $T_\mathrm{c} = 647.096$ K; RMS = 2.1\%.
+\end{table}
+
+% ---------------- Table 5 ----------------
+\begin{table}[htbp]
+\centering
+\caption*{Table 5\\ Coefficients and exponents of Eq.~(2)}
+\begin{tabular}{ccc}
+\toprule
+$i$ & $m_i$ & $t_i$ \hspace{2em} $a_i$ \\
+\midrule
+1 & 1 & 0 \hspace{2em} 1.746 \\
+2 & 1 & 6 \hspace{2em} 4.709 \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+\footnotesize $T_\mathrm{c} = 647.096$ K;
+$\rho_\mathrm{c} = 17{,}873$ \molm; RMS = 0.44\%.
+\end{table}
+
+% ---------------- Table 6 ----------------
+\begin{table}[htbp]
+\centering
+\caption*{Table 6\\ Coefficients and exponents of Eq.~(3)}
+\begin{tabular}{ccccr@{}l}
+\toprule
+$i$ & $m_i$ & $n_i$ & $t_i$ & \multicolumn{2}{c}{$a_i$} \\
+\midrule
+1 & 2 & 0 & 0 & $-1.42094$ & $\times10^{1}$ \\
+2 & 3 & 0 & 0 & $4.04943$   & $\times10^{1}$ \\
+3 & 3 & 1 & 0 & $1.11135$   & $\times10^{2}$ \\
+4 & 3 & 2 & 0 & $2.29980$   & $\times10^{2}$ \\
+5 & 3 & 3 & 0 & $1.34526$   & $\times10^{3}$ \\
+6 & 2 & 0 & 2 & $-1.41010$ & $\times10^{-2}$ \\
+7 & 1 & 3 & 3 & $1.24977$   & $\times10^{-2}$ \\
+8 & 1 & 2 & 4 & $-6.83209$ & $\times10^{-4}$ \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+\footnotesize $c_{p,\mathrm{t}} = 76.0226$ \JmolK;
+$T_\mathrm{c} = 647.096$ K; $T_0 = 221$ K; RMS = 0.98\%.
+\end{table}
+
+% ---------------- Table 7 ----------------
+\begin{table}[htbp]
+\centering
+\footnotesize
+\caption*{Table 7\\ Coefficients and exponents of Eq.~(4)}
+\begin{tabular}{ccccr@{}l}
+\toprule
+$i$ & $m_i$ & $n_i$ & $t_i$ & \multicolumn{2}{c}{$a_i$} \\
+\midrule
+1  & 1 & 0 & 0 & $2.27431$   & $\times10^{0}$ \\
+2  & 1 & 1 & 0 & $-7.99511$ & $\times10^{0}$ \\
+3  & 2 & 6 & 0 & $3.85239$   & $\times10^{2}$ \\
+4  & 3 & 6 & 0 & $-1.63940$ & $\times10^{4}$ \\
+5  & 6 & 2 & 0 & $-4.22562$ & $\times10^{2}$ \\
+6  & 1 & 0 & 1 & $1.13314$   & $\times10^{-1}$ \\
+7  & 3 & 0 & 1 & $-8.33474$ & $\times10^{0}$ \\
+8  & 5 & 4 & 1 & $-1.73833$ & $\times10^{4}$ \\
+9  & 4 & 0 & 2 & $6.49763$   & $\times10^{0}$ \\
+10 & 5 & 4 & 2 & $3.24552$   & $\times10^{3}$ \\
+11 & 5 & 5 & 2 & $-1.34643$ & $\times10^{4}$ \\
+12 & 6 & 5 & 2 & $3.99322$   & $\times10^{4}$ \\
+13 & 6 & 6 & 2 & $-2.58877$ & $\times10^{5}$ \\
+14 & 1 & 0 & 3 & $-1.93046$ & $\times10^{-3}$ \\
+15 & 2 & 3 & 3 & $2.80616$   & $\times10^{0}$ \\
+16 & 2 & 5 & 3 & $-4.04479$ & $\times10^{1}$ \\
+17 & 2 & 7 & 3 & $1.45342$   & $\times10^{2}$ \\
+18 & 5 & 0 & 3 & $-2.74873$ & $\times10^{0}$ \\
+19 & 6 & 3 & 3 & $-4.49743$ & $\times10^{2}$ \\
+20 & 7 & 1 & 3 & $-1.21794$ & $\times10^{1}$ \\
+21 & 1 & 0 & 4 & $-5.83739$ & $\times10^{-3}$ \\
+22 & 1 & 4 & 4 & $2.33910$   & $\times10^{-1}$ \\
+23 & 2 & 2 & 4 & $3.41888$   & $\times10^{-1}$ \\
+24 & 2 & 6 & 4 & $8.85259$   & $\times10^{0}$ \\
+25 & 2 & 7 & 4 & $-1.78731$ & $\times10^{1}$ \\
+26 & 3 & 0 & 4 & $7.35179$   & $\times10^{-2}$ \\
+27 & 1 & 0 & 5 & $-1.79430$ & $\times10^{-4}$ \\
+28 & 1 & 1 & 5 & $1.84261$   & $\times10^{-3}$ \\
+29 & 1 & 2 & 5 & $-6.24282$ & $\times10^{-3}$ \\
+30 & 1 & 3 & 5 & $6.84765$   & $\times10^{-3}$ \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+\footnotesize $h_\mathrm{c} = 37{,}548.5$ \Jmol;
+$T_\mathrm{c} = 647.096$ K; $T_0 = 221$ K.
+\end{table}
+
+% ---------------- Table 8 ----------------
+\begin{table}[htbp]
+\centering
+\footnotesize
+\caption*{Table 8\\ Coefficients and exponents of Eq.~(5)}
+\begin{tabular}{ccccr@{}l}
+\toprule
+$i$ & $m_i$ & $n_i$ & $t_i$ & \multicolumn{2}{c}{$a_i$} \\
+\midrule
+1  & 1 & 0 & 0 & $1.53091$   & $\times10^{0}$ \\
+2  & 1 & 1 & 0 & $-4.52564$ & $\times10^{0}$ \\
+3  & 2 & 6 & 0 & $6.98302$   & $\times10^{2}$ \\
+4  & 3 & 6 & 0 & $-2.16664$ & $\times10^{4}$ \\
+5  & 6 & 2 & 0 & $-1.47533$ & $\times10^{3}$ \\
+6  & 1 & 0 & 1 & $8.47012$   & $\times10^{-2}$ \\
+7  & 3 & 0 & 1 & $-6.59523$ & $\times10^{0}$ \\
+8  & 5 & 4 & 1 & $-2.95331$ & $\times10^{4}$ \\
+9  & 1 & 0 & 2 & $9.56314$   & $\times10^{-3}$ \\
+10 & 2 & 0 & 2 & $-1.88679$ & $\times10^{-1}$ \\
+11 & 2 & 4 & 2 & $9.31752$   & $\times10^{0}$ \\
+12 & 4 & 0 & 2 & $5.78104$   & $\times10^{0}$ \\
+13 & 5 & 4 & 2 & $1.38931$   & $\times10^{4}$ \\
+14 & 5 & 5 & 2 & $-1.71762$ & $\times10^{4}$ \\
+15 & 6 & 2 & 2 & $4.15108$   & $\times10^{2}$ \\
+16 & 6 & 5 & 2 & $-5.55647$ & $\times10^{4}$ \\
+17 & 1 & 0 & 3 & $-4.23409$ & $\times10^{-3}$ \\
+18 & 3 & 4 & 3 & $3.05242$   & $\times10^{1}$ \\
+19 & 5 & 0 & 3 & $-1.67620$ & $\times10^{0}$ \\
+20 & 7 & 1 & 3 & $1.48283$   & $\times10^{1}$ \\
+21 & 1 & 0 & 4 & $3.03055$   & $\times10^{-3}$ \\
+22 & 1 & 2 & 4 & $-4.01810$ & $\times10^{-2}$ \\
+23 & 1 & 4 & 4 & $1.49252$   & $\times10^{-1}$ \\
+24 & 2 & 7 & 4 & $2.59240$   & $\times10^{0}$ \\
+25 & 3 & 1 & 4 & $-1.77421$ & $\times10^{-1}$ \\
+26 & 1 & 0 & 5 & $-6.99650$ & $\times10^{-5}$ \\
+27 & 1 & 1 & 5 & $6.05007$   & $\times10^{-4}$ \\
+28 & 1 & 2 & 5 & $-1.65228$ & $\times10^{-3}$ \\
+29 & 1 & 3 & 5 & $1.22966$   & $\times10^{-3}$ \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+\footnotesize $s_\mathrm{c} = 79.3933$ \JmolK;
+$T_\mathrm{c} = 647.096$ K; $T_0 = 221$ K.
+\end{table}
+
+% ---------------- Table 9 ----------------
+\begin{table}[htbp]
+\centering
+\footnotesize
+\caption*{Table 9\\ Property values calculated from Eqs.~(1)--(5) for
+          validation of computer programs}
+\setlength{\tabcolsep}{6pt}
+\begin{tabular}{cccccccc}
+\toprule
+$x$ & $T$ (K) & $p$ (Pa) & $\dens$ (\molm) & $c_p$ (\JmolK)
+ & $h$ (\Jmol) & $s$ (\JmolK) \\
+\midrule
+0.05 & 300 & 3025.1805  & 54,148.9 & 69.931 & 1603.9   & 7.79057 \\
+0.05 & 450 & 835,097.47 & 48,984.9 & 74.047 & 12,189.0 & 36.5288 \\
+0.1  & 300 & 2286.4858  & 52,985.4 & 65.520 & 1445.1   & 7.66416 \\
+0.1  & 450 & 647,702.12 & 48,550.2 & 70.305 & 11,555.2 & 34.9553 \\
+0.3  & 350 & 2237.3986  & 47,826.4 & 66.597 & 9072.1   & 15.3214 \\
+0.4  & 450 & 43,075.149 & 45,941.8 & 70.294 & 21,024.4 & 33.3788 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ---------------- Figures 1-9 ----------------
+% Deviation plots.  Symbol legends are transcribed in the captions.
+
+\begin{figure}[htbp]\centering
+% \includegraphics[width=0.55\textwidth]{fig1.pdf}
+\framebox[0.55\textwidth][c]{\rule{0pt}{6cm} Fig.~1}
+\caption*{Fig.~1. Percentage deviations between the primary
+experimental data of the pressure $p$ of vapor--liquid equilibrium and
+values calculated from Eq.~(1). ($\triangledown$) Tamman [15],
+($\triangleleft$) Pennington [17], ($\bigcirc$) L\"ower [18],
+($\triangleright$) Fedorov et al.\ [21], ($\square$) Matsuda et al.\ [23],
+($*$) Renz [24], ($+$) Iyoki and Uemura [25],
+($\triangle$) Lenard et al.\ [27], ($\Diamond$) Feuerecker et al.\ [5].}
+\end{figure}
+
+\begin{figure}[htbp]\centering
+% \includegraphics[width=0.55\textwidth]{fig2.pdf}
+\framebox[0.55\textwidth][c]{\rule{0pt}{6cm} Fig.~2}
+\caption*{Fig.~2. Percentage deviations between the rejected
+experimental data of the pressure $p$ of vapor--liquid equilibrium and
+values calculated from Eq.~(1). ($\square$) Lannung [16],
+($\triangle$) Boryta et al.\ [19], ($\bigcirc$) Sada et al.\ [20],
+($+$) Felli and Mattiucci [22], ($*$) Patil et al.\ [26],
+($\Diamond$) Murakami et al.\ [28].}
+\end{figure}
+
+\begin{figure}[htbp]\centering
+% \includegraphics[width=0.55\textwidth]{fig3.pdf}
+\framebox[0.55\textwidth][c]{\rule{0pt}{6cm} Fig.~3}
+\caption*{Fig.~3. Percentage deviations between the primary
+experimental data of the density $\rho$ of LiBr--H$_2$O solutions and
+values calculated from Eq.~(2). ($*$) R\"ontgen and Schneider [30],
+($\bigcirc$) Heydweiller [31], ($\otimes$) Baxter et al.\ [32],
+($\triangledown$) Grufki [33], ($\triangleleft$) L\"ubben [34],
+($\oplus$) Baxter and Wallace [36], ($\blacktriangle$) Scott et al.\ [38],
+($\blacktriangledown$) Scott and Bridger [39], ($\bigcirc$) L\"ower [18],
+($\square$) Hasaba et al.\ [14], ($\times$) Bogatykh and Evnovitch [40],
+($\triangleright$) Mashovets et al.\ [41], ($\Diamond$) Lee et al.\ [42],
+($\triangle$) Wimby and Berntsson [43], ($+$) Murakami [44].}
+\end{figure}
+
+\begin{figure}[htbp]\centering
+% \includegraphics[width=0.55\textwidth]{fig4.pdf}
+\framebox[0.55\textwidth][c]{\rule{0pt}{6cm} Fig.~4}
+\caption*{Fig.~4. Percentage deviations between the rejected
+experimental data of the density $\rho$ of LiBr--H$_2$O solutions and
+values calculated from Eq.~(2). ($\square$) Kremers [29],
+($\triangle$) Gropp [35], ($\bigcirc$) de Block [37].}
+\end{figure}
+
+\begin{figure}[htbp]\centering
+% \includegraphics[width=0.55\textwidth]{fig5.pdf}
+\framebox[0.55\textwidth][c]{\rule{0pt}{6cm} Fig.~5}
+\caption*{Fig.~5. Percentage differences between the experimental data
+of the isobaric heat capacity $c_p$ of LiBr--H$_2$O solutions and the
+values calculated from Eq.~(3). ($\bigcirc$) Jauch [45],
+($\times$) Lange and Schwartz [13], ($\triangledown$) L\"ower [18],
+($*$) Iyoki and Uemura [46], ($\triangle$) Feuerecker et al.\ [5].}
+\end{figure}
+
+\begin{figure}[htbp]\centering
+% \includegraphics[width=0.55\textwidth]{fig6.pdf}
+\framebox[0.55\textwidth][c]{\rule{0pt}{6cm} Fig.~6}
+\caption*{Fig.~6. Percentage differences between the rejected
+experimental data of the isobaric heat capacity $c_p$ of LiBr--H$_2$O
+solutions and the values calculated from Eq.~(3).
+($\bigcirc$) Hasaba et al.\ [47], ($\square$) Jeter et al.\ [48].}
+\end{figure}
+
+\begin{figure}[htbp]\centering
+% \includegraphics[width=0.55\textwidth]{fig7.pdf}
+\framebox[0.55\textwidth][c]{\rule{0pt}{4cm} Fig.~7}
+\caption*{Fig.~7. Percentage differences between the experimental data
+by Fedorov et al.\ [21] at temperatures above 500 K and the values
+calculated from Eq.~(1). ($\bigcirc$) 523 K, ($\square$) 573 K,
+($\triangle$) 623 K.}
+\end{figure}
+
+\begin{figure}[htbp]\centering
+% \includegraphics[width=0.55\textwidth]{fig8.pdf}
+\framebox[0.55\textwidth][c]{\rule{0pt}{6cm} Fig.~8}
+\caption*{Fig.~8. Percentage differences between the experimental data
+on isobaric heat capacity and the values of $c_p$ calculated from
+Eq.~(4) according to the relation (18). ($\bigcirc$) Jauch [45],
+($\times$) Lange and Schwartz [13], ($\triangledown$) L\"ower [18],
+($*$) Iyoki and Uemura [46], ($\triangle$) Feuerecker et al.\ [5].}
+\end{figure}
+
+\begin{figure}[htbp]\centering
+% \includegraphics[width=0.55\textwidth]{fig9.pdf}
+\framebox[0.55\textwidth][c]{\rule{0pt}{6cm} Fig.~9}
+\caption*{Fig.~9. Percentage differences between the experimental data
+on isobaric heat capacity and the values of $c_p$ calculated from
+Eq.~(5) according to the relation (22). ($\bigcirc$) Jauch [45],
+($\times$) Lange and Schwartz [13], ($\triangledown$) L\"ower [18],
+($*$) Iyoki and Uemura [46], ($\triangle$) Feuerecker et al.\ [5].}
+\end{figure}
+
+% [Prose -- pp.\ 573-574.  Eq. (1) is shown usable for extrapolation
+%  in temperature with defined uncertainty up to 623 K.  c_p computed
+%  from the enthalpy (4) reproduces the c_p data used in fitting
+%  Eq. (3) with RMS 1.3%; for entropy the corresponding figure is
+%  1.2%.  Deviations from the Langeliers et al. [49] correlation do
+%  not exceed 2% up to 480 K and 3% up to 500 K.  Pressure
+%  derivatives are reproduced within 0.8%.  Correlation
+%  uncertainties: +/-10 kJ/kg for enthalpy, +/-0.03 kJ/kg/K for
+%  entropy.]
+
+% ---------------- Table 10 ----------------
+\begin{table}[htbp]
+\centering
+\caption*{Table 10\\ Maximum differences of values of enthalpy and
+          entropy calculated from Eqs.~(4) and (5), respectively, from
+          values calculated according to formulations of other authors}
+\begin{tabular}{lcc}
+\toprule
+Author & $(\Delta h)_\mathrm{max}$ (\kJkg)
+       & $(\Delta s)_\mathrm{max}$ (\kJkgK) \\
+\midrule
+McNeely [2]             & 14 & --    \\
+Herold and Moran [3]    & 16 & --    \\
+Feuerecker et al.\ [5]  & 4  & 0.016 \\
+Chua et al.\ [8]        & 10 & 0.030 \\
+Kaita [7]               & 8  & 0.012 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% ============================================================
+\section{Description of thermodynamic properties of the pure water
+         substance at saturation}
+% ============================================================
+
+In Eqs.~(1) and (2) the IAPWS 95 [11] equations for vapor pressure and
+liquid density of pure water at saturation are used:
+\begin{equation}
+p_\sigma(T) = p_\mathrm{c}\exp\left[\frac{T_\mathrm{c}}{T}
+  \sum_{i=1}^{6}\alpha_i
+  \left(1-\frac{T}{T_\mathrm{c}}\right)^{\beta_i}\right],
+\end{equation}
+\begin{equation}
+\dens'(T) = \dens_\mathrm{c}\left[1 + \sum_{i=1}^{6}\alpha_i
+  \left(1-\frac{T}{T_\mathrm{c}}\right)^{\beta_i}\right].
+\end{equation}
+
+\noindent Equations for isobaric heat capacity, enthalpy, and entropy
+of pure water at saturation were newly developed in the present study
+based on data calculated from the IAPWS 95 formulation:
+\begin{equation}
+c'_p(T) = c_{p,\mathrm{t}}\sum_{i=1}^{5}\alpha_i
+  \left(1-\frac{T}{T_\mathrm{c}}\right)^{\beta_i}
+  \left(\frac{T}{T_\mathrm{t}}\right)^{\gamma_i},
+\end{equation}
+\begin{equation}
+h'(T) = h_\mathrm{c}\left[1 + \sum_{i=1}^{4}\alpha_i
+  \left(1-\frac{T}{T_\mathrm{c}}\right)^{\beta_i}\right],
+\end{equation}
+\begin{equation}
+s'(T) = s_\mathrm{c}\left[1 + \sum_{i=1}^{4}\alpha_i
+  \left(1-\frac{T}{T_\mathrm{c}}\right)^{\beta_i}\right].
+\end{equation}
+
+% [Prose -- p.\ 576.  The functional forms by Patek et al. [50] were
+%  used for enthalpy and entropy.  Eqs. (30)-(32) are valid from
+%  273.16 to 500 K, deviating from IAPWS 95 by less than 0.08% for
+%  c_p, 0.33 kJ/kg for enthalpy and 0.001 kJ/kg/K for entropy.
+%  Note on the 1956 London convention setting internal energy and
+%  entropy of saturated liquid at the triple point to zero, which
+%  yields 0.611872 J/kg for the specific enthalpy there ([11], p. 429).]
+
+% ---------------- Table 11 ----------------
+\begin{table}[htbp]
+\centering
+\caption*{Table 11\\ Coefficients and exponents of Eq.~(28)}
+\begin{tabular}{ccr}
+\toprule
+$i$ & $\beta_i$ & \multicolumn{1}{c}{$\alpha_i$} \\
+\midrule
+1 & 1.0 & $-7.85951783$ \\
+2 & 1.5 & $1.84408259$  \\
+3 & 3.0 & $-11.7866497$ \\
+4 & 3.5 & $22.6807411$  \\
+5 & 4.0 & $-15.9618719$ \\
+6 & 7.5 & $1.80122502$  \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+\footnotesize $T_\mathrm{c} = 647.096$;
+$p_\mathrm{c} = 22.064\times10^{6}$ Pa.
+\end{table}
+
+% ---------------- Table 12 ----------------
+\begin{table}[htbp]
+\centering
+\caption*{Table 12\\ Coefficients and exponents of Eq.~(29)}
+\begin{tabular}{ccr}
+\toprule
+$i$ & $\beta_i$ & \multicolumn{1}{c}{$\alpha_i$} \\
+\midrule
+1 & 1/3   & $1.99274064$ \\
+2 & 2/3   & $1.09965342$ \\
+3 & 5/3   & $-0.510839303$ \\
+4 & 16/3  & $-1.75493479$ \\
+5 & 43/3  & $-45.5170352$ \\
+6 & 110/3 & $-6.7469445\times10^{5}$ \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+\footnotesize $\rho_\mathrm{c} = 17{,}873$ \molm.
+\end{table}
+
+% ---------------- Table 13 ----------------
+\begin{table}[htbp]
+\centering
+\caption*{Table 13\\ Coefficients and exponents of Eq.~(30)}
+\begin{tabular}{cccr}
+\toprule
+$i$ & $\beta_i$ & $\gamma_i$ & \multicolumn{1}{c}{$\alpha_i$} \\
+\midrule
+1 & 0  & 0 & $1.38801$ \\
+2 & 2  & 2 & $-2.95318$ \\
+3 & 3  & 3 & $3.18721$ \\
+4 & 6  & 5 & $-0.645473$ \\
+5 & 34 & 0 & $9.18946\times10^{5}$ \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+\footnotesize $c_{p,\mathrm{t}} = 76.0226$ \JmolK;
+$T_\mathrm{c} = 647.096$ K; $T_\mathrm{t} = 273.16$ K.
+\end{table}
+
+% ---------------- Table 14 ----------------
+\begin{table}[htbp]
+\centering
+\caption*{Table 14\\ Coefficients and exponents of Eq.~(31)}
+\begin{tabular}{ccr}
+\toprule
+$i$ & $\beta_i$ & \multicolumn{1}{c}{$\alpha_i$} \\
+\midrule
+1 & 1/3  & $-4.37196\times10^{-1}$ \\
+2 & 2/3  & $3.03440\times10^{-1}$ \\
+3 & 5/6  & $-1.29582$ \\
+4 & 21/6 & $-1.76410\times10^{-1}$ \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+\footnotesize $T_\mathrm{c} = 647.096$ K;
+$h_\mathrm{c} = 37{,}548.5$ \Jmol.
+\end{table}
+
+% ---------------- Table 15 ----------------
+\begin{table}[htbp]
+\centering
+\caption*{Table 15\\ Coefficients and exponents of Eq.~(32)}
+\begin{tabular}{ccr}
+\toprule
+$i$ & $\beta_i$ & \multicolumn{1}{c}{$\alpha_i$} \\
+\midrule
+1 & 1/3 & $-3.34112\times10^{-1}$ \\
+2 & 1   & $-8.47987\times10^{-1}$ \\
+3 & 8/3 & $-9.11980\times10^{-1}$ \\
+4 & 8   & $-1.64046$ \\
+\bottomrule
+\end{tabular}
+
+\vspace{2pt}
+\footnotesize $T_\mathrm{c} = 647.096$ K;
+$s_\mathrm{c} = 79.3933$ \JmolK.
+\end{table}
+
+% ============================================================
+\section{Conclusion}
+% ============================================================
+% [Conclusion prose -- pp.\ 576-577.  Key quantitative points:
+%  published c_p data do not exceed 430 K; p-T-x data below 483 K
+%  were used for fitting the p(T,x) equation; extrapolation to 500 K
+%  is justified by the structure of the equations; validity of
+%  extrapolation of the p(T,x) equation demonstrated to 623 K;
+%  enthalpy and entropy consistent with Feuerecker et al. [5],
+%  Chua et al. [8], Kaita [7] and Langeliers et al. [49]; ANSI C
+%  code implementing Eqs. (1)-(5) available from the authors on
+%  request; largest data gap above 400 K and above 60 wt% LiBr; no
+%  single-phase data in the compressed liquid region.]
+
+% ============================================================
+\begin{thebibliography}{99}
+\small
+
+\bibitem{1} P. Srikhirin, S. Aphornratana, S. Cuungpaibulpatana,
+A review of absorption refrigeration technologies, Renewable Energy
+Rev 5 (2001) 343--372.
+
+\bibitem{2} L.A. Mc Neely, Thermodynamic properties of aqueous
+solutions of lithium bromide, ASHRAE Trans 85 (1979) 413--434.
+
+\bibitem{3} K.E. Herold, M.J. Moran, Thermodynamic properties of
+lithium bromide/water solutions, ASHRAE Trans 93 (1997) 35--48.
+
+\bibitem{4} M.R. Patterson, H. Perez-Branco, Numerical fits of the
+properties of lithium bromide-water solutions, ASHRAE Trans 94 (1988)
+2379--2388.
+
+\bibitem{5} G. Feurecker, J. Scharfe, I. Greiter, C. Frank, G. Alefeld,
+Measurement of thermophysical properties of aqueous LiBr-solutions at
+high temperatures and concentrations, Proc Int Absorp Heat Pump Conf
+ASME 31 (1993) 493--499.
+
+\bibitem{6} J.P. Ruiter, Simplified thermodynamic description of
+mixtures and solution, Int J Refrigeration 13 (4) (1990) 223--236.
+
+\bibitem{7} Y. Kaita, Thermodynamic properties of lithium
+bromide-water solutions at high temperatures, Int J Refrigeration 24
+(2001) 374--390.
+
+\bibitem{8} H.T. Chua, H.T. Toh, A. Malek, K.C. Ng, K. Srinivasan,
+Improved thermodynamic property fields of LiBr--H$_2$O solution,
+Int J Refrigeration 23 (6) (2000) 412--429.
+
+\bibitem{9} R. Span, Multiparameter equation of state, Springer,
+Berlin, 2000.
+
+\bibitem{10} R. Tillner-Roth, D.G. Friend, A Helmholtz free energy
+formulation of the thermodynamic properties of the mixture
+water\,+\,ammonia, J Phys Chem Ref Data 27 (1) (1998) 63--96.
+
+\bibitem{11} W. Wagner, A. Pru\ss, The IAPWS formulation 1995 for the
+thermodynamic properties of ordinary water substance for general and
+scientific use, J Phys Chem Ref Data 31 (2) (2002) 387--535.
+
+\bibitem{12} K.M. de Reuck, B. Armstrong, A method of correlation
+using a search procedure based on step-wise least-square technique,
+and its application to an equation of state for propylene, Cryogenics
+19 (1979) 228--234.
+
+\bibitem{13} E. Lange, E. Schwartz, L\"osungs- und
+Verd\"unnungsw\"armen von Salzen von der \"aussersten Verd\"unnung bis
+zur S\"attigung. IV. Lithiumbromid, Z Phys Chem 133 (3/4) (1928)
+129--150.
+
+\bibitem{14} S. Hasaba, T. Uemura, H. Narita, Some thermal and
+physical properties of lithium bromide-water solutions for the
+designing of absorption refrigerating machines, Refrigeration 36 (405)
+(1961) 622--629.
+
+\bibitem{15} G. Tammann, Ueber die Dampftensionen von
+Salzl\"osungen, Ann Phys Chem 24 (1885) 523--569.
+
+\bibitem{16} A. Lannung, Dampfdruckmessungen w\"asseriger L\"osungen
+der Alkalihalogenide, Z Phys Chem A 170 (1934) 134--144.
+
+\bibitem{17} W. Pennington, How to find accurate vapor pressure of
+LiBr water solutions, Refrigeration Eng 63 (1955) 57--61.
+
+\bibitem{18} H. L\"ower, Thermodynamische und physikalische
+Eigenschaften der w\"assrigen Lithiumbromid-L\"osung, PhD thesis,
+Technischen Hochschule Karlsruhe, 1960.
+
+\bibitem{19} D.A. Boryta, A.J. Maas, C.B. Grant,
+Pressure--temperature--concentration relationship for system lithium
+bromide and water (40--70\% lithium bromide), J Chem Eng Data 20 (3)
+(1975) 316--319.
+
+\bibitem{20} E. Sada, T. Morisue, K. Miyahara, Salt effects on
+vapor--liquid equilibrium of isopropanol--water system, J Chem Eng Jpn
+8 (3) (1975) 196--201.
+
+\bibitem{21} M.K. Fedorov, N.A. Antonov, S.N. L'vov, Vapor pressure of
+saturated aqueous solutions LiCl, LiBr and LiI and thermodynamic
+characteristics of the solvent in these systems at temperatures of
+150--350 $^{\circ}$C and pressures up to 150 bar, Zh Prikl Khim 49 (6)
+(1976) 1226--1232.
+
+\bibitem{22} M. Felli, F. Mattiucci, P-T-x experimental data of
+working mixtures for absorption refrigeration; evaluation of their
+performances with low generator temperatures, XVth International
+Congress of Refrigeration, Proceedings, vol.\ II 1979 p.\ 199--210.
+
+\bibitem{23} A. Matsuda, T. Munakata, T. Yoshimaru, T. Kubara,
+H. Fuchi, Measurement of vapor pressures of lithium bromide water
+solutions, Kagaku Kogaku Ronbunshu 6 (2) (1980) 119--122.
+
+\bibitem{24} M. Renz, Bestimmung Thermodynamischer Eigenschaften
+W\"assriger und Methylalkoholischer Salzl\"osungen,
+Forschungsberichte des Deutschen K\"alte- und Klimatechnischen
+Vereins, 1980 [Nr.\ 5].
+
+\bibitem{25} S. Iyoki, T. Uemura, Vapour pressure of the
+water--lithium bromide system and the water--lithium bromide--zinc
+bromide--lithium chloride system at high temperatures, Int J
+Refrigeration 12 (5) (1989) 278--282.
+
+\bibitem{26} K.R. Patil, A.D. Tripathi, G. Pathak, S.S. Katti,
+Thermodynamic properties of aqueous electrolyte solutions. Vapor
+pressure of aqueous solution of LiCl, LiBr, and LiI, J Chem Eng Data
+35 (2) (1990) 166--168.
+
+\bibitem{27} J.L.Y. Lenard, A.M. Jeter, A.S. Teja, Properties of
+lithium bromide--water solutions at high temperatures and
+concentrations-Part IV: vapor pressure, ASHRAE Trans 98 (1) (1992)
+167--172.
+
+\bibitem{28} K. Murakami, H. Sato, K. Watanabe, Measurements of
+bubble-point pressures for the binary LiBr/H$_2$O pair, Proc Int
+Absorp Heat Pump Conf ASME 31 (1993) 509--515.
+
+\bibitem{29} P. Kremers, Ueber die Modification der mittleren
+L\"oslichkeit einiger Salzatome und des mittleren Volums dieser
+L\"osungen, Ann Phys Chem 104 (1858) 133--162.
+
+\bibitem{30} W.C. R\"ontgen, J. Schneider, Ueber Compressibilit\"at
+und Oberfl\"achenspannung von Fl\"ussigkeiten, Ann Phys Chem 29 (1886)
+165--213.
+
+\bibitem{31} A. Heydweiller, \"Uber physikalische Eigenschaften von
+L\"osungen in ihrem Zusammenhang. I. Dichte und elektrisches
+Leitverm\"ogen w\"asseriger Saltzl\"osungen, Ann Phys 30 (1909)
+873--904.
+
+\bibitem{32} G.P. Baxter, A.C. Boylston, E. Mueller, N.H. Balck,
+P.B. Goode, The refractive power of the halogen salts of lithium,
+sodium and potassium in aqueous solution, J Am Chem Soc 33 (1911)
+901--922.
+
+\bibitem{33} K. Grufki, PhD Thesis, Rostock 1913; Datas taken over
+from Ref.\ [51].
+
+\bibitem{34} C. L\"ubben, PhD Thesis, Rostock 1913; Datas taken over
+from Ref.\ [51].
+
+\bibitem{35} O. Gropp, PhD Thesis, Rostock 1915; Datas taken over from
+Ref.\ [51].
+
+\bibitem{36} G.P. Baxter, C.C. Wallace, Change in volume upon solution
+in water of the halogen salts of the alkali metals. II, J Am Chem Soc
+38 (1916) 70--105.
+
+\bibitem{37} F. de Block, Bull Acad Roy Belg V 11 (1925) 333 [Datas
+taken over from Ref.\ [51]].
+
+\bibitem{38} A.F. Scott, V.M. Obenhaus, R.W. Wilson, The
+compressibility coefficients of solutions of eight alkali halides,
+J Phys Chem 38 (1934) 931--940.
+
+\bibitem{39} A.F. Scott, G.L. Bridger, The apparent volumes and
+apparent compressibilities of solutes in solution. II. Concentrated
+solutions of lithium chloride and bromide, J Phys Chem 39 (1935)
+1031--1039.
+
+\bibitem{40} S.A. Bogatykh, I.D. Evnovitch, Investigation of density
+of aqueous LiBr, LiCl and CaCl$_2$ solutions in relation to conditions
+of gas drying, Zh Prikl Khim 36 (8) (1965) 945--946.
+
+\bibitem{41} V.P. Mashovets, N.M. Baron, M.Y. Sherba, Viscosity and
+density aqueous LiCl, LiBr and LiJ solutions at middle and low
+temperatures, Zh Prikl Khim 44 (1971) 1981--1986.
+
+\bibitem{42} R.J. Lee, R.M. DiGuilio, S.M. Jeter, A.S. Teja,
+Properties of lithium bromide--water solution at high temperatures and
+concentrations-II: density and viscosity, AHRAE Trans 96 (1) (1990)
+709--714.
+
+\bibitem{43} J.M. Wimby, T.S. Berntsson, Viscosity and density of
+aqueous solution of LiBr, LiCl, ZnBr$_2$, CaCl$_2$ and LiNO$_3$.
+1. Single salt solutions, J Chem Eng Data 39 (1) (1994) 68--72.
+
+\bibitem{44} K. Murakami, Density and crystallization temperature of
+lithium--bromide aqueous solution, Proceedings of Asian conference on
+refrigeration and air conditioning, Kobe, Japan, 2002.
+
+\bibitem{45} K. Jauch, Die spezifische W\"arme w\"asseriger
+Salzl\"osungen, Z Phys 4 (1921) 441--447.
+
+\bibitem{46} S. Iyoki, T. Uemura, Heat capacity of the water--lithium
+bromide system and the water--lithium bromide--zinc bromide--lithium
+chloride system at high temperatures, Int J Refrigeration 12 (1989)
+323--326.
+
+\bibitem{47} S. Hasaba, K. Kawai, K. Kawasaki, T. Uemura, Specific
+heat of aqueous solution of LiBr in water and solubility,
+Refrigeration 35 (397) (1960) 815--819.
+
+\bibitem{48} A.M. Jeter, J.P. Moran, A.S. Teja, Properties of lithium
+bromide--water solutions at high temperatures and
+concentrations---Part III: specific heat, ASHRAE Trans 98 (1) (1992)
+137--149.
+
+\bibitem{49} J. Langeliers, P. Sarkisian, U. Rockenfeller, Vapor
+pressure and specific heat of LiBr--H$_2$O at high temperature, ASHRAE
+Trans 109 (1) (2003) 423--427.
+
+\bibitem{50} J. P\'atek, O. \v{S}ifner, J. Bern\'atek, Simplified
+equations of thermodynamic properties of water for industrial use, in:
+M. P\'ichal, O. \v{S}ifner (Eds.), Properties of water and steam,
+Proceedings of the 11th International Conference, September 4--8 1989,
+Hemisphere Publishing Corp, Prague, 1990.
+
+\bibitem{51} J. Timmermans, The physico--chemical constants of binary
+systems in concentrated solutions, System with metallic compounds,
+vol.\ 3, 1960.
+
+\end{thebibliography}
+
+\end{document}

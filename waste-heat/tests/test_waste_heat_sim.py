@@ -107,7 +107,7 @@ def test_hydrogel_isotherm_inverts(config_hydrogel: SystemConfig):
         c_s=params.c_s_mol_m3,
         ions_per_formula=params.ions_per_formula,
         temperature_c=30.0,
-        salt_to_polymer_ratio=config_hydrogel.salt_to_polymer_ratio,
+        salt_loading=config_hydrogel.salt_loading,
         h_m=config_hydrogel.hydrogel_thickness_m,
         h0_ref_m=config_hydrogel.hydrogel_thickness_m,
     )
@@ -116,7 +116,7 @@ def test_hydrogel_isotherm_inverts(config_hydrogel: SystemConfig):
         c_s=params.c_s_mol_m3,
         ions_per_formula=params.ions_per_formula,
         temperature_c=30.0,
-        salt_to_polymer_ratio=config_hydrogel.salt_to_polymer_ratio,
+        salt_loading=config_hydrogel.salt_loading,
         h_m=config_hydrogel.hydrogel_thickness_m,
         h0_ref_m=config_hydrogel.hydrogel_thickness_m,
     )

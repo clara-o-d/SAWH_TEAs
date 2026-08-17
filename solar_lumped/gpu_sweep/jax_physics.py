@@ -14,6 +14,29 @@ from solar_lumped._parameters_xlsx import physics_value as _pv
 # Same m_des clamp the CPU path brackets its bisection with, so the joint Newton solve
 # below can't wander outside the range solve_m_des_and_thermal would have searched.
 from solar_lumped.simulation import _M_DES_BRACKET_MAX
+# Same g -> infinity scale as physics.mass_transfer_g_m_s, so both backends idealize
+# by the identical factor.
+from solar_lumped.physics import _INSTANT_EQUILIBRIUM_G_SCALE
+# Tsilingiris (2008) / Marrero & Mason (1972) coefficients and validity bounds are
+# imported, not restated: a duplicated polynomial is a silent backend divergence waiting
+# to happen, and physics.py carries the provenance comments for all of them.
+from solar_lumped.physics import (
+    _AIR_PROPS_T_HI_C,
+    _AIR_PROPS_T_LO_C,
+    _ATM_IN_PA,
+    _CP_A_KJ_KG_K,
+    _CP_V_KJ_KG_K,
+    _D_H2O_AIR_A_ATM_CM2,
+    _D_H2O_AIR_S,
+    _D_H2O_AIR_T_HI_C,
+    _D_H2O_AIR_T_LO_C,
+    _K_A_W_M_K,
+    _K_V_W_M_K,
+    _M_AIR_KG_KMOL,
+    _MU_A_NS_M2,
+    _MU_V_NS_M2,
+    _RHO_AIR_REF_KG_M3,
+)
 
 jax.config.update("jax_enable_x64", True)
 
@@ -29,7 +52,6 @@ RHO_GEL_KG_M3 = _pv("Composite (hydrogel) density at 20% RH (rho_gel)")
 RHO_COMPOSITE_KG_M3 = RHO_GEL_KG_M3
 H_DES_J_PER_KG = _pv("Desorption enthalpy, LiCl (h_des)")
 H_FG_J_PER_KG = _pv("Condensation enthalpy (h_fg)")
-K_AIR_W_M_K = _pv("Air thermal conductivity (k_air)")
 K_GEL_W_M_K = _pv("Hydrogel thermal conductivity (k_gel)")
 RABS_M2_K_W = _pv("Absorber-to-gel constant resistance (Rabs)")
 RHO_AL_KG_M3 = _pv("Aluminum density (rho_Al)")
@@ -45,16 +67,18 @@ EPS_ABS_IR_CASE2 = _pv("Absorber IR emissivity (eps_abs_ir)")
 EPS_GLASS_IR_CASE2 = _pv("Glass IR emissivity (eps_glass_ir)")
 
 STEFAN_BOLTZMANN = _pv("Stefan-Boltzmann constant (sigma)")
-D_AIR_M2_S = _pv("Water-vapor-in-air diffusivity (D_air)")
 GRAVITY_M_S2 = _pv("Gravitational acceleration (g)")
-BETA_AIR_K = 1.0 / _pv("Air reference temperature for thermal expansion")
-NU_AIR_M2_S = _pv("Air kinematic viscosity (nu_air)")
-RHO_AIR_KG_M3 = _pv("Air density (rho_air)")
-CP_AIR_J_KG_K = _pv("Air specific heat (cp_air)")
-ALPHA_AIR_M2_S = K_AIR_W_M_K / (RHO_AIR_KG_M3 * CP_AIR_J_KG_K)
+P_ATM_SEA_LEVEL_PA = _pv("Atmospheric pressure (P0)")
+# h_amb density derate; physics owns the exponent and the reference density.
+H_AMB_DENSITY_EXPONENT = _pv("Ambient convection density exponent")
+# ISO 15099 Eq. 52 aspect ratio A_g,i = height/gap; mirrors physics.CAVITY_HEIGHT_M.
+CAVITY_HEIGHT_M = _pv("Cavity height (H_cav)")
 
 WATER_MOLAR_MASS_KG_MOL = _pv("Water molar mass (MW_w)")
 GAS_CONSTANT_J_MOL_K = _pv("Universal gas constant (R)")
+# Tsilingiris works per kmol; mirrors the same two derived values in physics.py.
+_M_H2O_KG_KMOL = WATER_MOLAR_MASS_KG_MOL * 1e3
+_R_J_KMOL_K = GAS_CONSTANT_J_MOL_K * 1e3
 # No C_W_MAX/C_W_MIN module constants: both gel-water bounds are per-instance
 # (salt- and blend-dependent) and ride on MassParams. See physics.hydrate_floor_c_w
 # and physics.dilution_ceiling_c_w.
@@ -64,14 +88,42 @@ CONDENSER_THERMAL_MASS_J_M2_K = RHO_AL_KG_M3 * CP_AL_J_KG_K * L_C_M
 # Conde (2004) Table 3 LiCl vapour-pressure correlation parameters.
 _PI0, _PI1, _PI2, _PI3, _PI4 = 0.28, 4.30, 0.60, 0.21, 5.10
 _PI5, _PI6, _PI7, _PI8, _PI9 = 0.49, 0.362, -4.75, -0.40, 0.03
-# LiCl saturation (solubility) brine mass fraction: past saturation the excess salt is
-# solid and a_w pins here. Imported rather than recomputed -- this used to duplicate
-# physics.XI_SAT_LICL's arithmetic with a comment asking that the two be kept in step.
-from solar_lumped.physics import XI_SAT_LICL as _XI_SAT_LICL
 T_CRIT_H2O_K = _pv("Water critical temperature (T_crit,H2O)")
 P_CRIT_H2O_PA = _pv("Water critical pressure (P_crit,H2O)")
 _SAUL_WAGNER_A = jnp.array([-7.858230, 1.839910, -11.781100, 22.670500, -15.939300, 1.775160])
 _SAUL_WAGNER_EXP = jnp.array([1.0, 1.5, 3.0, 3.5, 4.0, 7.5])
+
+# LiCl saturation brine mass fraction: past saturation the excess salt is solid and a_w
+# pins here. Temperature-resolved from Conde's crystallization line (physics owns the
+# coefficients, imported rather than duplicated) because saturation concentration rises
+# with temperature -- 0.458 at 25 C, 0.528 at 80 C -- and this clip is what sets the
+# regime-2 activity plateau.
+from solar_lumped.physics import _CRYSTALLIZATION_LINE as _CRYST
+from solar_lumped.physics import BET_T_MAX_C, BET_T_MIN_C, CONDE_T_MAX_C
+from solar_lumped.physics import LICL_BET as _BET
+
+
+def xi_sat_licl(temperature_c):
+    """Lowest xi at which any LiCl solid phase can crystallize, at this temperature.
+
+    Mirrors physics.saturation_brine_salt_fraction("LiCl", T): the branch is whichever
+    admits the smallest root, since the solution saturates as soon as some solid can
+    form. The branch loop unrolls at trace time (coefficients are Python constants), so
+    this stays one fused expression per call and is vmap-safe."""
+    theta = (temperature_c + 273.15) / T_CRIT_H2O_K
+    best = jnp.full_like(jnp.asarray(theta, dtype=float), jnp.inf)
+    for a0, a1, a2 in _CRYST["LiCl"]:
+        if a2 == 0.0:
+            x = (theta - a0) / a1
+            best = jnp.where((x > 0.0) & (x < 1.0), jnp.minimum(best, x), best)
+            continue
+        disc = a1 * a1 - 4.0 * a2 * (a0 - theta)
+        root = jnp.sqrt(jnp.clip(disc, 0.0, None))
+        for sign in (1.0, -1.0):
+            x = (-a1 + sign * root) / (2.0 * a2)
+            ok = (disc >= 0.0) & (x > 0.0) & (x < 1.0)
+            best = jnp.where(ok, jnp.minimum(best, x), best)
+    return best
 
 TEMP_CLAMP_LO_C = _pv("Temperature clamp lower bound")
 TEMP_CLAMP_HI_C = _pv("Temperature clamp upper bound")
@@ -92,15 +144,38 @@ def saturation_vapor_pressure_pa(temperature_c):
     return P_CRIT_H2O_PA * jnp.exp(ln_p_pc)
 
 
+def _bet_water_activity_licl(xi, temperature_c):
+    """Zeng & Zhou (2006) eq 3 solved for a_w; mirrors physics.bet_water_activity."""
+    t_k = jnp.clip(temperature_c, BET_T_MIN_C, BET_T_MAX_C) + 273.15
+    m = 1000.0 * xi / (_BET.formula_weight_g_mol * (1.0 - xi))
+    r = _BET.r0 + _BET.r1 * t_k
+    c = jnp.exp(-(_BET.e0 + _BET.e1 * t_k) / (GAS_CONSTANT_J_MOL_K * t_k))
+    n = 1000.0 / 18.015
+    a, b, k = n * (c - 1.0), m * c * r - n * (c - 2.0), -n
+    disc = jnp.clip(b * b - 4.0 * a * k, 0.0, None)
+    return jnp.clip((-b + jnp.sqrt(disc)) / (2.0 * a), 0.0, 1.0)
+
+
+def _bet_temperature_factor_licl(xi, temperature_c):
+    """a_w(xi, T)/a_w(xi, 100 C) -- the >100 C slope Conde lacks. See physics."""
+    t = jnp.minimum(temperature_c, BET_T_MAX_C)
+    ref = _bet_water_activity_licl(xi, CONDE_T_MAX_C)
+    factor = _bet_water_activity_licl(xi, t) / jnp.clip(ref, 1e-30, None)
+    return jnp.where((ref > 0.0) & (temperature_c > CONDE_T_MAX_C), factor, 1.0)
+
+
 def vapor_pressure_ratio_licl(xi, temperature_c):
-    """pi = p_sol / p_H2O = brine water activity a_w (Conde 2004 Table 3, LiCl)."""
-    xi = jnp.clip(xi, 1e-12, _XI_SAT_LICL)
-    theta = (temperature_c + 273.15) / T_CRIT_H2O_K
+    """pi = p_sol / p_H2O = brine water activity a_w (Conde 2004 Table 3, LiCl).
+
+    Above CONDE_T_MAX_C the Conde part is held at 100 C and scaled by the Zeng & Zhou
+    BET temperature ratio, mirroring physics.vapor_pressure_ratio."""
+    xi = jnp.clip(xi, 1e-12, xi_sat_licl(temperature_c))
+    theta = (jnp.minimum(temperature_c, CONDE_T_MAX_C) + 273.15) / T_CRIT_H2O_K
     pi25 = 1.0 - (1.0 + (xi / _PI6) ** _PI7) ** _PI8 - _PI9 * jnp.exp(-((xi - 0.1) ** 2) / 0.005)
     a_term = 2.0 - (1.0 + (xi / _PI0) ** _PI1) ** _PI2
     b_term = (1.0 + (xi / _PI3) ** _PI4) ** _PI5 - 1.0
     f = a_term + b_term * theta
-    return jnp.clip(pi25 * f, 0.0, 1.0)
+    return jnp.clip(pi25 * f * _bet_temperature_factor_licl(xi, temperature_c), 0.0, 1.0)
 
 
 def licl_brine_salt_fraction_from_gel(c_w, *, c_s, h0_ref_m, formula_weight_g_mol):
@@ -116,8 +191,34 @@ def water_activity_licl_from_c_w(c_w, *, c_s, h0_ref_m, formula_weight_g_mol, te
     f_b = licl_brine_salt_fraction_from_gel(
         c_w, c_s=c_s, h0_ref_m=h0_ref_m, formula_weight_g_mol=formula_weight_g_mol
     )
-    aw = vapor_pressure_ratio_licl(f_b, jnp.minimum(temperature_c, 150.0))
+    aw = vapor_pressure_ratio_licl(f_b, jnp.minimum(temperature_c, BET_T_MAX_C))
     return jnp.where(c_w <= 0.0, 1.0, aw)
+
+
+_ISOSTERIC_DT_K = _pv("Isosteric h_des finite-difference step")
+_ISOSTERIC_T_MAX_C_LICL = BET_T_MAX_C
+
+
+def isosteric_h_des_j_per_kg(xi, temperature_c):
+    """Clausius-Clapeyron h_des at fixed composition; mirrors physics.isosteric_h_des_j_per_kg.
+
+    LiCl only -- this backend ports no other brine. vapor_pressure_ratio_licl re-clips xi
+    to xi_sat_licl(T) internally at each probe point, exactly as the CPU path does, so a
+    saturated gel gets the saturated-slurry slope on both backends."""
+    t_c = jnp.minimum(temperature_c, _ISOSTERIC_T_MAX_C_LICL - _ISOSTERIC_DT_K)
+
+    t1, t2 = t_c - _ISOSTERIC_DT_K, t_c + _ISOSTERIC_DT_K
+    # Clamp on the cold probe's saturation so both probes stay in one regime -- see the
+    # note in physics.isosteric_h_des_j_per_kg; straddling it reads the dissolution step.
+    xi_c = jnp.clip(xi, 1e-6, xi_sat_licl(t1))
+
+    def _ln_p(t):
+        aw = jnp.clip(vapor_pressure_ratio_licl(xi_c, t), 1e-300, None)
+        return jnp.log(aw * saturation_vapor_pressure_pa(t))
+
+    slope = (_ln_p(t2) - _ln_p(t1)) / (1.0 / (t2 + 273.15) - 1.0 / (t1 + 273.15))
+    h = -GAS_CONSTANT_J_MOL_K * slope / WATER_MOLAR_MASS_KG_MOL
+    return jnp.where(jnp.isfinite(h) & (h > 0.0), h, H_DES_J_PER_KG)
 
 
 def parallel_plate_emissivity(eps_a, eps_b):
@@ -134,13 +235,97 @@ def radiative_exchange_w_m2(t_hot_c, t_cold_c, emissivity):
     return emissivity * STEFAN_BOLTZMANN * (t_hot_k**4 - t_cold_k**4)
 
 
-def conduction_air_gap_w_m2(t_hot_c, t_cold_c, gap_m):
-    return jnp.where(gap_m <= 0.0, 0.0, K_AIR_W_M_K / jnp.clip(gap_m, 1e-30, None) * (t_hot_c - t_cold_c))
+def _poly(coeffs, x):
+    """Horner in ascending coefficient order; mirrors physics._poly."""
+    acc = 0.0
+    for c in reversed(coeffs):
+        acc = acc * x + c
+    return acc
 
 
-def _rayleigh_vapor_gap(gap_m, t_hot_c, t_cold_c):
-    delta_t = jnp.clip(jnp.abs(t_hot_c - t_cold_c), 1e-6, None)
-    return GRAVITY_M_S2 * BETA_AIR_K * delta_t * gap_m**3 / (NU_AIR_M2_S * ALPHA_AIR_M2_S)
+def humid_air_props(t_film_c, x_v=0.0, p_atm_pa=P_ATM_SEA_LEVEL_PA):
+    """(k, nu, alpha) of humid air at a film temperature; mirrors physics.humid_air_props.
+
+    Unlike the CPU version this has no dry-air early return -- at x_v = 0 the mixing
+    rules reduce to the dry-air values exactly (each vapor term is 0/positive), so one
+    traced path serves both gaps and there is no branch to diverge.
+    """
+    t = jnp.clip(t_film_c, _AIR_PROPS_T_LO_C, _AIR_PROPS_T_HI_C)
+    t_k = t + 273.15
+    xv = jnp.clip(x_v, 0.0, 1.0)
+    xa = 1.0 - xv
+
+    mu_a = _poly(_MU_A_NS_M2, t_k) * 1e-6      # Tsilingiris Eq. (38)
+    k_a = _poly(_K_A_W_M_K, t_k)               # Eq. (39) -- already W/m K
+    cp_a = _poly(_CP_A_KJ_KG_K, t_k) * 1e3     # Eq. (40)
+    mu_v = _poly(_MU_V_NS_M2, t) * 1e-7        # Eq. (41) -- 1e-7, not the printed 1e-6
+    k_v = _poly(_K_V_W_M_K, t) * 1e-3          # Eq. (42)
+    cp_v = _poly(_CP_V_KJ_KG_K, t) * 1e3       # Eq. (43)
+
+    m_ratio = _M_AIR_KG_KMOL / _M_H2O_KG_KMOL
+    root2_4 = jnp.sqrt(2.0) / 4.0
+    phi_av = root2_4 / jnp.sqrt(1.0 + m_ratio) * (
+        1.0 + jnp.sqrt(mu_a / mu_v) * (1.0 / m_ratio) ** 0.25
+    ) ** 2
+    phi_va = root2_4 / jnp.sqrt(1.0 + 1.0 / m_ratio) * (
+        1.0 + jnp.sqrt(mu_v / mu_a) * m_ratio**0.25
+    ) ** 2
+
+    mu = xa * mu_a / (xa + xv * phi_av) + xv * mu_v / (xv + xa * phi_va)
+    k = xa * k_a / (xa + xv * phi_av) + xv * k_v / (xv + xa * phi_va)
+    cp = (cp_a * xa * _M_AIR_KG_KMOL + cp_v * xv * _M_H2O_KG_KMOL) / (
+        _M_AIR_KG_KMOL * xa + _M_H2O_KG_KMOL * xv
+    )
+    rho = p_atm_pa * _M_AIR_KG_KMOL / (_R_J_KMOL_K * t_k) * (1.0 - xv * (1.0 - 1.0 / m_ratio))
+    return k, mu / rho, k / (rho * cp)
+
+
+def vapor_gap_water_mole_fraction(t_cond_c, p_atm_pa=P_ATM_SEA_LEVEL_PA):
+    """x_v pinned by the condenser; mirrors physics.vapor_gap_water_mole_fraction.
+
+    The `<= 0 C -> dry` guard mirrors the CPU path deliberately: there
+    water_vapor_pressure_pa returns NaN over ice and the caller falls back to dry air,
+    whereas this backend's saturation_vapor_pressure_pa clamps instead of failing. Without
+    the explicit where, the two would disagree on sub-zero iterates.
+    """
+    p_v = saturation_vapor_pressure_pa(t_cond_c)
+    return jnp.where(t_cond_c <= 0.0, 0.0, jnp.clip(p_v / p_atm_pa, 0.0, 1.0))
+
+
+def d_h2o_air_m2_s(t_c, p_atm_pa=P_ATM_SEA_LEVEL_PA):
+    """Marrero & Mason (1972) Table 13 air-H2O; mirrors physics.d_h2o_air_m2_s."""
+    t_k = jnp.clip(t_c, _D_H2O_AIR_T_LO_C, _D_H2O_AIR_T_HI_C) + 273.15
+    return _D_H2O_AIR_A_ATM_CM2 * t_k**_D_H2O_AIR_S / (p_atm_pa / _ATM_IN_PA) * 1e-4
+
+
+def h_amb_density_factor(t_amb_c, p_atm_pa=P_ATM_SEA_LEVEL_PA, exponent=H_AMB_DENSITY_EXPONENT):
+    """(rho_amb/rho_ref)^n; mirrors physics.h_amb_density_factor."""
+    t_k = jnp.clip(t_amb_c + 273.15, 1.0, None)
+    rho = jnp.clip(p_atm_pa, 0.0, None) * _M_AIR_KG_KMOL / (_R_J_KMOL_K * t_k)
+    return (rho / _RHO_AIR_REF_KG_M3) ** exponent
+
+
+def conduction_air_gap_w_m2(t_hot_c, t_cold_c, gap_m, p_atm_pa=P_ATM_SEA_LEVEL_PA):
+    """Dry-air conduction across one sealed glazing gap, k at THAT gap's film temperature.
+
+    Called separately for absorber-glass and pane-pane, which sit at genuinely different
+    temperatures -- mirrors the _gap_conduction_w_m2 closure in physics._residuals.
+    """
+    k_air = humid_air_props(0.5 * (t_hot_c + t_cold_c), 0.0, p_atm_pa)[0]
+    return jnp.where(gap_m <= 0.0, 0.0, k_air / jnp.clip(gap_m, 1e-30, None) * (t_hot_c - t_cold_c))
+
+
+def _rayleigh_vapor_gap(gap_m, t_hot_c, t_cold_c, x_v=0.0, p_atm_pa=P_ATM_SEA_LEVEL_PA):
+    """Note S1 Eq. S3 — exact Δρ buoyancy (ideal-gas air, ρ_air at film temperature);
+    mirrors physics.rayleigh_vapor_gap. Not the Boussinesq β·ΔT linearization. ν and α are
+    evaluated at the same film temperature, so one temperature serves the whole group."""
+    t_hot_k = jnp.clip(t_hot_c + 273.15, 1.0, None)
+    t_cold_k = jnp.clip(t_cold_c + 273.15, 1.0, None)
+    t_film_k = 0.5 * (t_hot_k + t_cold_k)
+    delta_t = jnp.clip(jnp.abs(t_hot_k - t_cold_k), 1e-6, None)
+    d_rho_over_rho = t_film_k * delta_t / (t_hot_k * t_cold_k)
+    _, nu_air, alpha_air = humid_air_props(t_film_k - 273.15, x_v, p_atm_pa)
+    return GRAVITY_M_S2 * d_rho_over_rho * gap_m**3 / (nu_air * alpha_air)
 
 
 def hollands_nu_eq_s3(ra, *, tilt_deg):
@@ -154,11 +339,31 @@ def hollands_nu_eq_s3(ra, *, tilt_deg):
     return jnp.where(ra_cos <= 0.0, 1.0, nu)
 
 
-def hollands_vapor_gap_h_conv_w_m2_k(gap_m, t_hot_c, t_cold_c, *, tilt_deg):
-    ra = _rayleigh_vapor_gap(jnp.clip(gap_m, 1e-30, None), t_hot_c, t_cold_c)
-    nu = hollands_nu_eq_s3(ra, tilt_deg=tilt_deg)
-    h = nu * K_AIR_W_M_K / jnp.clip(gap_m, 1e-30, None)
-    return jnp.where(gap_m <= 0.0, 0.0, h)
+def iso15099_nu_vertical(ra, aspect_ratio):
+    """ISO 15099 Eqs. 48-52 (vertical cavity); mirrors physics.iso15099_nu_vertical."""
+    ra_s = jnp.clip(ra, 1e-30, None)
+    nu1 = jnp.where(
+        ra_s > 5e4,
+        0.0673838 * ra_s ** (1.0 / 3.0),
+        jnp.where(ra_s > 1e4, 0.028154 * ra_s**0.4134, 1.0 + 1.7596678e-10 * ra_s**2.2984755),
+    )
+    nu2 = 0.242 * (ra_s / jnp.clip(aspect_ratio, 1e-6, None)) ** 0.272
+    return jnp.maximum(1.0, jnp.maximum(nu1, nu2))
+
+
+def vapor_gap_h_conv_w_m2_k(gap_m, t_gel_c, t_cond_c, *, tilt_deg, p_atm_pa=P_ATM_SEA_LEVEL_PA):
+    """Heated-from-above ISO 15099 sec. 5.3.3.5 gap; mirrors physics.vapor_gap_h_conv_w_m2_k.
+    Hollands (heated-from-below) only for the inverted condenser-hotter case."""
+    gap = jnp.clip(gap_m, 1e-30, None)
+    # Humid, at this gap's own film temperature -- the condenser pins x_v. The glazing
+    # gaps go through conduction_air_gap_w_m2 with their own (hotter, dry) film temps.
+    x_v = vapor_gap_water_mole_fraction(t_cond_c, p_atm_pa)
+    k_air = humid_air_props(0.5 * (t_gel_c + t_cond_c), x_v, p_atm_pa)[0]
+    ra = _rayleigh_vapor_gap(gap, t_gel_c, t_cond_c, x_v, p_atm_pa)
+    nu_v = iso15099_nu_vertical(ra, CAVITY_HEIGHT_M / gap)
+    nu_above = 1.0 + (nu_v - 1.0) * jnp.sin(jnp.radians(180.0 - tilt_deg))
+    nu = jnp.where(t_cond_c > t_gel_c, hollands_nu_eq_s3(ra, tilt_deg=tilt_deg), nu_above)
+    return jnp.where(gap_m <= 0.0, 0.0, nu * k_air / gap)
 
 
 def condenser_h_conv_w_m2_k(h_amb, *, fin_area_ratio, fin_thickness_m=None, fin_height_m=None):
@@ -208,8 +413,13 @@ def blend_water_activity_from_c_w(
     return jnp.where(c_w <= 0.0, 1.0, aw)
 
 
-def mass_transfer_g_from_h_conv_m_s(h_conv):
-    return jnp.where(h_conv <= 0.0, 0.0, h_conv * D_AIR_M2_S / K_AIR_W_M_K)
+def mass_transfer_g_from_h_conv_m_s(h_conv, t_gel_c, t_cond_c, p_atm_pa=P_ATM_SEA_LEVEL_PA):
+    """Note S1 Eq. S5 (Le ≈ 1); mirrors physics.mass_transfer_g_from_h_conv_m_s. D_air and
+    k_air are both taken at the vapor gap's film temperature."""
+    t_film_c = 0.5 * (t_gel_c + t_cond_c)
+    x_v = vapor_gap_water_mole_fraction(t_cond_c, p_atm_pa)
+    k_air = humid_air_props(t_film_c, x_v, p_atm_pa)[0]
+    return jnp.where(h_conv <= 0.0, 0.0, h_conv * d_h2o_air_m2_s(t_film_c, p_atm_pa) / k_air)
 
 
 def u_gel_w_m2_k(h_m):
@@ -233,6 +443,7 @@ class MassParams:
     def __init__(
         self, *, h0_ref_m, vapor_gap_m, tilt_deg, c_s_mol_m3, formula_weight_g_mol,
         c_w_min_mol_m3, c_w_max_mol_m3, g_conv_m_s=0.015, aw_table=None,
+        instant_equilibrium=False, p_atm_pa=P_ATM_SEA_LEVEL_PA,
     ):
         self.h0_ref_m = h0_ref_m
         self.vapor_gap_m = vapor_gap_m
@@ -248,14 +459,26 @@ class MassParams:
         # Complex mode (B8): host-built (T, f_b) -> a_w table. None keeps the
         # closed-form LiCl isotherm, which is what the simple model uses.
         self.aw_table = aw_table
+        # Ideal case: g -> infinity (static, uniform across the batch). Mirrors
+        # SystemConfig.instant_equilibrium / MassTransferParams.instant_equilibrium.
+        self.instant_equilibrium = instant_equilibrium
+        # Site ambient pressure; mirrors MassTransferParams.p_atm_pa.
+        self.p_atm_pa = p_atm_pa
 
 
 def dc_dh_desorption(c_w, *, t_gel_c, t_cond_c, h_m, mass: MassParams):
     """Eqs. 5-6 desorption branch (dc_w/dt, dH/dt), before the clip-to-<=0 in sorbent.py."""
     gap_m = jnp.clip(mass.vapor_gap_m - h_m, 0.0, None)
-    h_conv = hollands_vapor_gap_h_conv_w_m2_k(gap_m, t_gel_c, t_cond_c, tilt_deg=mass.tilt_deg)
-    g = mass_transfer_g_from_h_conv_m_s(h_conv)
-    g = jnp.where(gap_m < VAPOR_GAP_TRANSPORT_MIN_M, 0.0, g)
+    if mass.instant_equilibrium:
+        # g -> infinity, including past the 7 mm transport cutoff below -- that cutoff
+        # is itself a mass-transfer limit. Static branch, same as the CPU path.
+        g = _INSTANT_EQUILIBRIUM_G_SCALE * mass.g_conv_m_s
+    else:
+        h_conv = vapor_gap_h_conv_w_m2_k(
+            gap_m, t_gel_c, t_cond_c, tilt_deg=mass.tilt_deg, p_atm_pa=mass.p_atm_pa
+        )
+        g = mass_transfer_g_from_h_conv_m_s(h_conv, t_gel_c, t_cond_c, mass.p_atm_pa)
+        g = jnp.where(gap_m < VAPOR_GAP_TRANSPORT_MIN_M, 0.0, g)
 
     c_r = concentration_ratio_desorption(t_gel_c, t_cond_c)
     if mass.aw_table is None:
@@ -296,7 +519,9 @@ def dc_dh_desorption(c_w, *, t_gel_c, t_cond_c, h_m, mass: MassParams):
 
     dc = jnp.minimum(dc, 0.0)
     dh = jnp.minimum(dh, 0.0)
-    dh = jnp.where(h_m <= mass.h0_ref_m + 1e-12, 0.0, dh)
+    # Bounded at the hydrate floor, not at the as-cast H0 -- mirrors the CPU
+    # evaluate_mass_rates so the two backends stop the gel shrinking together.
+    dh = jnp.where(c_w <= mass.c_w_min_mol_m3, 0.0, dh)
     return dc, dh
 
 
@@ -316,6 +541,9 @@ class ThermalParams:
         # per-instance arrays; only ``complex_mode`` (set on the builder) is static,
         # since it fixes how many unknowns the Newton solve carries.
         n_glazing_panes=1.0, evacuated_gap=0.0, complex_mode=False,
+        # Static: mirrors SystemConfig.h_des_mode == "isosteric" on the CPU path.
+        h_des_isosteric=False,
+        p_atm_pa=P_ATM_SEA_LEVEL_PA,
     ):
         self.insulation_gap_m = insulation_gap_m
         self.vapor_gap_m = vapor_gap_m
@@ -328,6 +556,9 @@ class ThermalParams:
         self.evacuated_gap = evacuated_gap
         self.complex_mode = complex_mode
         self.h_des_j_per_kg = H_DES_J_PER_KG
+        self.h_des_isosteric = h_des_isosteric
+        # Site ambient pressure; mirrors SystemThermalParams.p_atm_pa.
+        self.p_atm_pa = p_atm_pa
 
     @property
     def n_thermal_unknowns(self) -> int:
@@ -335,20 +566,29 @@ class ThermalParams:
         return 4 if self.complex_mode else 3
 
 
-def _thermal_residuals(x, *, t_cond_c, t_amb_c, q_solar_w_m2, m_des, h_amb, params: ThermalParams, gap_eff_m, h_m):
+def _thermal_residuals(x, *, t_cond_c, t_amb_c, q_solar_w_m2, m_des, h_amb, params: ThermalParams, gap_eff_m, h_m, brine_salt_fraction=None):
     t_gel, t_abs, t_glass = x[0], x[1], x[2]
     u_gel = u_gel_w_m2_k(h_m)
-    h_conv_g = hollands_vapor_gap_h_conv_w_m2_k(gap_eff_m, t_gel, t_cond_c, tilt_deg=params.tilt_deg)
+    h_conv_g = vapor_gap_h_conv_w_m2_k(
+        gap_eff_m, t_gel, t_cond_c, tilt_deg=params.tilt_deg, p_atm_pa=params.p_atm_pa
+    )
+    # Thinner air convects less; mirrors the same line in physics._residuals.
+    h_amb = h_amb * h_amb_density_factor(t_amb_c, params.p_atm_pa)
     eps_gc = parallel_plate_emissivity(EPS_GEL, EPS_AL)
     q_rad_gc = radiative_exchange_w_m2(t_gel, t_cond_c, eps_gc)
 
-    q_des = m_des * params.h_des_j_per_kg
+    h_des = (
+        params.h_des_j_per_kg
+        if (brine_salt_fraction is None or not params.h_des_isosteric)
+        else isosteric_h_des_j_per_kg(brine_salt_fraction, t_gel)
+    )
+    q_des = m_des * h_des
     r1 = u_gel * (t_abs - t_gel) - h_conv_g * (t_gel - t_cond_c) - q_des - q_rad_gc
 
     eps_ag = parallel_plate_emissivity(params.eps_abs_ir, params.eps_glass_ir)
     eps_ga = params.eps_glass_ir
     if not params.complex_mode:
-        q_cond_ag = conduction_air_gap_w_m2(t_abs, t_glass, params.insulation_gap_m)
+        q_cond_ag = conduction_air_gap_w_m2(t_abs, t_glass, params.insulation_gap_m, params.p_atm_pa)
         q_rad_ag = radiative_exchange_w_m2(t_abs, t_glass, eps_ag)
         q_rad_ga = radiative_exchange_w_m2(t_glass, t_amb_c, eps_ga)
         r3 = q_cond_ag + q_rad_ag - h_amb * (t_glass - t_amb_c) - q_rad_ga
@@ -364,12 +604,12 @@ def _thermal_residuals(x, *, t_cond_c, t_amb_c, q_solar_w_m2, m_des, h_amb, para
     uncovered = params.n_glazing_panes < 0.5
     # An evacuated assembly kills gas conduction across every glazing gap but leaves
     # radiation untouched -- that asymmetry is the whole point of paying for it.
-    cond_ag = conduction_air_gap_w_m2(t_abs, t_glass, params.insulation_gap_m)
+    cond_ag = conduction_air_gap_w_m2(t_abs, t_glass, params.insulation_gap_m, params.p_atm_pa)
     q_cond_ag = jnp.where(params.evacuated_gap >= 0.5, 0.0, cond_ag)
     q_rad_ag = radiative_exchange_w_m2(t_abs, t_glass, eps_ag)
     q_rad_ga = radiative_exchange_w_m2(t_glass, t_amb_c, eps_ga)
 
-    cond_io = conduction_air_gap_w_m2(t_glass, t_glass_outer, params.insulation_gap_m)
+    cond_io = conduction_air_gap_w_m2(t_glass, t_glass_outer, params.insulation_gap_m, params.p_atm_pa)
     q_cond_io = jnp.where(params.evacuated_gap >= 0.5, 0.0, cond_io)
     eps_pane = parallel_plate_emissivity(eps_ga, eps_ga)
     q_rad_io = radiative_exchange_w_m2(t_glass, t_glass_outer, eps_pane)
@@ -401,7 +641,8 @@ def _thermal_residuals(x, *, t_cond_c, t_amb_c, q_solar_w_m2, m_des, h_amb, para
 
 
 def solve_steady_thermal(
-    *, t_cond_c, t_amb_c, q_solar_w_m2, m_des, h_amb, params: ThermalParams, h_m, gap_eff_m, x0, n_iter=8
+    *, t_cond_c, t_amb_c, q_solar_w_m2, m_des, h_amb, params: ThermalParams, h_m, gap_eff_m, x0,
+    n_iter=8, brine_salt_fraction=None,
 ):
     """Fixed-iteration Newton solve of Eqs. 1/3/4, replacing scipy.optimize.root('hybr')."""
 
@@ -409,11 +650,13 @@ def solve_steady_thermal(
         r = _thermal_residuals(
             x, t_cond_c=t_cond_c, t_amb_c=t_amb_c, q_solar_w_m2=q_solar_w_m2,
             m_des=m_des, h_amb=h_amb, params=params, gap_eff_m=gap_eff_m, h_m=h_m,
+            brine_salt_fraction=brine_salt_fraction,
         )
         jac = jax.jacfwd(
             lambda xx: _thermal_residuals(
                 xx, t_cond_c=t_cond_c, t_amb_c=t_amb_c, q_solar_w_m2=q_solar_w_m2,
                 m_des=m_des, h_amb=h_amb, params=params, gap_eff_m=gap_eff_m, h_m=h_m,
+                brine_salt_fraction=brine_salt_fraction,
             )
         )(x)
         step = jnp.linalg.solve(jac, r)
@@ -421,7 +664,9 @@ def solve_steady_thermal(
         return x_new, None
 
     x_final, _ = jax.lax.scan(body, x0, None, length=n_iter)
-    h_conv_g = hollands_vapor_gap_h_conv_w_m2_k(gap_eff_m, x_final[0], t_cond_c, tilt_deg=params.tilt_deg)
+    h_conv_g = vapor_gap_h_conv_w_m2_k(
+        gap_eff_m, x_final[0], t_cond_c, tilt_deg=params.tilt_deg, p_atm_pa=params.p_atm_pa
+    )
     return x_final, h_conv_g
 
 
@@ -434,6 +679,10 @@ def _joint_residuals(z, *, c_w, h_m, t_cond_c, t_amb_c, q_solar_w_m2, h_amb, the
     r_thermal = _thermal_residuals(
         x, t_cond_c=t_cond_c, t_amb_c=t_amb_c, q_solar_w_m2=q_solar_w_m2,
         m_des=m_des, h_amb=h_amb, params=thermal, gap_eff_m=gap_eff_m, h_m=h_m,
+        brine_salt_fraction=licl_brine_salt_fraction_from_gel(
+            c_w, c_s=mass.c_s_mol_m3, h0_ref_m=mass.h0_ref_m,
+            formula_weight_g_mol=mass.formula_weight_g_mol,
+        ),
     )
     t_gel = x[0]
     dc, _ = dc_dh_desorption(c_w, t_gel_c=t_gel, t_cond_c=t_cond_c, h_m=h_m, mass=mass)
@@ -495,6 +744,7 @@ def desorption_rhs(
     thermal: ThermalParams,
     mass: MassParams,
     h0_ref_m,
+    h_floor_m,
     h_fg_j_per_kg,
     fin_area_ratio,
     x0_guess,
@@ -513,7 +763,7 @@ def desorption_rhs(
     is pinned to T_amb every step instead of evolving via Eq. 2, and y[2]'s
     derivative is zeroed since that state is no longer read."""
     c_w, h_m_raw, t_cond = y[0], y[1], y[2]
-    h_m = jnp.clip(h_m_raw, h0_ref_m, None)
+    h_m = jnp.clip(h_m_raw, h_floor_m, None)
     t_cond_c = t_amb_c if condenser_tracks_ambient else clamp_temperature_c(t_cond)
     gap_eff_m = jnp.clip(thermal.vapor_gap_m - h_m, 0.0, None)
     q_sol = jnp.clip(q_solar_w_m2, 0.0, None)
@@ -526,8 +776,12 @@ def desorption_rhs(
 
     _, dh = dc_dh_desorption(c_w, t_gel_c=t_gel, t_cond_c=t_cond_c, h_m=h_m, mass=mass)
 
-    h_conv_g = hollands_vapor_gap_h_conv_w_m2_k(gap_eff_m, t_gel, t_cond_c, tilt_deg=thermal.tilt_deg)
+    h_conv_g = vapor_gap_h_conv_w_m2_k(
+        gap_eff_m, t_gel, t_cond_c, tilt_deg=thermal.tilt_deg, p_atm_pa=thermal.p_atm_pa
+    )
     h_amb_for_cond = h_amb if h_amb_cond is None else h_amb_cond
+    # Thinner air convects less, fans included; mirrors simulation.evaluate_coupled_rates.
+    h_amb_for_cond = h_amb_for_cond * h_amb_density_factor(t_amb_c, thermal.p_atm_pa)
     h_conv_cond = condenser_h_conv_w_m2_k(
         h_amb_for_cond, fin_area_ratio=fin_area_ratio,
         fin_thickness_m=fin_thickness_m, fin_height_m=fin_height_m,
@@ -537,7 +791,7 @@ def desorption_rhs(
     tmass = jnp.clip(CONDENSER_THERMAL_MASS_J_M2_K, 1.0, None)
     dT_cond = (h_conv_g * (t_gel - t_cond_c) - h_conv_cond * (t_cond_c - t_amb_c) + m_des * h_fg_j_per_kg + q_rad) / tmass
 
-    dh_masked = jnp.where(h_m > h0_ref_m + 1e-12, dh, 0.0)
+    dh_masked = jnp.where(h_m > h_floor_m + 1e-12, dh, 0.0)
     dc_masked = jnp.minimum(dc, 0.0)
     if condenser_tracks_ambient:
         # Static flag, so this is a plain branch, not a traced select. y[2] stays in
@@ -572,16 +826,16 @@ def pam_licl_water_activity_from_uptake_g_g(uptake_g_g):
     return jnp.clip(aw_pct / 100.0, 0.0, 1.0)
 
 
-def pam_licl_gravimetric_uptake_g_g(c_w, *, h0_ref_m, c_s_mol_m3, formula_weight_g_mol, salt_to_polymer_ratio, salt_weight_factor=1.0):
+def pam_licl_gravimetric_uptake_g_g(c_w, *, h0_ref_m, c_s_mol_m3, formula_weight_g_mol, salt_loading, salt_weight_factor=1.0):
     mw_eff = formula_weight_g_mol * salt_weight_factor
     mass_salt = jnp.clip(c_s_mol_m3, 0.0, None) * h0_ref_m * mw_eff / 1000.0
-    mass_polymer = mass_salt / jnp.clip(salt_to_polymer_ratio, 1e-9, None)
+    mass_polymer = mass_salt / jnp.clip(salt_loading, 1e-9, None)
     m_dry = mass_salt + mass_polymer
     mass_water = jnp.clip(c_w, 0.0, None) * h0_ref_m * WATER_MOLAR_MASS_KG_MOL
     return jnp.where(m_dry <= 0.0, 0.0, mass_water / jnp.clip(m_dry, 1e-30, None))
 
 
-def absorption_effective_water_activity(c_w, *, t_gel_c, mass: "MassParams", salt_to_polymer_ratio):
+def absorption_effective_water_activity(c_w, *, t_gel_c, mass: "MassParams", salt_loading):
     """max(brine activity, PAM-LiCl DVS cap) -- salt_properties.py's LiCl branch.
 
     Complex mode takes the brine alone: the DVS cap is a measurement of the PAM-LiCl
@@ -601,20 +855,20 @@ def absorption_effective_water_activity(c_w, *, t_gel_c, mass: "MassParams", sal
     )
     u = pam_licl_gravimetric_uptake_g_g(
         c_w, h0_ref_m=mass.h0_ref_m, c_s_mol_m3=mass.c_s_mol_m3,
-        formula_weight_g_mol=mass.formula_weight_g_mol, salt_to_polymer_ratio=salt_to_polymer_ratio,
+        formula_weight_g_mol=mass.formula_weight_g_mol, salt_loading=salt_loading,
     )
     aw_dvs = pam_licl_water_activity_from_uptake_g_g(u)
     return jnp.maximum(aw_brine, aw_dvs)
 
 
-def dc_dh_absorption(c_w, *, t_gel_c, rh, h_m, mass: "MassParams", salt_to_polymer_ratio):
+def dc_dh_absorption(c_w, *, t_gel_c, rh, h_m, mass: "MassParams", salt_loading):
     """Eqs. 5-6 absorption branch: g_chamber (constant), driven by rh - a_w,eff."""
-    aw = absorption_effective_water_activity(c_w, t_gel_c=t_gel_c, mass=mass, salt_to_polymer_ratio=salt_to_polymer_ratio)
+    aw = absorption_effective_water_activity(c_w, t_gel_c=t_gel_c, mass=mass, salt_loading=salt_loading)
     driving = rh - aw
 
     t_k = jnp.clip(t_gel_c + 273.15, 200.0, None)
     p_sat = saturation_vapor_pressure_pa(t_gel_c)
-    g = mass.g_conv_m_s
+    g = _INSTANT_EQUILIBRIUM_G_SCALE * mass.g_conv_m_s if mass.instant_equilibrium else mass.g_conv_m_s
     pref = g / mass.h0_ref_m
     rate = pref * (p_sat / (GAS_CONSTANT_J_MOL_K * t_k)) * driving
     rate = jnp.where(jnp.isfinite(rate), rate, 0.0)
@@ -623,17 +877,17 @@ def dc_dh_absorption(c_w, *, t_gel_c, rh, h_m, mass: "MassParams", salt_to_polym
 
     dh = g * WATER_MOLAR_MASS_KG_MOL / RHO_GEL_KG_M3 * (p_sat / (GAS_CONSTANT_J_MOL_K * t_k)) * driving
     dh = jnp.where(jnp.isfinite(dh), dh, 0.0)
-    dh = jnp.where(h_m <= mass.h0_ref_m + 1e-12, jnp.maximum(dh, 0.0), dh)
+    dh = jnp.where(c_w <= mass.c_w_min_mol_m3, jnp.maximum(dh, 0.0), dh)
     return dc, dh
 
 
-def absorption_rhs(y, *, t_amb_c, rh, h0_ref_m, h_max_m, mass: "MassParams", salt_to_polymer_ratio):
+def absorption_rhs(y, *, t_amb_c, rh, h0_ref_m, h_floor_m, h_max_m, mass: "MassParams", salt_loading):
     """dy/dt for y = [c_w, H]: the 2-state absorption ODE. T_gel == T_amb during open
     absorption (Note S1 Eq. S1), so no thermal root-solve is needed."""
     c_w, h_m_raw = y[0], y[1]
-    h_m = jnp.maximum(h_m_raw, h0_ref_m)
+    h_m = jnp.maximum(h_m_raw, h_floor_m)
     t_gel = t_amb_c
-    dc, dh = dc_dh_absorption(c_w, t_gel_c=t_gel, rh=rh, h_m=h_m, mass=mass, salt_to_polymer_ratio=salt_to_polymer_ratio)
-    dh = jnp.where(h_m > h0_ref_m + 1e-12, dh, jnp.maximum(dh, 0.0))
+    dc, dh = dc_dh_absorption(c_w, t_gel_c=t_gel, rh=rh, h_m=h_m, mass=mass, salt_loading=salt_loading)
+    dh = jnp.where(h_m > h_floor_m + 1e-12, dh, jnp.maximum(dh, 0.0))
     dh = jnp.where((h_m >= h_max_m) & (dh > 0.0), 0.0, dh)
     return jnp.array([dc, dh])

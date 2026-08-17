@@ -171,15 +171,43 @@ def normalized_blend_weights(weights: tuple[float, ...] | np.ndarray) -> np.ndar
 # curve; swap in a spline only if the blend optimum ever looks grid-sensitive.
 _MOLALITY_GRID_POINTS: int = int(_pv("Binary molality curve grid points"))
 _T_BUCKET_C: float = _pv("Binary molality curve temperature bucket")
+# Bucketing rounds *up*, so a temperature just under the Conde cap can round past it
+# (at the old 150 C cap, 150.25 C bucketed to 150.5), which empties
+# blend_water_activity_window and returns NaN. That NaN is then swallowed by
+# _mass_transfer_driving_force as a 0.0 driving force, so a hot gel silently stops
+# desorbing instead of erroring. Clamp before bucketing.
+#
+# The cap is per-blend, not the flat CONDE_T_MAX_C it used to be. That flat cap was the
+# real reason the evacuated two-pane case saw no benefit from extending LiCl past 100 C:
+# ComplexOptions.blend_weights defaults to (1, 0, 0), so even a pure-LiCl complex run
+# goes through ZSR and inherited CaCl2's ceiling. A mixture must be evaluated at ONE
+# temperature, so the blend takes the minimum over its *active* components -- pure LiCl
+# gets 155.5 C, anything containing CaCl2 or MgCl2 still gets 100 C.
+from solar_lumped.physics import BET_T_MAX_C, isotherm_t_max_c
+
+
+def _blend_t_max_c(blend_weights: tuple[float, ...] | np.ndarray) -> float:
+    w = normalized_blend_weights(blend_weights)
+    return min(isotherm_t_max_c(n) for n, wi in zip(ZSR_SALTS, w) if wi > 1e-15)
+
+
+def _t_bucket_c(temperature_c: float, t_max_c: float) -> float:
+    t = min(float(temperature_c), t_max_c)
+    return round(t / _T_BUCKET_C) * _T_BUCKET_C
 
 
 @lru_cache(maxsize=4096)
 def _binary_molality_curve(salt_name: str, t_bucket_c: float) -> tuple[np.ndarray, np.ndarray]:
     """Tabulated (a_w, molality) for a pure binary brine over its validated window."""
-    from solar_lumped.physics import equilibrate_salt_mf, get_salt
+    from solar_lumped.physics import deliquescence_rh, equilibrate_salt_mf, get_salt
 
     rec = get_salt(salt_name)
-    aw = np.linspace(rec.rh_min, rec.rh_max, _MOLALITY_GRID_POINTS)
+    # Sweep from this bucket's own deliquescence point, matching the gate in
+    # physics.equilibrate_salt_mf -- a 25 C lower edge would truncate the curve
+    # exactly where a hot gel operates.
+    aw = np.linspace(
+        deliquescence_rh(salt_name, t_bucket_c), rec.rh_max, _MOLALITY_GRID_POINTS
+    )
     mw = rec.formula_weight_g_mol
     m = np.empty_like(aw)
     for i, a in enumerate(aw):
@@ -207,7 +235,7 @@ def _binary_molality_at_aw(salt_name: str, water_activity: float, temperature_c:
     Above rh_max the fit has no support at all, so that end really is NaN.
     """
     aw_grid, m_grid = _binary_molality_curve(
-        salt_name, round(float(temperature_c) / _T_BUCKET_C) * _T_BUCKET_C
+        salt_name, _t_bucket_c(temperature_c, isotherm_t_max_c(salt_name))
     )
     a = float(water_activity)
     if aw_grid.size == 0 or a > aw_grid[-1]:
@@ -291,17 +319,15 @@ def blend_water_activity_window(
     desorption driving force for a gel that has dried past saturation. Fixed at 25 C
     it understated a_w by 0.055 at 80 C for LiCl -- a ~30x error in (c_r - a_w).
 
-    Never goes below the 25 C catalog ``rh_min``, because that is the gate
-    ``physics.equilibrate_salt_mf`` rejects outside; below 25 C the window therefore
-    stays at its old value rather than following the isotherm down.
+    Follows the deliquescence point at this temperature in both directions.
+    ``physics.equilibrate_salt_mf`` gates on the same temperature-resolved value, so the
+    window can track it down as well as up.
     """
     from solar_lumped.physics import deliquescence_rh, get_salt
 
     w = normalized_blend_weights(blend_weights)
     active = [n for n, wi in zip(ZSR_SALTS, w) if wi > 1e-15]
-    lo = min(
-        max(deliquescence_rh(n, float(temperature_c)), get_salt(n).rh_min) for n in active
-    ) + _AW_WINDOW_INSET
+    lo = min(deliquescence_rh(n, float(temperature_c)) for n in active) + _AW_WINDOW_INSET
     hi = min(get_salt(n).rh_max for n in active) - _AW_WINDOW_INSET
     return float(lo), float(hi)
 
@@ -328,7 +354,7 @@ def zsr_water_activity_at_brine_fraction(
         return float("nan")
     aw_grid, fb_grid = _blend_fb_curve(
         tuple(float(w) for w in normalized_blend_weights(blend_weights)),
-        round(float(temperature_c) / _T_BUCKET_C) * _T_BUCKET_C,
+        _t_bucket_c(temperature_c, _blend_t_max_c(blend_weights)),
     )
     if aw_grid.size < 2:
         return float("nan")
@@ -396,7 +422,13 @@ def zsr_inverse_table(
     ragged search. Entries outside a temperature's reachable f_b range are filled
     by edge-clamping, matching what the CPU path's clamped inversion returns.
     """
-    t_lo, t_hi, n_t = ZSR_TABLE_T_GRID_C
+    t_lo, t_hi_default, n_t = ZSR_TABLE_T_GRID_C
+    # The grid must reach as high as THIS blend's isotherms do, or the device-side lookup
+    # edge-clamps a 158 C gel onto the 100 C row and the whole >100 C extension is thrown
+    # away on the GPU path (it was: the workbook upper bound is 100 C). Blends that still
+    # stop at 100 C keep exactly the grid they had; BET_T_MAX_C bounds the temperature-
+    # independent fits, which have no ceiling of their own but no business past it either.
+    t_hi = min(max(t_hi_default, _blend_t_max_c(blend_weights)), BET_T_MAX_C)
     t_grid = np.linspace(t_lo, t_hi, n_t)
 
     # Common f_b axis spanning every temperature's reachable range. Each row takes the

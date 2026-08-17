@@ -23,7 +23,7 @@ RH-switch cycling logic is otherwise unchanged.
 
 | `--sorbent` | Model | Heats |
 |---|---|---|
-| `hydrogel` (default) | PAM-LiCl brine + DVS isotherm, `c_w` + `H` state | LiCl from `salt_catalog.csv` |
+| `hydrogel` (default) | PAM-LiCl brine + DVS isotherm, `c_w` + `H` state | LiCl from the `Salts` sheet of `parameters.xlsx` |
 | `mof` | Dual-site Langmuir placeholder | `mof_catalog.csv` |
 
 ## Run

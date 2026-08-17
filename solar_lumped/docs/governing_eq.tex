@@ -357,7 +357,7 @@ modeled failure or service-call process.
 \item \textbf{Sorbent replacement:} the hydrogel is replaced on a fixed interval
 (\code{hydrogel\_lifetime\_years}); its replacement cost is the dry composite mass per footprint
 area times a blended cost per kg. The blend price weights the salt and the polymer sub-mix
-(acrylamide/APS/MBA/TEMED) by the salt:polymer ratio, and separately adds a DI-water term sized by
+(acrylamide/APS/MBA/TEMED) by the salt loading, and separately adds a DI-water term sized by
 that water's mass fraction of the whole synthesis batch (Table~S1 recipe) -- not a fixed
 per-ingredient cost. MOF sorbent instead uses mass $\times$ price / lifetime directly.
 \item \textbf{Utilization factor} is a single multiplicative derating of the physics-simulated
@@ -385,7 +385,7 @@ where $i$ is the discount rate and $L$ the system lifetime (years).
 \textbf{Sorbent (hydrogel) replacement, annualized:}
 \begin{equation}
 C_{sorbent} = \frac{c_{gel}\,m_{dry}}{L_{gel}}, \qquad
-c_{gel} = \frac{c_{salt}\,(S/L) + c_{polymer}}{1 + S/L} + \frac{\phi_{water}}{1-\phi_{water}}\,c_{water}
+c_{gel} = \frac{c_{salt}\,SL + c_{polymer}}{1 + SL} + \frac{\phi_{water}}{1-\phi_{water}}\,c_{water}
 \label{eq:sorbent}
 \end{equation}
 \begin{equation}
@@ -407,8 +407,8 @@ the same dry-basis density physics.py already uses for its own gravimetric-uptak
 initial-$c_w$ calculations -- \code{economics.py::dry\_composite\_mass\_kg} now imports it rather
 than reading \code{rho\_gel} directly, to keep the two files' notions of "dry mass" consistent.
 $\phi_{water}$ below is a separate quantity: the DI water mixed in during synthesis (Table~S1),
-not water later absorbed from ambient. $S/L$ is the
-salt:polymer ratio, $L_{gel}$ is the hydrogel replacement interval (years), $\phi_k$ is ingredient
+not water later absorbed from ambient. $SL$ is the
+salt loading, $L_{gel}$ is the hydrogel replacement interval (years), $\phi_k$ is ingredient
 $k$'s mass fraction in the whole synthesis batch (Table~S1 recipe: AM, APS, MBA, TEMED, salt, and
 DI water), and $c_k$ its catalog price. $c_{polymer}$ (Eq.~\eqref{eq:polymer-blend}) is the
 acrylamide/APS/MBA/TEMED sub-mix price, mass-fraction-weighted and renormalized over just those
@@ -416,8 +416,8 @@ four ingredients (their $\phi_k$ do not sum to 1 alone -- the batch also contain
 The $\phi_{water}/(1-\phi_{water})$ term converts the DI-water mass fraction of the whole batch
 into a ratio against the batch's dry (non-water) mass, since $m_{dry}$ already excludes water.
 The cost breakdown (\code{lcow\_cost\_breakdown\_from\_daily\_yield}) further splits
-$c_{polymer}/(1+S/L)$ back into its four per-ingredient terms
-$\frac{\phi_k}{\sum_k \phi_k}\,\frac{c_k}{1+S/L}$ for reporting. (MOF sorbent:
+$c_{polymer}/(1+SL)$ back into its four per-ingredient terms
+$\frac{\phi_k}{\sum_k \phi_k}\,\frac{c_k}{1+SL}$ for reporting. (MOF sorbent:
 $C_{sorbent} = m_{MOF}\,c_{MOF} / L_{gel}$ directly.)
 
 \textbf{Annualized system cost:}

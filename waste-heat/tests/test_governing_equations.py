@@ -116,3 +116,49 @@ def test_eq6_thickness_rate_ratio_absorption(config: SystemConfig, mass):
         pytest.skip("No mass transfer at this state")
     expected_ratio = (WATER_MOLAR_MASS_KG_MOL / mass.rho_solution_kg_m3) * h0
     assert dh / dc == pytest.approx(expected_ratio, rel=1e-9)
+
+
+def test_hollands_nu_is_real_hollands_and_vacuum_suppressed():
+    """Guards the vapor-gap Nu against the invented `0.720*Ra^0.25*(1+0.1cos t)` fit
+    that used to sit here mislabelled as Hollands et al. (1976)."""
+    import math
+
+    from waste_heat.physics import (
+        ALPHA_AIR_M2_S,
+        GRAVITY_M_S2,
+        K_AIR_W_M_K,
+        NU_AIR_M2_S,
+        P_REF_PA,
+        hollands_nu,
+    )
+
+    gap, t_hot, t_cold, tilt = 0.01, 80.0, 30.0, 30.0
+
+    # alpha must be a diffusivity (k/(rho*cp)), not the 1.8e-5 dynamic viscosity it was.
+    assert ALPHA_AIR_M2_S == pytest.approx(2.371e-5, rel=1e-3)
+
+    # At 1 atm: matches Hollands evaluated independently, with the exact ideal-gas
+    # density-difference buoyancy and no spurious extra Prandtl factor.
+    t_h, t_c = t_hot + 273.15, t_cold + 273.15
+    d_rho_over_rho = 0.5 * (t_h + t_c) * (t_h - t_c) / (t_h * t_c)
+    ra = GRAVITY_M_S2 * d_rho_over_rho * gap**3 / (NU_AIR_M2_S * ALPHA_AIR_M2_S)
+    rc = ra * math.cos(math.radians(tilt))
+    expect = (
+        1.0
+        + 1.44
+        * max(0.0, 1.0 - 1708.0 * math.sin(math.radians(1.8 * tilt)) ** 1.6 / rc)
+        * max(0.0, 1.0 - 1708.0 / rc)
+        + max(0.0, (rc / 5830.0) ** (1.0 / 3.0) - 1.0)
+    )
+    assert hollands_nu(gap, t_hot, t_cold, tilt_deg=tilt, p_gap_pa=P_REF_PA) == pytest.approx(
+        expect, rel=1e-12
+    )
+
+    # Ra ~ p^2, so the ~30 mbar operating gap collapses to the conduction limit Nu = 1.
+    assert hollands_nu(gap, t_hot, t_cold, tilt_deg=tilt, p_gap_pa=3000.0) == pytest.approx(1.0)
+
+    # Nu >= 1 always, so h = Nu*k/gap never falls below pure conduction.
+    for p in (1.0, 3000.0, P_REF_PA, 5 * P_REF_PA):
+        for dt in (0.0, 1.0, 60.0):
+            assert hollands_nu(gap, 30.0 + dt, 30.0, tilt_deg=tilt, p_gap_pa=p) >= 1.0
+    assert K_AIR_W_M_K > 0.0

@@ -125,7 +125,7 @@ def jax_absorption_rhs(config: SystemConfig, *, c_w, h_m, t_amb_c, rh):
     y = jnp.array([c_w, h_m])
     dy = jp.absorption_rhs(
         y, t_amb_c=t_amb_c, rh=rh, h0_ref_m=config.hydrogel_thickness_m, h_max_m=h_max_m,
-        mass=mass, salt_to_polymer_ratio=config.salt_to_polymer_ratio,
+        mass=mass, salt_loading=config.salt_loading,
     )
     return np.array(dy)
 

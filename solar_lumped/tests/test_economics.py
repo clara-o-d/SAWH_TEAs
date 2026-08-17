@@ -11,9 +11,9 @@ from solar_lumped.economics import (
 from solar_lumped.physics import DRY_COMPOSITE_DENSITY_KG_M3
 
 _KW = dict(
-    daily_yield_kg_per_m2=1.0,
+    yield_per_cycle_kg_per_m2=1.0,
     salt_name="NaCl",
-    salt_to_polymer_ratio=1.0,
+    salt_loading=1.0,
     hydrogel_thickness_m=0.002,
 )
 

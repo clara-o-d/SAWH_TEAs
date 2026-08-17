@@ -68,13 +68,13 @@ _RH_GRID = np.linspace(0.0, 0.92, 200)
 
 def diaz_marin_licl_uptake_g_g(
     relative_humidity: float,
-    salt_to_polymer_ratio: float,
+    salt_loading: float,
     *,
     temperature_c: float = _TEMPERATURE_C,
 ) -> float:
     """Gravimetric uptake U = m_w / (m_s + m_p) [g/g] from Eq. 5."""
     rh = float(relative_humidity)
-    sl = float(salt_to_polymer_ratio)
+    sl = float(salt_loading)
     if sl <= 0.0 or rh <= 0.0:
         return 0.0
 
@@ -100,10 +100,10 @@ def diaz_marin_licl_uptake_g_g(
     return float(polymer_factor * u_salt)
 
 
-def _uptake_curve(salt_to_polymer_ratio: float) -> tuple[np.ndarray, np.ndarray]:
+def _uptake_curve(salt_loading: float) -> tuple[np.ndarray, np.ndarray]:
     uptake = np.array(
         [
-            diaz_marin_licl_uptake_g_g(rh, salt_to_polymer_ratio)
+            diaz_marin_licl_uptake_g_g(rh, salt_loading)
             for rh in _RH_GRID
         ],
         dtype=float,
@@ -173,13 +173,13 @@ def _style_uptake_axes(ax: plt.Axes, *, panel_title: str) -> None:
 
 def _plot_model_series(
     ax: plt.Axes,
-    salt_to_polymer_ratio: float,
+    salt_loading: float,
     *,
     color: str,
     label: str,
     linestyle: str = "-",
 ) -> None:
-    rh_pct, uptake = _uptake_curve(salt_to_polymer_ratio)
+    rh_pct, uptake = _uptake_curve(salt_loading)
     ax.plot(
         rh_pct,
         uptake,

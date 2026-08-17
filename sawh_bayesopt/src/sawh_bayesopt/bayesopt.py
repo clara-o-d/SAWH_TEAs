@@ -15,7 +15,13 @@ import numpy as np
 from sawh_bayesopt.acquisition import propose_batch
 from sawh_bayesopt.design_space import DesignBounds, latin_hypercube_design
 from sawh_bayesopt.evaluator import DesignEvalResult, EvalCache, evaluate_batch
-from sawh_bayesopt.sites import ATACAMA, SiteSpec, fetch_daily_profiles, fetch_site_frame
+from sawh_bayesopt.sites import (
+    ATACAMA,
+    SiteSpec,
+    fetch_daily_profiles,
+    fetch_site_elevations,
+    fetch_site_frame,
+)
 from sawh_bayesopt.surrogate import (
     SurrogateState,
     append_observations,
@@ -59,6 +65,9 @@ class BayesOptConfig:
     # False (default): solar_lumped's Eq. 2 condenser ODE. True: T_cond == T_amb, the
     # infinite-cooling-capacity limit, in either fidelity mode.
     condenser_tracks_ambient: bool = False
+    # False (default): finite mass transfer (Eq. 5's g). True: the g -> infinity limit --
+    # instantaneous sorption on the equilibrium isotherm, in either fidelity mode.
+    instant_equilibrium: bool = False
     # "jax" batches every (design, site) into one vmapped call -- the backend for
     # global sweeps. "cpu" is sequential and needs no GPU stack, which is what a
     # single-site study wants. Both support simple and complex fidelity.
@@ -118,6 +127,9 @@ def run_bayesopt(cfg: BayesOptConfig, run_dir: str | Path) -> BayesOptResult:
             s.name: fetch_daily_profiles(s, cache_dir=cfg.weather_cache_dir) for s in cfg.sites
         }
         site_frames = None
+    # Site elevations for both modes: the frames (complex) or the same cached year frames
+    # the profiles came from (simple). One scalar per site, resolved once.
+    site_elevations = fetch_site_elevations(cfg.sites, cache_dir=cfg.weather_cache_dir)
     cache = EvalCache(run_dir / "cache.jsonl")
 
     def _evaluate(xs: list[np.ndarray]) -> list[DesignEvalResult]:
@@ -130,7 +142,9 @@ def run_bayesopt(cfg: BayesOptConfig, run_dir: str | Path) -> BayesOptResult:
             case=cfg.case,
             complex_mode=cfg.complex_mode,
             condenser_tracks_ambient=cfg.condenser_tracks_ambient,
+            instant_equilibrium=cfg.instant_equilibrium,
             site_frames=site_frames,
+            site_elevations=site_elevations,
             backend=cfg.backend,
         )
 

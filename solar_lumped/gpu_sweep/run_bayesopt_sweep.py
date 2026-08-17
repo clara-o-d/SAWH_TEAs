@@ -68,7 +68,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # Fixed (non-optimized) system constants -- same role as run_gpu_sweep.py's
     # matching flags, just not swept here.
     p.add_argument("--salt", type=str, default="LiCl")
-    p.add_argument("--salt-loading", type=float, default=4.0, help="salt_to_polymer_ratio, held fixed.")
+    p.add_argument("--salt-loading", type=float, default=4.0, help="salt_loading, held fixed.")
     p.add_argument("--insulation-gap-mm", type=float, default=5.0, help="insulation_gap_m, held fixed.")
     p.add_argument("--tilt-deg", type=float, default=gps.TILT_DEG, help="tilt_deg, held fixed.")
     p.add_argument("--case", choices=tuple(CASE_EPS_IR), default="case2")
@@ -76,6 +76,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--condenser-ambient", action="store_true",
         help="Pin T_cond == T_amb instead of solving the condenser ODE -- the "
         "infinite-cooling-capacity limit, not a physical design.",
+    )
+    p.add_argument(
+        "--instant-equilibrium", action="store_true",
+        help="g -> infinity: instantaneous sorption on the equilibrium isotherm, so "
+        "desorption is energy-limited rather than transport-limited. An upper bound on "
+        "sorption kinetics, not a physical design.",
     )
     p.add_argument(
         "--complex", action="store_true",
@@ -143,7 +149,7 @@ def _bounds(args: argparse.Namespace) -> DesignBounds:
             fin_area_ratio=(min(args.fin_area_ratio), max(args.fin_area_ratio)),
             complex_mode=True,
         )
-    salt_ratio = args.salt_loading
+    salt_loading_val = args.salt_loading
     insulation_m = args.insulation_gap_mm / 1000.0
     return DesignBounds(
         hydrogel_thickness_m=(min(args.hydrogel_thickness_mm) / 1000.0, max(args.hydrogel_thickness_mm) / 1000.0),
@@ -151,7 +157,7 @@ def _bounds(args: argparse.Namespace) -> DesignBounds:
         insulation_gap_m=(insulation_m, insulation_m + _FIXED_DIM_EPS),
         fin_area_ratio=(min(args.fin_area_ratio), max(args.fin_area_ratio)),
         tilt_deg=(args.tilt_deg, args.tilt_deg + _FIXED_DIM_EPS),
-        salt_to_polymer_ratio=(salt_ratio, salt_ratio + _FIXED_DIM_EPS),
+        salt_loading=(salt_loading_val, salt_loading_val + _FIXED_DIM_EPS),
     )
 
 
@@ -202,6 +208,7 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, bounds: DesignBou
         weather_cache_dir=args.cache_dir,
         case=args.case,
         condenser_tracks_ambient=args.condenser_ambient,
+        instant_equilibrium=args.instant_equilibrium,
         de_maxiter=args.de_maxiter,
         de_popsize=args.de_popsize,
     )
@@ -231,9 +238,10 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, bounds: DesignBou
         "tilt_deg": best_by_name["tilt_deg"],
         **{name: best_by_name[name] for name in COMPLEX_VAR_ORDER if name in best_by_name},
         "salt": args.salt,
-        "salt_loading": best_by_name["salt_to_polymer_ratio"],
+        "salt_loading": best_by_name["salt_loading"],
         "case": args.case,
         "condenser_mode": "ambient" if args.condenser_ambient else "ode",
+        "kinetics": "instant" if args.instant_equilibrium else "finite_g",
         "warmup_method": "aitken-gpu-fixed-round", "resolution": "annual",
         "best_combined_lcow_usd_m3": f"{best.combined_lcow:.6f}",
         "n_evals": len(result.history),
@@ -273,7 +281,7 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, bounds: DesignBou
                 "insulation_gap_mm": rec["insulation_gap_m"] * 1000.0,
                 "fin_area_ratio": rec["fin_area_ratio"],
                 "tilt_deg": rec["tilt_deg"],
-                "salt_loading": rec["salt_to_polymer_ratio"],
+                "salt_loading": rec["salt_loading"],
                 **{name: rec[name] for name in COMPLEX_VAR_ORDER if name in rec},
                 "best_combined_lcow_usd_m3": f"{report['recommended_combined_lcow_usd_per_m3']:.6f}",
             })

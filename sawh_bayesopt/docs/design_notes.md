@@ -128,12 +128,20 @@ the same peak, without needing a true batch-EI (qEI) implementation.
 
 | variable | range used | source |
 |---|---|---|
-| hydrogel_thickness_m | [0.001, 0.010] | `data/economics/lcow_economic_params.csv`'s `hydrogel_thickness_min/max_m` (explicitly documented as "bound on **optimized** hydrogel thickness"), matches `params.py`'s `HYDROGEL_THICKNESS_MIN/MAX_M` module constants and `parameter_sweep.py`'s sweep range |
-| vapor_gap_m | [0.007, 0.060] | `parameter_sweep.py::make_sweep_params` (`vapor_gap_mm`, 7-60mm); lower bound also matches `table_s3.VAPOR_GAP_TRANSPORT_MIN_M` |
-| insulation_gap_m | [0.001, 0.020] | `parameter_sweep.py` (`insulation_gap_mm`, 1-20mm) |
-| fin_area_ratio | [3.0, 12.0] | `parameter_sweep.py` and `grid_param_sweep.py`'s swept range |
-| tilt_deg | [0.0, 60.0] | `parameter_sweep.py`'s swept range |
-| salt_to_polymer_ratio | [1.0, 8.0] | `parameter_sweep.py` (`salt_to_polymer_ratio`) |
+| hydrogel_thickness_m | [0.001, 0.010] | `parameters.xlsx` Physics, `Hydrogel reference thickness (H0)` sweep columns |
+| vapor_gap_m | [0.007, 0.060] | `parameters.xlsx` Physics, `Vapor gap (L_g)` sweep columns; the lower bound also matches `Vapor-gap transport floor` |
+| insulation_gap_m | [0.001, 0.020] | `parameters.xlsx` Physics, `Insulation gap (L_ins)` sweep columns |
+| fin_area_ratio | [3.0, 12.0] | `parameters.xlsx` Physics, `Condenser fin area ratio (A_r)` sweep columns |
+| tilt_deg | [0.0, 60.0] | `parameters.xlsx` Physics, `Tilt angle (theta)` sweep columns |
+| salt_loading | [1.0, 8.0] | `parameters.xlsx` Physics, `Salt loading (SL)` sweep columns |
+| eps_abs_ir | [0.05, 0.95] | `parameters.xlsx` Physics, `Absorber IR emissivity (eps_abs_ir)` sweep columns |
+| condenser_air_speed_m_s | [0.0, 1.5] | `parameters.xlsx` Physics, `Condenser forced-air speed` sweep columns |
+| seal_offset_h / open_offset_h | [-4.0, 4.0] | `parameters.xlsx` Physics, `Seal / open offset from sunrise-sunset` sweep columns |
+| glazing_config | [0, 3] | not a workbook row -- the index range of `GLAZING_CONFIGS`, derived from that tuple |
+| blend_u / blend_v | [0, 1] | not a workbook row -- the unit square of the stick-breaking map onto the ZSR simplex |
+
+`DesignBounds` reads every one of the workbook rows above directly, so the table
+is a description of the sheet, not a second copy of it.
 
 No `condenser_thickness_m` row: it isn't a design variable in this package
 (see "Known caveats" below).
