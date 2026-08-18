@@ -153,37 +153,24 @@ exact blackbody behavior ($\varepsilon_{a\text{-}g}=1$, glass emits at 1).
   matches `grid_param_sweep.py`'s own CPU function for the same combos (checked
   locally; see conversation/commit history for exact numbers).
 
-### How to run Case 2 (and later Case 3)
+### How to run the scenario sweep
 
-**Important**: the CSV schema changed (2 new columns) — use a **new**
-`--output-csv`/output directory for Case 2/3, don't append to Case 1's files.
-
-Same GPU approach as Case 1, with dedicated scripts already set up (mirrors of
-`sbatch_gpu_sweep_smoke.sh`/`sbatch_gpu_sweep_array.sh` with the new flags and
-their own output directories baked in — nothing to edit):
-
-```bash
-sbatch gpu_sweep/sbatch_gpu_sweep_smoke_case2.sh   # 10 real sites first
-sbatch gpu_sweep/sbatch_gpu_sweep_array_case2.sh   # then the full 1,405-site grid
-```
-
-and for Case 3:
+Superseded the per-case scripts: Cases 1-3 are now three of the eight entries in
+`site_sweep.SCENARIOS`, alongside the instant-sorption and perfect-condenser
+combinations, and one run covers all of them. The sweep varies site x scenario
+only -- geometry is fixed at the parameters.xlsx baseline -- so there are no
+sweep flags to pass:
 
 ```bash
-sbatch gpu_sweep/sbatch_gpu_sweep_smoke_case3.sh
-sbatch gpu_sweep/sbatch_gpu_sweep_array_case3.sh
+sbatch gpu_sweep/sbatch_gpu_sweep_smoke.sh   # 10 real sites x 8 scenarios first
+sbatch gpu_sweep/sbatch_gpu_sweep_array.sh   # then the full 1,405-site grid
 ```
 
-(Case 3 passes `--eps-abs 1.0 --tau-glass 1.0` explicitly, since those are fixed
-idealized values there, not the usual swept lists.) Both array scripts default
-to `--array=0-39%8` like Case 1's — tune to your actual `serc` GPU quota.
-
-Before trusting a full Case 2/3 run: re-run the smoke test and spot-check a few
-rows against the CPU `grid_param_sweep.py`/`build_system_config(...,
-eps_abs_ir=..., eps_glass_ir=...)` path for the same sites/combos, the same way
-Case 1's full run was checked (`FINDINGS.md` Result 12) — the physics-level
-validation above confirms the *equations* are right, not that the full
-monthly+Aitken+batching pipeline behaves as expected at scale for this new
-parameter regime (e.g. Case 3's `eps=0` extremes are a genuinely different
-numerical regime than anything Case 1 exercised — worth confirming the Aitken
-convergence and fixed-round-count tolerance still hold up there specifically).
+Output goes to `outputs/gpu_scenario_sweep/` and carries a `scenario` column;
+the old `fidelity`/`cx_*` columns are gone, so don't append to pre-scenario
+CSVs. Re-run the smoke test whenever the scenario list changes -- the
+optical-limits scenarios put `eps=0` through the radiative solve, a genuinely
+different numerical regime from the Wilson baseline, so before trusting a full
+run spot-check a few rows against the CPU path (`build_system_config(...,
+eps_abs_ir=..., eps_glass_ir=...)` plus `run_daily_cycle`) for the same
+site/scenario, the way Case 1's full run was checked (`FINDINGS.md` Result 12).

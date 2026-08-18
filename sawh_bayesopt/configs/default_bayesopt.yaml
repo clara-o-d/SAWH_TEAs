@@ -6,10 +6,13 @@
 design_bounds:
   hydrogel_thickness_m: [0.001, 0.010]
   vapor_gap_m: [0.007, 0.060]
-  insulation_gap_m: [0.001, 0.020]
-  fin_area_ratio: [3.0, 12.0]
   tilt_deg: [0.0, 60.0]
-  salt_loading: [1.0, 8.0]
+  seal_offset_h: [-4.0, 4.0]
+  open_offset_h: [-4.0, 4.0]
+  # insulation_gap_m, fin_area_ratio and salt_loading are no longer dimensions: simple
+  # mode pins them at solar_lumped's defaults (design_space.SIMPLE_FIXED) and only
+  # --complex frees them again.
+  #
   # No condenser_thickness_m: fixed at Table S3's constant, both because
   # economics/lcow.py charges a flat condenser BOM cost regardless of it,
   # and because the JAX gpu_sweep fast path this now evaluates against
@@ -20,7 +23,7 @@ sites: [cambridge, atacama]
 combine_rule: mean
 
 bayesopt:
-  n_init: 24 # ~= 3*(d+1), d=6
+  n_init: 24 # ~= 4*(d+1), d=5
   n_total: 50 # wall-clock now dominated by weather fetch + jax compile, not
   # by per-design CPU processes -- see evaluator.py / gpu_sweep/FINDINGS.md
   # for the ~8x speedup this batches on top of.

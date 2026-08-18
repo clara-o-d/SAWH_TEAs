@@ -482,8 +482,11 @@ values that originally triggered the `ZeroDivisionError` bug fix). **Both Case
    holds up** -- new territory again: concurrent array tasks sharing the same
    `serc` partition/GPU pool, and the merge-the-chunk-CSVs step
    (`sbatch_gpu_sweep_array.sh`'s header comment) hasn't been exercised.
-2. **Fix the per-site recompile cost directly** (Result 11's root cause, not
-   yet attempted) -- group sites by similar day-length/latitude so many sites
+2. **Fix the per-site recompile cost directly** (Result 11's root cause; now
+   done in a simpler form -- `run_gpu_sweep.py`'s scenario sweep pads every site
+   in an invocation to one shape and makes site x scenario the batch axis, so a
+   whole array task compiles once per scenario group rather than once per site.
+   Unmeasured on GPU.) -- group sites by similar day-length/latitude so many sites
    share one padded shape and one compile, the same trick Result 7 already
    uses across a *site's* 12 months, extended across *sites*. Would speed up
    both the sequential and the array-job paths, and reduces how many GPUs the

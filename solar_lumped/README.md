@@ -30,8 +30,9 @@ python -m solar_lumped.system --weather-mode atacama-replay
 python -m solar_lumped.system --weather-mode real --lat -23.65 --lon -70.40 --year 2024
 python -m solar_lumped.system --weather-mode real --lat -23.65 --lon -70.40 --day 2024-03-07
 
-# Full-factorial system-parameter sweep -- GPU only, all 365 real days per combo
-python3 gpu_sweep/run_gpu_sweep.py --lat-lon -23.65 -70.40 --output-csv outputs/gpu_grid_sweep/site.csv
+# Global scenario sweep -- GPU only, all 365 real days x the 8 scenarios in
+# site_sweep.SCENARIOS, every one at the parameters.xlsx baseline design
+python3 gpu_sweep/run_gpu_sweep.py --lat-lon -23.65 -70.40 --output-csv outputs/gpu_scenario_sweep/site.csv
 ```
 
 ## Architecture

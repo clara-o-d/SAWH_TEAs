@@ -3,7 +3,7 @@
 "jax" is gpu_sweep's daily-cycle + Aitken pipeline: every uncached design's (site,
 day) instances stack into one jax.vmap-compiled call, which is what makes global
 sweeps affordable. "cpu" is solar_lumped's own ODE path -- sequential, no GPU stack,
-and the reference when a single site is being studied closely.
+and single-site only -- the reference for studying one location closely.
 
 Both backends implement simple *and* complex fidelity, and agree to <0.03% simple /
 <0.5% complex (FINDINGS.md 6/7, solar_lumped/tests/test_cpu_jax_parity.py)."""
@@ -31,7 +31,8 @@ from sawh_bayesopt.sites import DailyProfiles, SiteSpec
 # (solar_lumped/tests/test_cpu_jax_parity.py):
 #   "jax" -- gpu_sweep's vmapped/jitted path. Batches every (design, site) instance
 #            into one call, so it is the backend for global sweeps. Needs jax+diffrax.
-#   "cpu" -- solar_lumped's own ODE path. Sequential, no GPU stack required, and the
+#   "cpu" -- solar_lumped's own ODE path. Single-site only (one simulation at a time in
+#            one location). Sequential, no GPU stack required, and the
 #            reference implementation when a single site is being studied closely.
 Backend = Literal["jax", "cpu"]
 
@@ -256,68 +257,72 @@ def _run_jax_year(
     return yield_by_pair, eta_by_pair, None
 
 
-def fetch_site_inputs(cfg) -> tuple[dict, dict | None]:
-    """(site_profiles, site_frames) for a run config.
+def fetch_site_inputs(cfg) -> tuple[dict, dict[str, float]]:
+    """(frames, elevations), each keyed by site name, for a run config.
 
-    Complex mode rebuilds profiles per design point -- A1's schedule offsets, B4's
-    condenser air, and POA tilt all live *in* the profile -- so it needs the raw
-    frames and the usual fetch-once-per-site reuse does not apply.
+    Neither fidelity can share profiles across a batch any more: A1's schedule offsets
+    move the day/night split and POA transposition puts tilt in the profile, and all three
+    are optimized in both modes, so profiles are rebuilt per design point from these
+    frames (see :func:`_profiles_for_design`).
+
+    Elevations ride along rather than being a separate fetch because they must not be
+    forgotten: leaving them out silently runs the site at sea level, which changes every
+    air property in the gaps and the h_amb density derate. Off the same cached frames, so
+    it costs no extra request.
     """
-    from sawh_bayesopt.sites import fetch_daily_profiles, fetch_site_frame
+    from sawh_bayesopt.sites import fetch_site_frame
+    from solar_lumped.weather import site_elevation_m
 
-    if cfg.complex_mode:
-        return {}, {
-            s.name: fetch_site_frame(s, cache_dir=cfg.weather_cache_dir) for s in cfg.sites
-        }
-    return {
-        s.name: fetch_daily_profiles(s, cache_dir=cfg.weather_cache_dir) for s in cfg.sites
-    }, None
+    frames = {s.name: fetch_site_frame(s, cache_dir=cfg.weather_cache_dir) for s in cfg.sites}
+    return frames, {name: site_elevation_m(df) for name, df in frames.items()}
 
 
-def evaluate_for_config(xs, *, cfg, cache, econ, site_profiles=None, site_frames=None):
+def evaluate_for_config(xs, *, cfg, cache, econ, site_frames=None, site_elevations=None):
     """evaluate_batch with every mode argument taken from ``cfg``.
 
     The loop, the verification pass, and the baseline comparison must all evaluate
     designs identically -- each one that assembled these kwargs by hand was a place
     to silently drop complex_mode or backend and score a 13-dim design against
-    6-dim physics. Callers that already fetched weather can pass it through.
+    5-dim physics. ``site_elevations`` was exactly that: omitted here, the verification
+    neighbours and the Wilson baseline ran at sea level while the loop they are compared
+    against ran at the real site pressure. Callers that already fetched weather can pass
+    both through.
     """
-    if site_profiles is None and site_frames is None:
-        site_profiles, site_frames = fetch_site_inputs(cfg)
+    if site_frames is None or site_elevations is None:
+        site_frames, site_elevations = fetch_site_inputs(cfg)
     return evaluate_batch(
         xs,
         cache=cache,
         sites=cfg.sites,
-        site_profiles=site_profiles,
         econ=econ,
         case=cfg.case,
         complex_mode=cfg.complex_mode,
         condenser_tracks_ambient=cfg.condenser_tracks_ambient,
         instant_equilibrium=cfg.instant_equilibrium,
         site_frames=site_frames,
+        site_elevations=site_elevations,
         backend=cfg.backend,
     )
 
 
-def _profiles_for_design(df, config) -> DailyProfiles:
+def _profiles_for_design(df, x, complex_mode: bool) -> DailyProfiles:
     """Rebuild a site's per-day profiles under one design's profile-level variables.
 
-    Complex mode puts three design variables inside the weather profile itself: A1's
-    seal/open offsets move the day/night split, B4's forced condenser air fills the
-    ``h_amb_cond`` channel, and POA transposition makes ``tilt_deg`` drive solar gain
-    instead of only the Hollands ``cos(theta)``. So profiles become design-dependent
-    and the fetch-once-per-site reuse no longer applies -- this rebuilds them from
-    the site's cached DataFrame, which is the expensive-but-correct option.
+    Design variables live inside the weather profile itself: A1's seal/open offsets move
+    the day/night split and POA transposition makes ``tilt_deg`` drive solar gain rather
+    than only the Hollands ``cos(theta)`` (both fidelities), and in complex mode B4's
+    forced condenser air fills the ``h_amb_cond`` channel. So profiles are
+    design-dependent and the fetch-once-per-site reuse does not apply -- this rebuilds
+    them from the site's cached DataFrame, which is the expensive-but-correct option.
+
+    ponytail: one full pandas re-split per (design, site), ~365 groupby days of work that
+    only the day/night mask actually depends on. If the simple-mode loop gets weather-
+    bound, the upgrade is a re-split that reuses the already-parsed day frames.
     """
     from solar_lumped.weather import real_weather_days_from_df
 
-    cx = config.complex
     days = real_weather_days_from_df(
-        df,
-        seal_offset_h=cx.seal_offset_h,
-        open_offset_h=cx.open_offset_h,
-        condenser_air_speed_m_s=cx.condenser_air_speed_m_s,
-        poa_tilt_deg=config.tilt_deg,
+        df, **design_space.to_profile_kwargs(x, complex_mode=complex_mode)
     )
     return [(d.timetuple().tm_yday, prof) for d, prof, _group in days]
 
@@ -376,15 +381,18 @@ def evaluate_batch(
     *,
     cache: EvalCache,
     sites: tuple[SiteSpec, ...],
-    site_profiles: dict[str, DailyProfiles],
     econ,
     case: str = "case2",
     complex_mode: bool = False,
     condenser_tracks_ambient: bool = False,
     instant_equilibrium: bool = False,
+    # name -> raw year weather frame. Required: profiles are rebuilt per design point in
+    # both fidelities, since the schedule offsets and POA tilt are optimized dims that
+    # live in the profile. Both come from fetch_site_inputs, which resolves them together
+    # so a caller cannot take the frames and forget the elevations.
     site_frames: dict[str, object] | None = None,
-    # name -> elevation (m), from sites.fetch_site_elevations. None leaves every site at
-    # sea level, which is the previous behaviour.
+    # name -> elevation (m). None runs every site at sea level, which changes every gap
+    # air property and the h_amb density derate -- only test paths should want that.
     site_elevations: dict[str, float] | None = None,
     backend: Backend = "jax",
 ) -> list[DesignEvalResult]:
@@ -436,15 +444,12 @@ def evaluate_batch(
     no_weather: set[tuple[int, int]] = set()
     for i in to_run:
         for si, spec in enumerate(sites):
-            # Complex mode's A1 schedule shift, B4 condenser air, and POA tilt are all
-            # design variables that live in the *weather profile*, so profiles cannot be
-            # built once per site and shared -- they are rebuilt per design point.
-            if complex_mode:
-                if site_frames is None:
-                    raise ValueError("complex_mode requires site_frames (profiles are per-design)")
-                profiles = _profiles_for_design(site_frames[spec.name], configs[i])
-            else:
-                profiles = site_profiles[spec.name]
+            # A1's schedule shift and POA tilt (both modes) plus complex mode's B4
+            # condenser air are design variables that live in the *weather profile*, so
+            # profiles cannot be built once per site and shared.
+            if site_frames is None:
+                raise ValueError("evaluate_batch requires site_frames (profiles are per-design)")
+            profiles = _profiles_for_design(site_frames[spec.name], xs[i], complex_mode)
             if not profiles:
                 no_weather.add((i, si))
                 continue
@@ -456,6 +461,11 @@ def evaluate_batch(
             instance_configs.append(dataclasses.replace(configs[i], site_elevation_m=elev))
             owner.append((i, si))
 
+    if backend == "cpu" and len(sites) != 1:
+        # The CPU path is the single-location physics reference: one simulation at a
+        # time, one site. Multi-site/global sweeping is the JAX backend's job
+        # (gpu_sweep/run_gpu_sweep.py, run_bayesopt_sweep.py).
+        raise ValueError(f"cpu backend is single-site only, got {len(sites)} sites")
     run_year = _run_cpu_year if backend == "cpu" else _run_jax_year
     t0 = time.perf_counter()
     yield_by_pair, eta_by_pair, batch_error = run_year(

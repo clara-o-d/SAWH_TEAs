@@ -86,11 +86,24 @@ def main(argv: list[str] | None = None) -> int:
     if args.weather_mode == "baseline":
         profile = baseline_profile()
     elif args.weather_mode == "real":
+        import dataclasses
         from datetime import date
+
+        from solar_lumped.weather import real_site_elevation_m
 
         profile = real_day_profile(
             args.lat, args.lon, date.fromisoformat(args.day),
             cache_dir=args.cache_dir, poa_tilt_deg=config.tilt_deg,
+        )
+        # Real sites run at their own ambient pressure -- it sets every gap air property
+        # and the h_amb density derate. Only the replay/baseline modes stay at sea level
+        # (Antofagasta and Cambridge effectively are, and Wilson recreation must not move).
+        config = dataclasses.replace(
+            config,
+            site_elevation_m=real_site_elevation_m(
+                args.lat, args.lon, date.fromisoformat(args.day).year,
+                cache_dir=args.cache_dir,
+            ),
         )
     else:
         profile = replay_profile(args.weather_mode, cache_dir=args.cache_dir)

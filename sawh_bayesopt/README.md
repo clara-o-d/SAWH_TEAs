@@ -25,9 +25,11 @@ producing a per-site optimum rather than one compromise design.
 
 ## Scope (v1)
 
-- Design variables: `hydrogel_thickness_m`, `vapor_gap_m`, `insulation_gap_m`,
-  `fin_area_ratio`, `tilt_deg`, `salt_loading`. No
-  `condenser_thickness_m`: `economics/lcow.py` charges a flat condenser BOM
+- Design variables: `hydrogel_thickness_m`, `vapor_gap_m`, `tilt_deg`, and the
+  two cycle-schedule offsets `seal_offset_h` / `open_offset_h`.
+  `insulation_gap_m`, `fin_area_ratio` and `salt_loading` are pinned at
+  solar_lumped's defaults (`design_space.SIMPLE_FIXED`); `--complex` frees them
+  again alongside its own seven dimensions. No `condenser_thickness_m`: `economics/lcow.py` charges a flat condenser BOM
   cost regardless of thickness (a free cost-side lever with no downside), and
   the JAX fast path hardcodes condenser thermal mass at Table S3's constant
   rather than taking it as a per-instance input — it isn't a real physics

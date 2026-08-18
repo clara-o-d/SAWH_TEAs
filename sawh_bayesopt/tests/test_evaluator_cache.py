@@ -70,11 +70,13 @@ def test_eval_cache_round_trips_and_resumes(tmp_path):
     assert resumed.get_or_none("missing") is None
 
 
-def test_evaluate_batch_skips_cached_points(tmp_path):
+def test_evaluate_batch_skips_cached_points(monkeypatch, tmp_path):
     bounds = DesignBounds()
     xs = list(latin_hypercube_design(2, bounds, seed=5))
     sites = _sites(1)
-    site_profiles = {sites[0].name: []}  # empty profiles -> "no weather profiles" short-circuit, no jax needed
+    # No usable day in the frame -> "no weather profiles" short-circuit, no jax needed.
+    monkeypatch.setattr(evaluator, "_profiles_for_design", lambda df, x, complex_mode: [])
+    site_frames = {sites[0].name: object()}
 
     cache = EvalCache(tmp_path / "cache.jsonl")
     key0 = design_vector_hash(xs[0], sites=(sites[0].name,))
@@ -85,7 +87,7 @@ def test_evaluate_batch_skips_cached_points(tmp_path):
         xs,
         cache=cache,
         sites=sites,
-        site_profiles=site_profiles,
+        site_frames=site_frames,
         econ=None,
     )
 

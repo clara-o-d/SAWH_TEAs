@@ -53,12 +53,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--complex", action="store_true",
         help="Run the complex-fidelity model (A1/B1/B2/B3/B4/B8): 13 design dims on "
-             "solar_lumped's CPU path instead of 6 on the JAX fast path.",
+             "solar_lumped's CPU path instead of 5 on the JAX fast path.",
     )
     p.add_argument(
         "--backend", choices=("jax", "cpu"), default="jax",
         help="jax: vmapped/jitted, batches designs x sites -- use for global sweeps. "
-             "cpu: sequential solar_lumped ODE path, no GPU stack -- use for one site.",
+             "cpu: sequential solar_lumped ODE path, no GPU stack, single site only.",
     )
     p.add_argument("--case", choices=tuple(CASE_EPS_IR), default="case2")
     p.add_argument("--weather-cache-dir", type=str, default=str(_REPO / ".weather_cache"))

@@ -109,7 +109,7 @@ the same peak, without needing a true batch-EI (qEI) implementation.
 ### The full loop (`bayesopt.py::run_bayesopt`)
 
 1. **Warm start**: draw `n_init=24` designs via Latin-hypercube sampling
-   (space-filling -- spreads samples evenly across all 6 dimensions at once,
+   (space-filling -- spreads samples evenly across all 5 dimensions at once,
    unlike uniform random, which tends to clump), with a rejection rule that
    resamples any design whose vapor gap leaves too little clearance over the
    hydrogel thickness (physics-degenerate, not worth an expensive evaluation).
@@ -130,10 +130,10 @@ the same peak, without needing a true batch-EI (qEI) implementation.
 |---|---|---|
 | hydrogel_thickness_m | [0.001, 0.010] | `parameters.xlsx` Physics, `Hydrogel reference thickness (H0)` sweep columns |
 | vapor_gap_m | [0.007, 0.060] | `parameters.xlsx` Physics, `Vapor gap (L_g)` sweep columns; the lower bound also matches `Vapor-gap transport floor` |
-| insulation_gap_m | [0.001, 0.020] | `parameters.xlsx` Physics, `Insulation gap (L_ins)` sweep columns |
-| fin_area_ratio | [3.0, 12.0] | `parameters.xlsx` Physics, `Condenser fin area ratio (A_r)` sweep columns |
+| insulation_gap_m *(complex only)* | [0.001, 0.020] | `parameters.xlsx` Physics, `Insulation gap (L_ins)` sweep columns |
+| fin_area_ratio *(complex only)* | [3.0, 12.0] | `parameters.xlsx` Physics, `Condenser fin area ratio (A_r)` sweep columns |
 | tilt_deg | [0.0, 60.0] | `parameters.xlsx` Physics, `Tilt angle (theta)` sweep columns |
-| salt_loading | [1.0, 8.0] | `parameters.xlsx` Physics, `Salt loading (SL)` sweep columns |
+| salt_loading *(complex only)* | [1.0, 8.0] | `parameters.xlsx` Physics, `Salt loading (SL)` sweep columns |
 | eps_abs_ir | [0.05, 0.95] | `parameters.xlsx` Physics, `Absorber IR emissivity (eps_abs_ir)` sweep columns |
 | condenser_air_speed_m_s | [0.0, 1.5] | `parameters.xlsx` Physics, `Condenser forced-air speed` sweep columns |
 | seal_offset_h / open_offset_h | [-4.0, 4.0] | `parameters.xlsx` Physics, `Seal / open offset from sunrise-sunset` sweep columns |
@@ -142,6 +142,22 @@ the same peak, without needing a true batch-EI (qEI) implementation.
 
 `DesignBounds` reads every one of the workbook rows above directly, so the table
 is a description of the sheet, not a second copy of it.
+
+The three rows marked *complex only* are bounds without a dimension in simple
+mode: `design_space.SIMPLE_FIXED` pins them at solar_lumped's defaults (5 mm,
+A_r = 7.1, SL = 4.0) so the 5-dim simple space spends its samples on the gaps,
+tilt, and the cycle schedule. `seal_offset_h` / `open_offset_h` are optimized in
+both modes; because they move the day/night split, which lives inside the
+weather profile, both modes now rebuild per-day profiles per design point rather
+than fetching one profile set per site.
+
+`tilt_deg` is in the profile for the same reason: POA transposition is on in both
+fidelities, at each design's own tilt (`design_space.to_profile_kwargs`), so one
+`tilt_deg` trades solar gain against gap convection instead of only entering the
+Hollands `cos(theta)`. Sites also run at their real ambient pressure — elevation
+comes off the same weather frame (`evaluator.fetch_site_inputs`), and it sets
+every gap air property and the `h_amb` density derate, so the loop, the
+verification neighbours and the Wilson baseline all see the same site.
 
 No `condenser_thickness_m` row: it isn't a design variable in this package
 (see "Known caveats" below).

@@ -613,10 +613,16 @@ def run_solar_simulation(
             args.lon,
             args.day,
             cache_dir=args.cache_dir,
+            # This CLI has its own tilt knob, so POA transposes onto --tilt-deg rather
+            # than inheriting weather.POA_DEFAULT_TILT_DEG -- otherwise --tilt-deg 45
+            # would change gap convection while the absorber kept collecting a 30 deg
+            # aperture's irradiance.
+            poa_tilt_deg=config.tilt_deg,
         )
         # Only --weather-mode real gets its elevation from the feed. The replay modes are
         # Antofagasta and Cambridge, both effectively at sea level, so their pinned
-        # profiles already sit at the 0.0 default.
+        # profiles already sit at the 0.0 default. Wilson recreation keeps raw GHI too
+        # (replay_profile passes poa_tilt_deg=None).
         config = dataclasses.replace(
             config,
             site_elevation_m=real_site_elevation_m(

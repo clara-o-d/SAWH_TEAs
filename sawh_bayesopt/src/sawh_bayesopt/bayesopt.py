@@ -14,14 +14,13 @@ import numpy as np
 
 from sawh_bayesopt.acquisition import propose_batch
 from sawh_bayesopt.design_space import DesignBounds, latin_hypercube_design
-from sawh_bayesopt.evaluator import DesignEvalResult, EvalCache, evaluate_batch
-from sawh_bayesopt.sites import (
-    ATACAMA,
-    SiteSpec,
-    fetch_daily_profiles,
-    fetch_site_elevations,
-    fetch_site_frame,
+from sawh_bayesopt.evaluator import (
+    DesignEvalResult,
+    EvalCache,
+    evaluate_batch,
+    fetch_site_inputs,
 )
+from sawh_bayesopt.sites import ATACAMA, SiteSpec
 from sawh_bayesopt.surrogate import (
     SurrogateState,
     append_observations,
@@ -69,8 +68,8 @@ class BayesOptConfig:
     # instantaneous sorption on the equilibrium isotherm, in either fidelity mode.
     instant_equilibrium: bool = False
     # "jax" batches every (design, site) into one vmapped call -- the backend for
-    # global sweeps. "cpu" is sequential and needs no GPU stack, which is what a
-    # single-site study wants. Both support simple and complex fidelity.
+    # global sweeps. "cpu" is sequential, needs no GPU stack, and is single-site only:
+    # one simulation at a time in one location. Both support simple and complex fidelity.
     backend: str = "jax"
     # Inner differential_evolution budget per EI proposal; matches acquisition.py's
     # defaults (1000/40) but overridable so synthetic tests don't pay real DE cost.
@@ -115,21 +114,11 @@ def run_bayesopt(cfg: BayesOptConfig, run_dir: str | Path) -> BayesOptResult:
     run_dir.mkdir(parents=True, exist_ok=True)
     econ = LCOEconomicParams()
 
-    # Complex mode rebuilds profiles per design point (A1/B4/POA are design
-    # variables that live in the profile), so it needs the raw frames instead.
-    if cfg.complex_mode:
-        site_profiles = {}
-        site_frames = {
-            s.name: fetch_site_frame(s, cache_dir=cfg.weather_cache_dir) for s in cfg.sites
-        }
-    else:
-        site_profiles = {
-            s.name: fetch_daily_profiles(s, cache_dir=cfg.weather_cache_dir) for s in cfg.sites
-        }
-        site_frames = None
-    # Site elevations for both modes: the frames (complex) or the same cached year frames
-    # the profiles came from (simple). One scalar per site, resolved once.
-    site_elevations = fetch_site_elevations(cfg.sites, cache_dir=cfg.weather_cache_dir)
+    # Both modes rebuild profiles per design point (A1's schedule offsets and POA tilt are
+    # optimized in either fidelity, and both live in the profile), so both need the raw
+    # frames. Elevations come off the same frames -- a site property, not a design
+    # variable, so resolved once here.
+    site_frames, site_elevations = fetch_site_inputs(cfg)
     cache = EvalCache(run_dir / "cache.jsonl")
 
     def _evaluate(xs: list[np.ndarray]) -> list[DesignEvalResult]:
@@ -137,7 +126,6 @@ def run_bayesopt(cfg: BayesOptConfig, run_dir: str | Path) -> BayesOptResult:
             xs,
             cache=cache,
             sites=cfg.sites,
-            site_profiles=site_profiles,
             econ=econ,
             case=cfg.case,
             complex_mode=cfg.complex_mode,
@@ -168,7 +156,7 @@ def run_bayesopt(cfg: BayesOptConfig, run_dir: str | Path) -> BayesOptResult:
     _progress("lhs-init", len(history), min((r.combined_lcow for r in history), default=float("inf")))
 
     # The Matern kernel is anisotropic (one length scale per dimension), so it must
-    # be built at this run's width -- 6 simple, 13 complex.
+    # be built at this run's width -- 5 simple, 13 complex.
     n_dims = len(cfg.bounds.names())
     state = SurrogateState(gp=build_gp(n_dims=n_dims, seed=cfg.seed), bounds=cfg.bounds)
     X_all, y_all, feasible_all = _to_xyf(history)

@@ -20,7 +20,7 @@ from solar_lumped.simulation import (
 )
 from solar_lumped.system import build_system_config
 from solar_lumped.weather import fetch_year_weather
-from solar_lumped.weather import real_weather_days_from_df
+from solar_lumped.weather import real_weather_days_from_df, site_elevation_m
 
 
 def default_output_path(lat: float, lon: float, year: int) -> Path:
@@ -62,6 +62,15 @@ def main(argv: list[str] | None = None) -> int:
     output = args.output or default_output_path(args.lat, args.lon, args.year)
     timeseries_dir = output.parent / output.stem / "timeseries"
 
+    print(
+        f"Fetching {args.year} weather for ({args.lat:+.4f}, {args.lon:+.4f})…",
+        flush=True,
+    )
+    df = fetch_year_weather(args.lat, args.lon, args.year, cache_dir=args.cache_dir)
+
+    # Config after the fetch, because the site's elevation comes off the frame: it sets
+    # ambient pressure, hence every gap air property and the h_amb density derate. A real
+    # site left at the 0.0 sea-level default is silently a different system.
     config = build_system_config(
         salt=args.salt,
         salt_loading=args.salt_loading,
@@ -70,13 +79,8 @@ def main(argv: list[str] | None = None) -> int:
         insulation_gap_mm=args.insulation_gap_mm,
         tilt_deg=args.tilt_deg,
         fin_area_ratio=args.fin_area_ratio,
+        site_elevation_m=site_elevation_m(df),
     )
-
-    print(
-        f"Fetching {args.year} weather for ({args.lat:+.4f}, {args.lon:+.4f})…",
-        flush=True,
-    )
-    df = fetch_year_weather(args.lat, args.lon, args.year, cache_dir=args.cache_dir)
 
     day_items = real_weather_days_from_df(df, stride=args.stride, poa_tilt_deg=args.tilt_deg)
     if not day_items:

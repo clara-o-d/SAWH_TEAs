@@ -9,6 +9,7 @@ from sawh_bayesopt.evaluator import EvalCache
 from sawh_bayesopt.sites import SiteSpec
 
 _DUMMY_PROFILES = [(1, object())]
+_DUMMY_FRAMES = {"dummy": object()}  # never read: _profiles_for_design is stubbed below
 
 
 class _FakeJaxDailyCycle:
@@ -42,6 +43,15 @@ class _FakeJaxDailyCycle:
         return np.asarray(self._water), np.asarray(self._eta)
 
 
+@pytest.fixture(autouse=True)
+def stub_profiles(monkeypatch):
+    """evaluate_batch rebuilds per-day profiles from the site's weather frame for every
+    design (the schedule offsets are optimized dims), which these tests have no real
+    frame for. Return a sentinel profile list instead; the failure paths under test never
+    look inside it."""
+    monkeypatch.setattr(evaluator, "_profiles_for_design", lambda df, x, complex_mode: _DUMMY_PROFILES)
+
+
 @pytest.fixture
 def one_site():
     return (SiteSpec("dummy", 0.0, 0.0),)
@@ -66,10 +76,9 @@ def test_evaluate_batch_penalizes_batched_call_failure(monkeypatch, tmp_path, on
     monkeypatch.setattr(evaluator, "_load_jax_daily_cycle", lambda: fake)
 
     x = _one_x()
-    site_profiles = {"dummy": _DUMMY_PROFILES}
     cache = EvalCache(tmp_path / "cache.jsonl")
     [result] = evaluator.evaluate_batch(
-        [x], cache=cache, sites=one_site, site_profiles=site_profiles, econ=econ
+        [x], cache=cache, sites=one_site, site_frames=_DUMMY_FRAMES, econ=econ
     )
 
     assert result.site_results[0].feasible is False
@@ -84,10 +93,9 @@ def test_evaluate_batch_penalizes_zero_yield(monkeypatch, tmp_path, one_site, ec
     monkeypatch.setattr(evaluator, "_load_jax_daily_cycle", lambda: fake)
 
     x = _one_x()
-    site_profiles = {"dummy": _DUMMY_PROFILES}
     cache = EvalCache(tmp_path / "cache.jsonl")
     [result] = evaluator.evaluate_batch(
-        [x], cache=cache, sites=one_site, site_profiles=site_profiles, econ=econ
+        [x], cache=cache, sites=one_site, site_frames=_DUMMY_FRAMES, econ=econ
     )
 
     assert result.site_results[0].feasible is False
@@ -102,10 +110,9 @@ def test_evaluate_batch_combined_lcow_uses_finite_penalty_not_fail_lco(
     monkeypatch.setattr(evaluator, "_load_jax_daily_cycle", lambda: fake)
 
     x = _one_x()
-    site_profiles = {"dummy": _DUMMY_PROFILES}
     cache = EvalCache(tmp_path / "cache.jsonl")
     [result] = evaluator.evaluate_batch(
-        [x], cache=cache, sites=one_site, site_profiles=site_profiles, econ=econ
+        [x], cache=cache, sites=one_site, site_frames=_DUMMY_FRAMES, econ=econ
     )
 
     assert result.site_results[0].feasible is False
@@ -124,21 +131,38 @@ def test_evaluate_batch_propagates_bugs_instead_of_penalizing(monkeypatch, tmp_p
     with pytest.raises(NameError, match="_M_DES_BRACKET_MAX"):
         evaluator.evaluate_batch(
             [_one_x()], cache=cache, sites=one_site,
-            site_profiles={"dummy": _DUMMY_PROFILES}, econ=econ,
+            site_frames=_DUMMY_FRAMES, econ=econ,
         )
 
 
-def test_evaluate_batch_penalizes_missing_weather(tmp_path, one_site, econ):
+def test_evaluate_batch_penalizes_missing_weather(monkeypatch, tmp_path, one_site, econ):
     from solar_lumped.economics import FAIL_LCO
 
     x = _one_x()
-    site_profiles = {"dummy": []}  # no weather at all -> never touches jax
+    # No usable day in the frame -> never touches jax.
+    monkeypatch.setattr(evaluator, "_profiles_for_design", lambda df, x, complex_mode: [])
     cache = EvalCache(tmp_path / "cache.jsonl")
     [result] = evaluator.evaluate_batch(
-        [x], cache=cache, sites=one_site, site_profiles=site_profiles, econ=econ
+        [x], cache=cache, sites=one_site, site_frames=_DUMMY_FRAMES, econ=econ
     )
 
     assert result.site_results[0].feasible is False
     assert result.site_results[0].lcow == FAIL_LCO
     assert result.site_results[0].failure_reason == "no weather profiles"
     assert result.combined_lcow == evaluator.PENALTY_LCOW_USD_PER_M3
+
+
+def test_cpu_backend_rejects_multiple_sites(tmp_path, one_site, econ):
+    """The CPU path is single-location only -- global/multi-site sweeping is JAX's job."""
+    from sawh_bayesopt.sites import SiteSpec
+
+    sites = (one_site[0], SiteSpec("second", 0.0, 0.0))
+    with pytest.raises(ValueError, match="single-site"):
+        evaluator.evaluate_batch(
+            [(4.0, 40.0, 0.3, 0.0, 0.0)],
+            cache=evaluator.EvalCache(tmp_path / "cache.jsonl"),
+            sites=sites,
+            site_frames={s.name: object() for s in sites},
+            econ=econ,
+            backend="cpu",
+        )

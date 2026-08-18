@@ -203,9 +203,9 @@ def plot_design_vs_baseline(
             va="center", ha="left", fontsize=8.5, color=_INK_MUTED,
         )
 
-    # The 6 simple-model variables and the 7 complex-fidelity ones are different families
-    # (the latter only exist under --complex), so mark the split rather than letting the
-    # reader count rows against COMPLEX_VAR_ORDER.
+    # In a complex run the 6 geometry variables and the 7 complex-fidelity ones are
+    # different families, so mark the split rather than letting the reader count rows
+    # against COMPLEX_VAR_ORDER. A simple run has one family and draws no divider.
     if 0 < n_base_dims < len(names):
         ax.axhline(y[n_base_dims] + 0.5, color=_GRID, linewidth=1.2)
         ax.annotate(
@@ -257,7 +257,8 @@ def main(argv: list[str] | None = None) -> int:
         report["baseline_wilson_table_s3"]["design"],
         report["recommended_design"],
         config["bounds"],
-        # Everything past the 6 simple dims is complex-fidelity; a simple-mode run has 6.
+        # Everything past design_space.BASE_VAR_ORDER's 6 names is complex-fidelity. A
+        # simple-mode run has 5 dims total, so the guard below skips the divider.
         n_base_dims=6,
         path=out_dir / "design_vs_baseline.png",
     )

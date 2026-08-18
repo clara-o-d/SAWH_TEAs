@@ -117,11 +117,13 @@ I'll fold whatever comes back into `FINDINGS.md` as a real GPU data point.
 
 ## 6. The actual sweep, on a small subset of real sites -- done, see FINDINGS.md Result 11
 
-`run_gpu_sweep.py` is the GPU counterpart to `scripts/grid_param_sweep.py` (see
-its module docstring) -- it reuses that script's CLI, weather fetch, combo grid,
-and CSV schema directly, but batches one site's full 135-combo x 12-month grid
-(up to 1,620 instances) into a single compiled call instead of looping calls to
-SciPy.
+`run_gpu_sweep.py` now sweeps **site x scenario only** -- the 8 scenarios in
+`site_sweep.SCENARIOS` (three optical cases, two with instant sorption, two with
+a perfect condenser, one with all three limits), every one at the
+parameters.xlsx baseline design. No geometry is swept. The batch axis is all
+sites in the invocation x the scenarios sharing a compiled code path, so one
+array task = 4 compilations, not 4 per site. (Results 11 below predate this and
+describe the old 135-combo-per-site grid.)
 
 The 10-site smoke test (`sbatch gpu_sweep/sbatch_gpu_sweep_smoke.sh`) already
 ran and is recorded in `FINDINGS.md` Result 11: correct (1,350/1,350 expected
@@ -140,10 +142,10 @@ own `chunk_<task_id>.csv` (no concurrent-write contention between tasks):
 ```bash
 sbatch gpu_sweep/sbatch_gpu_sweep_array.sh
 squeue --me                                        # watch tasks queue/run
-tail -f gpu_sweep/logs/full_<jobid>_<taskid>.out    # any one task's log
+tail -f gpu_sweep/logs/scenarios_<jobid>_<taskid>.out    # any one task's log
 ```
 
-The script's `--array=0-39%8` header (40 chunks, ~35 sites each, at most 8
+The script's `--array=0-19%8` header (20 chunks, ~70 sites each, at most 8
 running at once) is a starting guess, not a measured number -- **tune both
 numbers to your account's real serc GPU quota** (more concurrent tasks = closer
 to a full N-way speedup over the ~63-hour sequential estimate; the `%K` throttle
@@ -151,8 +153,8 @@ lets you submit more chunks than you can run at once and let Slurm queue the
 rest automatically). Once all tasks finish, merge the chunks:
 
 ```bash
-(head -1 outputs/gpu_grid_sweep/chunk_0.csv; tail -n +2 -q outputs/gpu_grid_sweep/chunk_*.csv) \
-  > outputs/gpu_grid_sweep/full_sweep.csv
+(head -1 outputs/gpu_scenario_sweep/chunk_0.csv; tail -n +2 -q outputs/gpu_scenario_sweep/chunk_*.csv) \
+  > outputs/gpu_scenario_sweep/full_sweep.csv
 ```
 
 This is genuinely new territory -- concurrent array tasks sharing the `serc`

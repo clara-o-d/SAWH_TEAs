@@ -19,7 +19,6 @@ def _fake_evaluate_batch(
     *,
     cache=None,
     sites,
-    site_profiles=None,
     econ=None,
     resolution="annual",
     case="case1",
@@ -49,10 +48,7 @@ def _fake_evaluate_batch(
 
 
 def _patch(monkeypatch):
-    monkeypatch.setattr("sawh_bayesopt.bayesopt.fetch_daily_profiles", lambda site, cache_dir: [])
-    monkeypatch.setattr(
-        "sawh_bayesopt.bayesopt.fetch_site_elevations", lambda sites, cache_dir: {}
-    )
+    monkeypatch.setattr("sawh_bayesopt.bayesopt.fetch_site_inputs", lambda cfg: ({}, {}))
     monkeypatch.setattr("sawh_bayesopt.bayesopt.evaluate_batch", _fake_evaluate_batch)
 
 
@@ -101,7 +97,6 @@ def _fake_evaluate_batch_with_infeasible_region(
     *,
     cache=None,
     sites,
-    site_profiles=None,
     econ=None,
     resolution="annual",
     case="case1",
@@ -141,10 +136,7 @@ def _fake_evaluate_batch_with_infeasible_region(
 
 
 def test_run_bayesopt_handles_an_infeasible_region_without_crashing(tmp_path, monkeypatch):
-    monkeypatch.setattr("sawh_bayesopt.bayesopt.fetch_daily_profiles", lambda site, cache_dir: [])
-    monkeypatch.setattr(
-        "sawh_bayesopt.bayesopt.fetch_site_elevations", lambda sites, cache_dir: {}
-    )
+    monkeypatch.setattr("sawh_bayesopt.bayesopt.fetch_site_inputs", lambda cfg: ({}, {}))
     monkeypatch.setattr(
         "sawh_bayesopt.bayesopt.evaluate_batch", _fake_evaluate_batch_with_infeasible_region
     )

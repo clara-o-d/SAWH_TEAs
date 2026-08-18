@@ -1,5 +1,10 @@
-"""Shared definition of the full-factorial system-parameter sweep: the combo grid, the
-per-combo SystemConfig, and the output CSV schema.
+"""Shared definition of the global sweep: the scenario list, the baseline design every
+scenario runs at, the per-instance SystemConfig, and the output CSV schema.
+
+The global sweep varies **site x scenario only** -- geometry is fixed at the
+parameters.xlsx baseline (``BASELINE_COMBO``). ``Combo``/``combo_grid`` and the
+``DEFAULT_*`` grids remain for the callers that still sweep geometry (the Bayes-opt
+driver and the tolerance validator).
 
 There is no CPU sweep driver -- sweeping runs on GPU only (gpu_sweep/run_gpu_sweep.py,
 all 365 real days per combo), and imports this module so the grid, config, and CSV
@@ -9,14 +14,22 @@ use ``system.py --weather-mode real --day YYYY-MM-DD``."""
 from __future__ import annotations
 
 import csv
+import dataclasses
 import itertools
 from dataclasses import dataclass
 from pathlib import Path
 
 from solar_lumped.physics import (
+    EPS_ABS,
     EPS_ABS_IR_CASE2,
     EPS_GLASS_IR_CASE2,
+    FIN_AREA_RATIO,
+    H0_M,
+    L_G_M,
+    L_INS_M,
+    SALT_LOADING_DEFAULT,
     SystemThermalParams,
+    TAU_GLASS,
     # Re-exported as gps.TILT_DEG by gpu_sweep's CLI defaults -- not unused.
     TILT_DEG,  # noqa: F401
 )
@@ -28,8 +41,8 @@ DEFAULT_HYDROGEL_THICKNESS_MM: tuple[float, ...] = (1.0, 3.25, 5.5, 7.75, 10.0)
 DEFAULT_FIN_AREA_RATIO: tuple[float, ...] = (3.0, 5.275, 7.55, 9.825, 12.0)
 DEFAULT_VAPOR_GAP_MM: tuple[float, ...] = (20.0, 30.0, 40.0, 50.0, 60.0)
 # eps_abs and tau_glass are fixed constants per case (not swept) -- see --eps-abs/--tau-glass.
-DEFAULT_EPS_ABS: float = 0.95
-DEFAULT_TAU_GLASS: float = 0.90
+DEFAULT_EPS_ABS: float = EPS_ABS
+DEFAULT_TAU_GLASS: float = TAU_GLASS
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +62,65 @@ def combo_grid(
         Combo(*vals)
         for vals in itertools.product(hydrogel_thickness_mm, fin_area_ratio, vapor_gap_mm)
     ]
+
+
+# --- The scenario axis of the global sweep -------------------------------------------
+# Every scenario runs the same parameters.xlsx baseline design; the sweep is site x
+# scenario and nothing else.
+BASELINE_COMBO = Combo(
+    hydrogel_thickness_mm=H0_M * 1e3,
+    fin_area_ratio=FIN_AREA_RATIO,
+    vapor_gap_mm=L_G_M * 1e3,
+)
+BASELINE_INSULATION_GAP_MM: float = L_INS_M * 1e3
+BASELINE_SALT_LOADING: float = SALT_LOADING_DEFAULT
+
+
+@dataclass(frozen=True, slots=True)
+class Scenario:
+    """Absorber/glass optics, plus which physical limits are relaxed.
+
+    ``instant_equilibrium`` (g -> infinity) and ``condenser_ambient`` (T_cond == T_amb)
+    each select a *code path* in the JAX step, not a per-instance number, so they are
+    uniform across a compiled batch -- which is why the driver runs the scenarios in
+    groups keyed on this pair rather than one flat batch.
+    """
+
+    eps_abs: float
+    tau_glass: float
+    eps_abs_ir: float
+    eps_glass_ir: float
+    instant_equilibrium: bool = False
+    condenser_ambient: bool = False
+
+
+# Wilson & Diaz-Marin's original blackbody/cavity radiative exchange (eps_IR = 1).
+_WILSON = Scenario(eps_abs=EPS_ABS, tau_glass=TAU_GLASS, eps_abs_ir=1.0, eps_glass_ir=1.0)
+# "Reasonable improvements": a real selective absorber behind ordinary glass.
+_IMPROVED = Scenario(
+    eps_abs=EPS_ABS, tau_glass=TAU_GLASS,
+    eps_abs_ir=EPS_ABS_IR_CASE2, eps_glass_ir=EPS_GLASS_IR_CASE2,
+)
+# "Optical material limits": perfect absorber, perfect glass, no IR loss.
+_LIMITS = Scenario(eps_abs=1.0, tau_glass=1.0, eps_abs_ir=0.0, eps_glass_ir=0.0)
+
+SCENARIOS: dict[str, Scenario] = {
+    "wilson": _WILSON,
+    "improved": _IMPROVED,
+    "optical_limits": _LIMITS,
+    # Instantaneous sorption (g -> infinity): desorption becomes energy-limited rather
+    # than transport-limited. Only meaningful on top of the two improved optics cases.
+    "improved_instant_g": dataclasses.replace(_IMPROVED, instant_equilibrium=True),
+    "optical_limits_instant_g": dataclasses.replace(_LIMITS, instant_equilibrium=True),
+    # Perfect condenser (T_cond == T_amb): infinite cooling capacity, so the condenser
+    # never warms under its own latent load.
+    "improved_perfect_cond": dataclasses.replace(_IMPROVED, condenser_ambient=True),
+    "optical_limits_perfect_cond": dataclasses.replace(_LIMITS, condenser_ambient=True),
+    # All three limits at once -- the idealized-device upper bound.
+    "optical_limits_instant_g_perfect_cond": dataclasses.replace(
+        _LIMITS, instant_equilibrium=True, condenser_ambient=True,
+    ),
+}
 
 
 def build_system_config(
@@ -121,6 +193,8 @@ _CSV_COLUMNS: tuple[str, ...] = (
     "mean_t_amb_c",
     "mean_solar_w_m2",
     "salt",
+    # Which entry of SCENARIOS produced this row -- the sweep's only design axis.
+    "scenario",
     "hydrogel_thickness_mm",
     "eps_abs",
     "tau_glass",
@@ -133,43 +207,25 @@ _CSV_COLUMNS: tuple[str, ...] = (
     "mean_yield_kg_m2",
     "mean_eta_thermal",
     "n_periods",
-    # Complex-fidelity settings (solar_lumped.complex_model). Always written, empty
-    # in simple mode, so simple and complex sweeps share one schema and their rows
-    # can be concatenated without silently losing which fidelity produced them.
-    "fidelity",
-    "cx_eps_abs_ir",
-    "cx_glazing_panes",
-    "cx_evacuated_gap",
-    "cx_condenser_air_speed_m_s",
-    "cx_blend_weights",
     # "ode" (default, Eq. 2) or "ambient" (T_cond == T_amb, infinite-cooling limit).
     "condenser_mode",
-    # "hydrate" (default, n*c_s) or "drh" (equilibrium c_w at the deliquescence RH) --
-    # which physical limit stopped desorption. See SystemConfig.c_w_floor_mode.
-    "c_w_floor_mode",
     # "finite_g" (default) or "instant" (g -> infinity, equilibrium every instant).
     # See SystemConfig.instant_equilibrium.
     "kinetics",
 )
 
 
-def _existing_combo_keys(path: Path, lat: float, lon: float) -> set[tuple]:
+def _existing_scenarios(path: Path) -> set[tuple[float, float, str]]:
+    """The (lat, lon, scenario) rows already in *path*, for --resume."""
     if not path.is_file():
         return set()
     import pandas as pd
 
     df = pd.read_csv(path)
-    df = df[(df["lat"] == lat) & (df["lon"] == lon)]
-    keys = set()
-    for _, row in df.iterrows():
-        keys.add(
-            (
-                round(float(row["hydrogel_thickness_mm"]), 6),
-                round(float(row["fin_area_ratio"]), 6),
-                round(float(row["vapor_gap_mm"]), 6),
-            )
-        )
-    return keys
+    return {
+        (round(float(r["lat"]), 6), round(float(r["lon"]), 6), str(r["scenario"]))
+        for _, r in df.iterrows()
+    }
 
 
 def _append_row(path: Path, row: dict) -> None:

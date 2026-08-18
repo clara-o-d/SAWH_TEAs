@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """BayesOpt at every map point run_gpu_sweep.py would brute-force sweep: same site
 selection CLI and 12-month Aitken JAX fast path, optimizing hydrogel_thickness /
-fin_area_ratio / vapor_gap over the min/max of the sweep's own combo lists.
+vapor_gap over the min/max of the sweep's own combo lists, plus tilt and the A1
+seal/open schedule offsets (design_space.VAR_ORDER).
 
 Each site writes the same artifacts hp_sweep.py records per combination (history.csv,
 convergence.png, gp_state.joblib, de_diagnostics.json, report.json, gp_regression_report
@@ -38,7 +39,12 @@ from run_gpu_sweep import _site_list  # noqa: E402
 
 import gp_diagnostics  # noqa: E402
 from sawh_bayesopt.bayesopt import BayesOptConfig, run_bayesopt  # noqa: E402
-from sawh_bayesopt.design_space import CASE_EPS_IR, COMPLEX_VAR_ORDER, DesignBounds  # noqa: E402
+from sawh_bayesopt.design_space import (  # noqa: E402
+    CASE_EPS_IR,
+    COMPLEX_VAR_ORDER,
+    SIMPLE_FIXED,
+    DesignBounds,
+)
 from sawh_bayesopt.reporting import (  # noqa: E402
     write_convergence_plot,
     write_de_diagnostics,
@@ -68,9 +74,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # Fixed (non-optimized) system constants -- same role as run_gpu_sweep.py's
     # matching flags, just not swept here.
     p.add_argument("--salt", type=str, default="LiCl")
-    p.add_argument("--salt-loading", type=float, default=4.0, help="salt_loading, held fixed.")
-    p.add_argument("--insulation-gap-mm", type=float, default=5.0, help="insulation_gap_m, held fixed.")
-    p.add_argument("--tilt-deg", type=float, default=gps.TILT_DEG, help="tilt_deg, held fixed.")
+    # salt_loading / insulation_gap_m are pinned by design_space.SIMPLE_FIXED now, at the
+    # same values these defaults carried, and tilt_deg is an optimized dim in both modes.
+    # The three flags are reported in summary.csv but no longer change anything; they are
+    # kept only so existing sbatch command lines still parse.
+    p.add_argument("--salt-loading", type=float, default=SIMPLE_FIXED["salt_loading"],
+                   help="Ignored (pinned by design_space.SIMPLE_FIXED).")
+    p.add_argument("--insulation-gap-mm", type=float, default=SIMPLE_FIXED["insulation_gap_m"] * 1000.0,
+                   help="Ignored (pinned by design_space.SIMPLE_FIXED).")
+    p.add_argument("--tilt-deg", type=float, default=gps.TILT_DEG,
+                   help="Ignored: tilt_deg is an optimized dim in both modes.")
     p.add_argument("--case", choices=tuple(CASE_EPS_IR), default="case2")
     p.add_argument(
         "--condenser-ambient", action="store_true",
@@ -85,13 +98,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     )
     p.add_argument(
         "--complex", action="store_true",
-        help="Optimize the 13-dim complex-fidelity space (A1/B1/B2/B3/B4/B8) instead of 3 "
-             "dims in a 6-dim box. Ignores --tilt-deg/--insulation-gap-mm/--salt-loading, "
-             "which become optimized dims rather than fixed constants -- see _bounds().",
+        help="Optimize the 13-dim complex-fidelity space (A1/B1/B2/B3/B4/B8) instead of "
+             "simple mode's 5 dims. Frees insulation_gap_m/fin_area_ratio/salt_loading, "
+             "which simple mode pins -- see _bounds().",
     )
 
-    # Same 3 combo variables the brute-force sweep grids over -- min/max of
-    # these lists become the BayesOpt box bounds instead of 5 discrete values.
+    # Combo variables the brute-force sweep grids over -- min/max of these lists become
+    # the BayesOpt box bounds instead of 5 discrete values. --fin-area-ratio only bounds a
+    # dimension under --complex; simple mode pins fin_area_ratio.
     p.add_argument("--hydrogel-thickness-mm", type=float, nargs="+", default=list(gps.DEFAULT_HYDROGEL_THICKNESS_MM))
     p.add_argument("--fin-area-ratio", type=float, nargs="+", default=list(gps.DEFAULT_FIN_AREA_RATIO))
     p.add_argument("--vapor-gap-mm", type=float, nargs="+", default=list(gps.DEFAULT_VAPOR_GAP_MM))
@@ -117,47 +131,32 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-# to_unit_cube divides by (hi - lo), so an exact lo == hi fixed dim would NaN the whole
-# normalization. This span is indistinguishable from the fixed value at any real bound.
-_FIXED_DIM_EPS = 1e-9
-
-
 def _bounds(args: argparse.Namespace) -> DesignBounds:
-    """Box bounds for the 3 optimized dims from the sweep's combo lists (min/max, mm -> m);
-    the other 3 collapse to a tiny span around the fixed CLI value (see _FIXED_DIM_EPS).
+    """Box bounds for the run's optimized dims.
 
-    ``--complex`` instead frees all 13 dims at their design_space defaults, ignoring
-    --tilt-deg/--insulation-gap-mm/--salt-loading. Two reasons, one physical and one
-    numerical:
+    Simple mode optimizes 5: hydrogel_thickness_m and vapor_gap_m over the sweep's own
+    combo lists (min/max, mm -> m), plus tilt_deg and A1's two schedule offsets over their
+    workbook ranges. insulation_gap_m / fin_area_ratio / salt_loading are not dimensions
+    at all any more -- design_space.SIMPLE_FIXED pins them, so the matching CLI flags no
+    longer feed anything.
 
-      * The 3-dim box exists to mirror run_gpu_sweep.py's brute-force grid so the two
-        are comparable. Complex mode has no brute-force counterpart to match, and
-        holding insulation and salt loading at that sweep's constants while optimizing
-        7 exotic glazing/blend/schedule dims optimizes the wrong system. tilt in
-        particular only becomes a real lever once complex mode's POA transposition is
-        on -- before that it enters only through the Hollands cos(theta).
-      * A _FIXED_DIM_EPS dim is worse than absent. to_unit_cube divides by the span, so
-        a 1e-9-wide axis still spreads its samples across the full [0, 1] cube while
-        having zero effect on LCOW. The GP spends an ARD length scale on pure noise
-        (and pins it at the upper bound), the LHS spends spread there, and DE spends a
-        search dimension there. At 13 dims that waste is no longer affordable.
+    That replaced the old _FIXED_DIM_EPS trick, which was worse than absence: to_unit_cube
+    divides by the span, so a 1e-9-wide axis still spread its samples across the full
+    [0, 1] cube while having zero effect on LCOW. The GP spent an ARD length scale on pure
+    noise (and pinned it at the upper bound), the LHS spent spread there, and DE spent a
+    search dimension there.
+
+    ``--complex`` instead frees all 13 dims at their design_space defaults. The 3-dim box
+    existed to mirror run_gpu_sweep.py's brute-force grid so the two were comparable;
+    complex mode has no brute-force counterpart to match, and holding insulation and salt
+    loading at that sweep's constants while optimizing 7 exotic glazing/blend/schedule
+    dims optimizes the wrong system.
     """
-    if args.complex:
-        return DesignBounds(
-            hydrogel_thickness_m=(min(args.hydrogel_thickness_mm) / 1000.0, max(args.hydrogel_thickness_mm) / 1000.0),
-            vapor_gap_m=(min(args.vapor_gap_mm) / 1000.0, max(args.vapor_gap_mm) / 1000.0),
-            fin_area_ratio=(min(args.fin_area_ratio), max(args.fin_area_ratio)),
-            complex_mode=True,
-        )
-    salt_loading_val = args.salt_loading
-    insulation_m = args.insulation_gap_mm / 1000.0
     return DesignBounds(
         hydrogel_thickness_m=(min(args.hydrogel_thickness_mm) / 1000.0, max(args.hydrogel_thickness_mm) / 1000.0),
         vapor_gap_m=(min(args.vapor_gap_mm) / 1000.0, max(args.vapor_gap_mm) / 1000.0),
-        insulation_gap_m=(insulation_m, insulation_m + _FIXED_DIM_EPS),
         fin_area_ratio=(min(args.fin_area_ratio), max(args.fin_area_ratio)),
-        tilt_deg=(args.tilt_deg, args.tilt_deg + _FIXED_DIM_EPS),
-        salt_loading=(salt_loading_val, salt_loading_val + _FIXED_DIM_EPS),
+        complex_mode=args.complex,
     )
 
 
@@ -225,15 +224,15 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, bounds: DesignBou
 
     best = result.best
     # Every optimized dim by name, so complex mode's 7 extra dims land in summary.csv
-    # instead of only living in the per-site report.json.
-    best_by_name = dict(zip(bounds.names(), best.design_vector))
+    # instead of only living in the per-site report.json. SIMPLE_FIXED underneath so the
+    # pinned geometry still reports its value in simple mode, where it is not a dim.
+    best_by_name = {**SIMPLE_FIXED, **dict(zip(bounds.names(), best.design_vector))}
     row.update({
         "hydrogel_thickness_mm": best_by_name["hydrogel_thickness_m"] * 1000.0,
         "vapor_gap_mm": best_by_name["vapor_gap_m"] * 1000.0,
         "fin_area_ratio": best_by_name["fin_area_ratio"],
-        # Read off the winning design, not the CLI: under --complex these three are
-        # optimized dims, and in simple mode a degenerate-span dim reproduces the CLI
-        # value to 1e-9 anyway.
+        # Read off the winning design, not the CLI: under --complex these are optimized
+        # dims, and in simple mode they come from SIMPLE_FIXED.
         "insulation_gap_mm": best_by_name["insulation_gap_m"] * 1000.0,
         "tilt_deg": best_by_name["tilt_deg"],
         **{name: best_by_name[name] for name in COMPLEX_VAR_ORDER if name in best_by_name},
@@ -274,7 +273,7 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, bounds: DesignBou
         # take its answer rather than leaving summary.csv on a design report.json rejected.
         row["recommended_from"] = report["recommended_from"]
         if report["recommended_from"] == "verification_neighbor":
-            rec = report["recommended_design"]
+            rec = {**SIMPLE_FIXED, **report["recommended_design"]}
             row.update({
                 "hydrogel_thickness_mm": rec["hydrogel_thickness_m"] * 1000.0,
                 "vapor_gap_mm": rec["vapor_gap_m"] * 1000.0,

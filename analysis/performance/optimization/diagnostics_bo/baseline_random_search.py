@@ -35,7 +35,8 @@ import numpy as np  # noqa: E402
 
 from sawh_bayesopt.design_space import DesignBounds  # noqa: E402
 from sawh_bayesopt.evaluator import EvalCache, evaluate_batch  # noqa: E402
-from sawh_bayesopt.sites import ATACAMA, CAMBRIDGE, fetch_daily_profiles  # noqa: E402
+from sawh_bayesopt.sites import ATACAMA, CAMBRIDGE, fetch_site_frame  # noqa: E402
+from solar_lumped.weather import site_elevation_m  # noqa: E402
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -71,7 +72,13 @@ def main(argv: list[str] | None = None) -> int:
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "config.json").write_text(json.dumps({**bo_config, "seed": args.seed, "search": "random_uniform"}, indent=2))
 
-    site_profiles = {s.name: fetch_daily_profiles(s, cache_dir=args.weather_cache_dir) for s in sites}
+    # Raw frames, not prebuilt profiles: the schedule offsets and POA tilt are optimized
+    # dims that live in the profile, so evaluate_batch rebuilds profiles per design point.
+    site_frames = {s.name: fetch_site_frame(s, cache_dir=args.weather_cache_dir) for s in sites}
+    # Real site pressure, same as the BayesOpt loop this is the baseline for -- at sea
+    # level every gap air property and the h_amb density derate differ, which would make
+    # the comparison a physics difference rather than a search-strategy one.
+    site_elevations = {name: site_elevation_m(df) for name, df in site_frames.items()}
     cache = EvalCache(run_dir / "cache.jsonl")
 
     from solar_lumped.economics import LCOEconomicParams
@@ -85,7 +92,8 @@ def main(argv: list[str] | None = None) -> int:
     for start in range(0, n_total, args.eval_batch_size):
         batch = list(X[start : start + args.eval_batch_size])
         results = evaluate_batch(
-            batch, cache=cache, sites=sites, site_profiles=site_profiles, econ=econ,
+            batch, cache=cache, sites=sites, site_frames=site_frames,
+            site_elevations=site_elevations, econ=econ,
             case=bo_config.get("case", "case2"),
         )
         history.extend(results)

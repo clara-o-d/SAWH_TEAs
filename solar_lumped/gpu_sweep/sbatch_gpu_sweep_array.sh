@@ -1,36 +1,36 @@
 #!/bin/bash
-# Full 1,405-site GPU sweep, split across parallel Slurm array tasks (each its
-# own GPU allocation) instead of one ~2.6-day sequential job -- see
-# FINDINGS.md Result 11 for why the per-site recompile cost makes splitting
-# across GPUs the right first move before optimizing the recompile itself.
+# Full 1,405-site x 8-scenario GPU sweep, split across parallel Slurm array tasks
+# (each its own GPU allocation). One scenario sweep replaces the old per-case
+# scripts (Case 1/2/3, the ambient-condenser and DRH variants): the scenario list
+# lives in site_sweep.SCENARIOS and every scenario runs the parameters.xlsx
+# baseline design, so there are no sweep flags to keep in sync here.
 #
-# Each task computes its own contiguous [start, end) site range (from its
-# array index and the array's total size -- edit only --array below, nothing
-# else needs to stay in sync) and writes to its own chunk_<task_id>.csv
-# (avoids concurrent-write contention between tasks) -- merge them afterward:
-#   (head -1 outputs/gpu_grid_sweep/chunk_0.csv; tail -n +2 -q outputs/gpu_grid_sweep/chunk_*.csv) \
-#     > outputs/gpu_grid_sweep/full_sweep.csv
+# Each task computes its own contiguous [start, end) site range (from its array
+# index and the array's total size -- edit only --array below) and writes to its
+# own chunk_<task_id>.csv, avoiding concurrent-write contention. Merge afterward:
+#   (head -1 outputs/gpu_scenario_sweep/chunk_0.csv; tail -n +2 -q outputs/gpu_scenario_sweep/chunk_*.csv) \
+#     > outputs/gpu_scenario_sweep/full_sweep.csv
 #
 # Submit from the repo root (/home/groups/cdiazm/SAWH_TEAs/solar_lumped):
 #   sbatch gpu_sweep/sbatch_gpu_sweep_array.sh
+# Smoke-test first with sbatch_gpu_sweep_smoke.sh.
 #
-# Tune the --array range/throttle below to how many concurrent serc GPU
-# allocations your account can realistically get. The %K suffix caps how many
-# array tasks run *simultaneously* -- e.g. --array=0-39%8 submits 40 chunks
-# (~35 sites each) but only runs 8 at once, letting Slurm queue and run the
-# rest automatically as slots free up, without you needing to know an exact
-# quota up front. More tasks = smaller, more independently resumable chunks.
-#SBATCH --job-name=sawh-gpu-sweep-full
+# The %K suffix caps how many array tasks run *simultaneously*. Sites within one
+# task now share a single compilation (they are the batch axis, see
+# run_gpu_sweep.py), so FEWER, BIGGER tasks are cheaper here than they were for
+# the old per-site combo sweep -- the trade is GPU memory, which grows with
+# sites-per-task x scenarios-in-group x days. 20 tasks is ~70 sites each.
+#SBATCH --job-name=sawh-gpu-scenarios
 #SBATCH --time=04:00:00
 #SBATCH --partition=serc
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
-#SBATCH --array=0-39%8
-#SBATCH --output=gpu_sweep/logs/full_%A_%a.out
+#SBATCH --array=0-19%8
+#SBATCH --output=gpu_sweep/logs/scenarios_%A_%a.out
 
 set -euo pipefail
-mkdir -p gpu_sweep/logs outputs/gpu_grid_sweep
+mkdir -p gpu_sweep/logs outputs/gpu_scenario_sweep
 
 ml python/3.12.1 uv
 source .venv_gpu/bin/activate
@@ -66,5 +66,5 @@ python3 -c "import jax; print('jax.devices():', jax.devices())"
 
 python3 gpu_sweep/run_gpu_sweep.py \
   --site-range "${START}" "${END}" --step "${STEP}" \
-  --output-csv "outputs/gpu_grid_sweep/chunk_${TASK_ID}.csv" \
+  --output-csv "outputs/gpu_scenario_sweep/chunk_${TASK_ID}.csv" \
   --resume

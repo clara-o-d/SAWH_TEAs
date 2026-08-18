@@ -11,9 +11,28 @@ from scipy.stats import qmc
 
 from solar_lumped._parameters_xlsx import physics_bounds as _bounds
 from solar_lumped.physics import EPS_ABS_IR_CASE2, EPS_GLASS_IR_CASE2
+from solar_lumped.physics import FIN_AREA_RATIO, L_INS_M, SALT_LOADING_DEFAULT
 from solar_lumped.physics import VAPOR_GAP_TRANSPORT_MIN_M as _VAPOR_GAP_TRANSPORT_MIN_M
 
+# Simple mode's optimized dimensions: the two gap lengths, tilt, and A1's two schedule
+# offsets borrowed from complex mode. insulation_gap_m / fin_area_ratio / salt_loading
+# used to be swept here and are now pinned at solar_lumped's own defaults (SIMPLE_FIXED).
+#
+# The offsets are the reason simple mode is no longer cheap in weather: they move the
+# day/night split, which lives in the *profile*, so profiles are rebuilt per design point
+# the way complex mode's already were -- see evaluator._profiles_for_design. tilt_deg is
+# in the profile too, via POA transposition (to_profile_kwargs).
 VAR_ORDER: tuple[str, ...] = (
+    "hydrogel_thickness_m",
+    "vapor_gap_m",
+    "tilt_deg",
+    "seal_offset_h",
+    "open_offset_h",
+)
+
+# Complex mode's leading geometry block. Positional: archived 13-dim history.csv rows and
+# cache.jsonl keys are indexed by this order, so it must not be reordered or trimmed.
+BASE_VAR_ORDER: tuple[str, ...] = (
     "hydrogel_thickness_m",
     "vapor_gap_m",
     "insulation_gap_m",
@@ -22,10 +41,20 @@ VAR_ORDER: tuple[str, ...] = (
     "salt_loading",
 )
 
+# Held fixed in simple mode, at solar_lumped's defaults. Passed to SystemConfig
+# explicitly rather than left to its defaults, so a change to those constants shows up as
+# a diff here instead of silently moving every simple-mode optimum.
+SIMPLE_FIXED: dict[str, float] = {
+    "insulation_gap_m": L_INS_M,
+    "fin_area_ratio": FIN_AREA_RATIO,
+    "salt_loading": SALT_LOADING_DEFAULT,
+}
+
 # --- Complex-fidelity dimensions (solar_lumped.complex_model) ---
 #
-# Appended after VAR_ORDER, so a simple-mode vector is a strict prefix of a
-# complex-mode one and the two share every bound, hash, and sampler code path.
+# Appended after BASE_VAR_ORDER. Simple mode is a *subset* of these 13 names, not a
+# prefix of them, so anything reading a design vector positionally must go through
+# ``var_order(complex_mode)`` rather than slicing.
 #
 # Screening verdict behind this list -- a dimension earns a slot only if
 # d(LCOW)/dx changes sign inside its box, otherwise the optimizer just pins a
@@ -36,8 +65,8 @@ VAR_ORDER: tuple[str, ...] = (
 #   insulation_gap_m       KEEP  conduction falls as 1/L until Hollands convection starts
 #   fin_area_ratio         KEEP  was a free lever (flat BOM line); B3 now prices the
 #                                aluminum, and the measured optimum moved below A_r=3
-#   tilt_deg               KEEP  only once POA is on -- complex mode enables it, so tilt
-#                                drives solar gain, not just the Hollands cos(theta)
+#   tilt_deg               KEEP  POA is on in both fidelities, so tilt drives solar gain,
+#                                not just the Hollands cos(theta)
 #   vapor_gap_m            WEAK  physics optimum flattens past ~40 mm and gap height is
 #                                still free (system height is not costed -- that was B5,
 #                                out of scope here). First candidate to drop if the GP
@@ -57,7 +86,7 @@ COMPLEX_VAR_ORDER: tuple[str, ...] = (
     "blend_v",
 )
 
-FULL_VAR_ORDER: tuple[str, ...] = VAR_ORDER + COMPLEX_VAR_ORDER
+FULL_VAR_ORDER: tuple[str, ...] = BASE_VAR_ORDER + COMPLEX_VAR_ORDER
 
 # glazing_config packs B2's pane count and evacuated flag into one ordinal axis,
 # ordered by increasing cost and increasing thermal isolation, so the GP sees a
@@ -78,7 +107,7 @@ def var_order(complex_mode: bool) -> tuple[str, ...]:
 VAPOR_GAP_TRANSPORT_MIN_M: float = _VAPOR_GAP_TRANSPORT_MIN_M
 
 # Absorber/glass IR emissivity pairs for the modified Eqs. 3/4 radiative term, matching
-# run_gpu_sweep.py's --eps-abs-ir/--eps-glass-ir: case2 (selective surface) is the base
+# the optics of site_sweep.SCENARIOS' wilson/improved/optical_limits entries: case2 (selective surface) is the base
 # case, case1 (1.0, 1.0) is Wilson's blackbody/cavity approximation, case3 the idealized
 # optical limit. case1 uses explicit floats -- numerically identical to the old (None,
 # None), so historical case1 cache.jsonl entries stay valid.
@@ -105,7 +134,7 @@ _SEAL_OPEN_OFFSET_BOUNDS_H = _bounds("Seal / open offset from sunrise-sunset")
 
 @dataclass(frozen=True, slots=True)
 class DesignBounds:
-    """(low, high) box bounds. 6 rows in simple mode, 13 with ``complex_mode=True``.
+    """(low, high) box bounds. 5 rows in simple mode, 13 with ``complex_mode=True``.
 
     No condenser_thickness_m: LCOW charges a flat condenser BOM cost and the JAX fast
     path hardcodes condenser thermal mass at the Table S3 constant, which is already
@@ -119,7 +148,8 @@ class DesignBounds:
     tilt_deg: tuple[float, float] = _TILT_BOUNDS_DEG
     salt_loading: tuple[float, float] = _SALT_LOADING_BOUNDS
 
-    # --- complex mode only (appended in COMPLEX_VAR_ORDER when complex_mode) ---
+    # --- complex mode only, except seal/open_offset_h which simple mode optimizes too
+    # (appended in COMPLEX_VAR_ORDER when complex_mode) ---
     complex_mode: bool = False
     eps_abs_ir: tuple[float, float] = _EPS_ABS_IR_BOUNDS
     # Continuous stand-in for the GLAZING_CONFIGS index; rounded on use. Not a workbook
@@ -186,7 +216,12 @@ def to_system_config_kwargs(
 
     ``case`` picks the IR emissivity pair (CASE_EPS_IR) in simple mode. Every case
     gets an explicit "thermal" kwarg with SystemThermalParams re-derived per point,
-    since insulation_gap_m/vapor_gap_m/tilt_deg are all swept dims.
+    since vapor_gap_m/tilt_deg are swept dims.
+
+    Simple mode's seal/open_offset_h dims are deliberately absent from the result: they
+    are not SystemConfig fields, they reshape the weather profile -- see
+    ``to_profile_kwargs``. The three geometry fields it no longer sweeps come from
+    SIMPLE_FIXED.
 
     In complex mode the vector carries COMPLEX_VAR_ORDER as well, ``case`` is
     ignored (B1 optimizes eps_abs_ir directly, which is what the case flag used to
@@ -199,11 +234,10 @@ def to_system_config_kwargs(
     cooling-capacity limit) in either fidelity mode. ``instant_equilibrium`` is
     orthogonal in the same way: the g -> infinity sorption limit, either fidelity.
     """
-    x = np.asarray(x, dtype=float).reshape(-1)
-    names = var_order(complex_mode)
-    if x.shape[0] != len(names):
-        raise ValueError(f"Expected a length-{len(names)} design vector, got shape {x.shape}")
-    kwargs: dict[str, Any] = dict(zip(VAR_ORDER, (float(v) for v in x[: len(VAR_ORDER)])))
+    vals = _design_values(x, complex_mode)
+    kwargs: dict[str, Any] = {name: vals[name] for name in BASE_VAR_ORDER if name in vals}
+    if not complex_mode:
+        kwargs.update(SIMPLE_FIXED)
     kwargs["condenser_tracks_ambient"] = condenser_tracks_ambient
     kwargs["instant_equilibrium"] = instant_equilibrium
 
@@ -229,6 +263,39 @@ def to_system_config_kwargs(
     return kwargs
 
 
+def to_profile_kwargs(x: np.ndarray, *, complex_mode: bool = False) -> dict[str, Any]:
+    """Profile-level design variables, as keywords for
+    ``solar_lumped.weather.real_weather_days_from_df``.
+
+    Both fidelities carry A1's seal/open offsets now, so the day/night split is
+    design-dependent either way and profiles cannot be fetched once per site.
+
+    POA transposition is on in both fidelities, at this design's own ``tilt_deg`` rather
+    than weather.POA_DEFAULT_TILT_DEG -- inheriting the default would transpose every
+    design onto the same aperture and leave tilt a pure gap-convection knob, which is the
+    backwards coupling POA exists to fix. Optimizing tilt requires it: only under POA does
+    one tilt trade solar gain against gap convection at once.
+
+    B4's forced condenser air stays complex-only -- simple mode does not price the fan.
+    """
+    vals = _design_values(x, complex_mode)
+    return {
+        "seal_offset_h": vals["seal_offset_h"],
+        "open_offset_h": vals["open_offset_h"],
+        "condenser_air_speed_m_s": vals["condenser_air_speed_m_s"] if complex_mode else 0.0,
+        "poa_tilt_deg": vals["tilt_deg"],
+    }
+
+
+def _design_values(x: np.ndarray, complex_mode: bool) -> dict[str, float]:
+    """name -> value for one design vector, at this mode's width."""
+    x = np.asarray(x, dtype=float).reshape(-1)
+    names = var_order(complex_mode)
+    if x.shape[0] != len(names):
+        raise ValueError(f"Expected a length-{len(names)} design vector, got shape {x.shape}")
+    return dict(zip(names, (float(v) for v in x)))
+
+
 def to_unit_cube(x: np.ndarray, bounds: DesignBounds) -> np.ndarray:
     """Raw design vector(s) -> the unit cube. Accepts (n_dims,) or (n, n_dims)."""
     x = np.asarray(x, dtype=float)
@@ -248,11 +315,11 @@ def is_gap_degenerate(x: np.ndarray, *, margin_m: float = VAPOR_GAP_TRANSPORT_MI
     ``margin_m`` of headroom over Wilson's transport floor before the gel even swells.
     Not a hard infeasibility -- just a signal not to spend a sample there.
 
-    Reads the first two VAR_ORDER slots directly, so it works on simple and complex
-    vectors alike (complex dims are appended after them)."""
+    Reads slots 0 and 1 directly, which VAR_ORDER and FULL_VAR_ORDER agree on, so it
+    works on simple and complex vectors alike."""
+    assert VAR_ORDER[:2] == FULL_VAR_ORDER[:2] == ("hydrogel_thickness_m", "vapor_gap_m")
     x = np.asarray(x, dtype=float).reshape(-1)
-    return (float(x[VAR_ORDER.index("vapor_gap_m")])
-            - float(x[VAR_ORDER.index("hydrogel_thickness_m")])) < margin_m
+    return float(x[1]) - float(x[0]) < margin_m
 
 
 def latin_hypercube_design(
