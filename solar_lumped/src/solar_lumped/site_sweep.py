@@ -137,6 +137,38 @@ def scenario_groups(names: list[str] | None = None) -> dict[tuple[bool, bool], l
     return groups
 
 
+# Sites per array-task chunk, PER SCENARIO GROUP -- deliberately not one number.
+# Measured on the serc A100 (366-day years): the finite-g groups cost ~23-28 ms per
+# instance-day at 400-600 instances wide, the instant-sorption groups ~250 ms. Under
+# vmap, diffrax steps the whole batch until *every* instance has finished its day, so a
+# group's cost tracks its WORST site's adaptive step count, not the mean -- and instant
+# equilibrium's 1e6-scaled g has a heavy tail. Narrow chunks are what cuts that tail,
+# which is why these two numbers differ by 4x. Re-measure with
+# gpu_sweep/sbatch_gpu_sweep_probe.sh before trusting them on other hardware.
+GROUP_SITES_PER_CHUNK: dict[tuple[bool, bool], int] = {
+    (False, False): 200,
+    (True, False): 50,
+    (False, True): 200,
+    (True, True): 50,
+}
+
+
+def array_tasks(total_sites: int) -> list[tuple[int, int, int, list[str]]]:
+    """(group index, site start, site end, scenario names) for each Slurm array task.
+
+    Ragged on purpose: groups are chunked at their own width, so index *i* of this list
+    is array task *i* and ``len()`` is the --array size that covers the whole grid.
+    Group order follows ``scenario_groups()`` -- appending to SCENARIOS is safe, but
+    reordering it renumbers tasks, which invalidates a half-finished sweep's chunk files.
+    """
+    tasks: list[tuple[int, int, int, list[str]]] = []
+    for gid, (key, names) in enumerate(scenario_groups().items()):
+        per_chunk = GROUP_SITES_PER_CHUNK[key]
+        for start in range(0, total_sites, per_chunk):
+            tasks.append((gid, start, min(start + per_chunk, total_sites), names))
+    return tasks
+
+
 def build_system_config(
     combo: Combo,
     *,

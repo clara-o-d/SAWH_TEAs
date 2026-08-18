@@ -69,6 +69,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="Subset of scenarios to run (default: all eight).")
     p.add_argument("--cache-dir", type=str, default=str(_REPO / ".weather_cache"))
     p.add_argument("--salt", type=str, default="LiCl")
+    p.add_argument("--max-days", type=int, default=0,
+                   help="Walk only the first N days (0 = the whole year). For timing "
+                   "probes only: yields are then N-day means, not annual, which the "
+                   "n_periods column records.")
     p.add_argument("--progress-every", type=int, default=30,
                    help="Print a day counter/ETA every N days (0 to silence). A group is "
                    "one uninterruptible year, so this is the only sign of life during it.")
@@ -100,6 +104,10 @@ def main() -> int:
         print(f"  day counts differ across sites; truncating all to {n_days} day(s) "
               f"({len(short)} site(s) lose up to {max(len(w.days) for w in short) - n_days}).", flush=True)
     print(f"Weather loaded for {len(loaded)} site(s) in {time.perf_counter() - t0:.1f}s.", flush=True)
+    if args.max_days and args.max_days < n_days:
+        print(f"  --max-days {args.max_days}: walking {args.max_days} of {n_days} day(s). "
+              f"Yields are NOT annual means -- timing probe only.", flush=True)
+        n_days = args.max_days
 
     done = gps._existing_scenarios(args.output_csv) if args.resume else set()
     total_rows = 0
