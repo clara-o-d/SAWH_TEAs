@@ -46,6 +46,20 @@ WEATHER_KEYS: tuple[str, ...] = (
 # Parity is carried by matching physics, not by oversolving.
 _RTOL, _ATOL = 1e-4, 1e-7
 
+# Per-solve step ceiling. Both solves run throw=False, so exceeding it is SILENT: the
+# instance returns a truncated day that reads like a result. 16384 is ample for the
+# finite-g path, but instant equilibrium scales g by 1e6 and the resulting c_w relaxation
+# is stiff, so explicit steps become stability-limited and a day needs far more of them.
+# Measured: at 16384 the instant path truncated hard enough to swing yield by ~60% and to
+# make the g -> infinity limit look unconverged. With the ceiling raised, the limit
+# converges monotonically (1e4: 0.79% off, 1e5: 0.12%, 1e6: reference).
+#
+# Kvaerno3 was tried here and is ~5x SLOWER end-to-end, not faster: the vector field
+# carries an inner Newton thermal solve, so implicit stages cost more than the stability
+# limit saves. Tsit5 with a high ceiling is the cheaper correct option.
+_MAX_STEPS_FINITE_G = 16384
+_MAX_STEPS_INSTANT = 1 << 20
+
 
 def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_tracks_ambient=False,
                  h_des_isosteric=False, instant_equilibrium=False):
@@ -96,6 +110,7 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
             h_des_isosteric=h_des_isosteric,
             p_atm_pa=p_atm_pa,
         )
+        max_steps = _MAX_STEPS_INSTANT if instant_equilibrium else _MAX_STEPS_FINITE_G
         h_max_m = jnp.maximum(vapor_gap_m - jp.VAPOR_GAP_TRANSPORT_MIN_M, h0_ref_m + 1e-6)
 
         def idx_abs(t):
@@ -150,7 +165,7 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
             diffrax.ODETerm(abs_vf), diffrax.Tsit5(), t0=0.0, t1=dt * n_abs_max, dt0=dt, y0=y0_abs, args=None,
             saveat=diffrax.SaveAt(t1=True),
             stepsize_controller=diffrax.PIDController(rtol=_RTOL, atol=_ATOL, dtmax=dt),
-            max_steps=16384, adjoint=diffrax.DirectAdjoint(), throw=False,
+            max_steps=max_steps, adjoint=diffrax.DirectAdjoint(), throw=False,
         )
         c_w_mid = jnp.clip(sol_abs.ys[0, 0], c_w_min_mol_m3, c_w_max_mol_m3)
         h_mid = jnp.clip(sol_abs.ys[0, 1], h_floor_m, h_max_m)
@@ -161,7 +176,7 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
             diffrax.ODETerm(des_vf), diffrax.Tsit5(), t0=0.0, t1=dt * n_des_max, dt0=dt, y0=y0_des, args=None,
             saveat=diffrax.SaveAt(t1=True),
             stepsize_controller=diffrax.PIDController(rtol=_RTOL, atol=_ATOL, dtmax=dt),
-            max_steps=16384, adjoint=diffrax.DirectAdjoint(), throw=False,
+            max_steps=max_steps, adjoint=diffrax.DirectAdjoint(), throw=False,
         )
         water = jnp.maximum(0.0, sol_des.ys[0, 3])
 
@@ -170,7 +185,13 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
 
         c_w_end = jnp.clip(sol_des.ys[0, 0], c_w_min_mol_m3, c_w_max_mol_m3)
         h_end = jnp.maximum(sol_des.ys[0, 1], h_floor_m)
-        return water, eta, c_w_end, h_end
+        # Both solves run throw=False so one bad instance cannot abort a whole batch --
+        # but that means an instance which exhausts max_steps returns a TRUNCATED day and
+        # no error, i.e. a plausible-looking wrong yield. Report it instead: this flag is
+        # what run_year_batched turns into NaN rather than a silently short year.
+        ok = ((sol_abs.result == diffrax.RESULTS.successful)
+              & (sol_des.result == diffrax.RESULTS.successful))
+        return water, eta, c_w_end, h_end, ok
 
     return single
 
@@ -331,9 +352,11 @@ def run_year_batched(step_fn, day_weathers, *, c_w_initial, h_initial, aitken_ma
 
     water_sum = np.zeros_like(c_w)
     eta_sum = np.zeros_like(c_w)
+    failed_days = np.zeros_like(c_w, dtype=int)
     t_days = time.perf_counter()
     for day, weather in enumerate(day_weathers, start=1):
-        water, eta, c_w, h = step_fn(jnp.asarray(c_w), jnp.asarray(h), weather)
+        water, eta, c_w, h, ok = step_fn(jnp.asarray(c_w), jnp.asarray(h), weather)
+        failed_days += ~np.asarray(ok, dtype=bool)
         if progress_every and (day % progress_every == 0 or day == len(day_weathers)):
             per_day = (time.perf_counter() - t_days) / day
             print(f"    day {day}/{len(day_weathers)}  {per_day:.2f}s/day  "
@@ -343,7 +366,18 @@ def run_year_batched(step_fn, day_weathers, *, c_w_initial, h_initial, aitken_ma
         c_w = np.asarray(c_w, dtype=float)
         h = np.asarray(h, dtype=float)
     n_days = len(day_weathers)
-    return water_sum / n_days, eta_sum / n_days
+    mean_water, mean_eta = water_sum / n_days, eta_sum / n_days
+    if failed_days.any():
+        bad = failed_days > 0
+        # NaN, not a raise: the instances that did converge are still good data, and a
+        # raise here would throw away a whole chunk over one pathological site. NaN
+        # reaches the CSV as an empty/NaN yield, which cannot be mistaken for a result.
+        mean_water[bad] = np.nan
+        mean_eta[bad] = np.nan
+        print(f"    WARNING: {int(bad.sum())}/{len(bad)} instance(s) hit the ODE step cap "
+              f"on at least one day (worst: {int(failed_days.max())}/{n_days} days). "
+              f"Their yields are NaN, not truncated years.", flush=True)
+    return mean_water, mean_eta
 
 
 def find_cyclic_state_batched(
@@ -358,8 +392,8 @@ def find_cyclic_state_batched(
     x = np.stack([c_w_initial, h_initial], axis=1)
 
     def step(state):
-        _, _, cw_end, h_end = daily_cycle_fn(jnp.asarray(state[:, 0]), jnp.asarray(state[:, 1]))
-        return np.stack([np.asarray(cw_end), np.asarray(h_end)], axis=1)
+        out = daily_cycle_fn(jnp.asarray(state[:, 0]), jnp.asarray(state[:, 1]))
+        return np.stack([np.asarray(out[2]), np.asarray(out[3])], axis=1)
 
     x_prev = x
     x_star = x
