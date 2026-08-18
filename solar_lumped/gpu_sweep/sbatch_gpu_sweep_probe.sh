@@ -1,22 +1,28 @@
 #!/bin/bash
-# Timing probe: how does the instant-sorption group's per-day cost scale with batch
-# width? That one curve sets GROUP_SITES_PER_CHUNK in site_sweep.py, and getting it
-# wrong costs either walltime-killed tasks (too wide) or wasted GPU-hours (too narrow).
+# Can the instant-equilibrium groups be made affordable? Measured on the serc A100 they
+# cost ~1.0 s per instance-day and stay there as the batch widens (20 instances:
+# 23.6 s/day; 100: ~106 s/day), against ~0.023 s/instance-day for the finite-g groups at
+# 603 wide. That puts the two instant groups at ~430 GPU-hours for the full grid, and it
+# is not a chunking problem: under vmap diffrax steps the whole batch until every
+# instance is done, so the cost is the batch's WORST adaptive step count, and by ~20
+# instances that worst case is already in every batch. Narrower chunks split the bill
+# without shrinking it.
 #
-# Runs the instant/ode group at three widths, 20 days each with a 1-round warm-up --
-# enough for a stable s/day, ~1 h total instead of the ~10 h a real chunk would take.
-# The rows it writes are 20-day means, NOT annual: they go to a probe/ directory and
-# n_periods records 20. Do not merge them into a real sweep.
+# What is left is the stiffness itself: instant equilibrium multiplies g by
+# _INSTANT_EQUILIBRIUM_G_SCALE = 1e6 (parameters.xlsx calls it "numerical, not
+# physical"), which is what forces the tiny explicit steps. probe_instant_g_scale.py
+# runs the same 20 sites x 20 days at 1e4/1e5/1e6 and reports yield drift against cost,
+# so the factor is chosen by measurement.
 #
 #   sbatch gpu_sweep/sbatch_gpu_sweep_probe.sh
-#   grep -E "instance|s/day" gpu_sweep/logs/probe_<jobid>.out
+#   grep -E "s/day|drift" gpu_sweep/logs/probe_<jobid>.out
 #
-# Read the result as: s/day per instance. If 100 instances costs ~1/4 of what 400 did
-# (measured >90 s/day at 402), the tail is width-driven and narrow chunks pay off. If
-# it barely drops, the cost is per-instance and the instant groups are simply ~100
-# GPU-hours -- at which point tightening the solver for that path is the better lever
-# than re-chunking.
-#SBATCH --job-name=sawh-probe
+# If a smaller factor holds the yield to well under the 1e-4 ODE tolerance while costing
+# much less, change the workbook value (both backends read that one cell) and re-run
+# tests/test_cpu_jax_parity.py before sweeping. If nothing below 1e6 is safe, the instant
+# groups need a stiff solver (diffrax Kvaerno) or an algebraic isotherm constraint
+# instead of a 1e6 penalty -- a real physics change, not a knob.
+#SBATCH --job-name=sawh-g-scale-probe
 #SBATCH --time=02:00:00
 #SBATCH --partition=serc
 #SBATCH --gres=gpu:1
@@ -32,19 +38,4 @@ source .venv_gpu/bin/activate
 export PYTHONUNBUFFERED=True
 
 python3 -c "import jax; print('jax.devices():', jax.devices())"
-
-for SITES in 10 50 200; do
-  echo "=== instant/ode, ${SITES} site(s) x 2 scenarios ==="
-  python3 gpu_sweep/run_gpu_sweep.py \
-    --site-range 0 "${SITES}" --step 3.0 \
-    --scenarios improved_instant_g optical_limits_instant_g \
-    --max-days 20 --max-rounds 1 --progress-every 5 \
-    --output-csv "outputs/gpu_scenario_sweep/probe/instant_${SITES}sites.csv"
-done
-
-echo "=== finite_g/ode at 200 sites, same settings, as the baseline to divide by ==="
-python3 gpu_sweep/run_gpu_sweep.py \
-  --site-range 0 200 --step 3.0 \
-  --scenarios wilson improved optical_limits \
-  --max-days 20 --max-rounds 1 --progress-every 5 \
-  --output-csv "outputs/gpu_scenario_sweep/probe/finite_200sites.csv"
+python3 gpu_sweep/probe_instant_g_scale.py
