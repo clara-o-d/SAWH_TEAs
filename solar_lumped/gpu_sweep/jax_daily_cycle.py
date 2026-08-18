@@ -6,12 +6,16 @@ The Aitken loop stays a thin Python loop -- only ~3-6 rounds, not worth fusing i
 
 from __future__ import annotations
 
+import time
+
 import diffrax
 import jax
 import jax.numpy as jnp
 import numpy as np
 
 import jax_physics as jp
+
+_T0 = time.perf_counter()
 
 
 # --- Batched cross-length daily cycle ---
@@ -302,25 +306,38 @@ def make_year_step_fn(system, dt, n_abs_max, n_des_max, *, complex_mode=False, c
     return step
 
 
-def run_year_batched(step_fn, day_weathers, *, c_w_initial, h_initial, aitken_max_rounds=8):
+def run_year_batched(step_fn, day_weathers, *, c_w_initial, h_initial, aitken_max_rounds=8,
+                     progress_every=0):
     """Simulate a full year per instance and return (mean daily yield, mean eta).
 
     Day 1 is Aitken-extrapolated to its steady periodic state so the year does not start
     from an arbitrary loading; every later day warm-starts from the previous day's end
     state, so the sorbent carries real seasonal history and no mean-day approximation is
     made. Days are inherently sequential -- the batch axis (design x site) is where the
-    parallelism lives."""
+    parallelism lives.
+
+    ``progress_every`` > 0 prints a day counter and ETA that often. The year is one
+    uninterruptible block from the caller's side -- nothing reaches disk until it
+    returns -- so without this a multi-hour run is indistinguishable from a hung one."""
     c_w = np.asarray(c_w_initial, dtype=float)
     h = np.asarray(h_initial, dtype=float)
     c_w, h = find_cyclic_state_batched(
         lambda cw, hh: step_fn(cw, hh, day_weathers[0]),
         c_w_initial=c_w, h_initial=h, max_rounds=aitken_max_rounds,
     )
+    if progress_every:
+        print(f"    warm-up done ({time.perf_counter() - _T0:.0f}s in), "
+              f"{len(day_weathers)} day(s) to walk", flush=True)
 
     water_sum = np.zeros_like(c_w)
     eta_sum = np.zeros_like(c_w)
-    for weather in day_weathers:
+    t_days = time.perf_counter()
+    for day, weather in enumerate(day_weathers, start=1):
         water, eta, c_w, h = step_fn(jnp.asarray(c_w), jnp.asarray(h), weather)
+        if progress_every and (day % progress_every == 0 or day == len(day_weathers)):
+            per_day = (time.perf_counter() - t_days) / day
+            print(f"    day {day}/{len(day_weathers)}  {per_day:.2f}s/day  "
+                  f"~{per_day * (len(day_weathers) - day) / 60:.0f} min left", flush=True)
         water_sum += np.asarray(water, dtype=float)
         eta_sum += np.asarray(eta, dtype=float)
         c_w = np.asarray(c_w, dtype=float)

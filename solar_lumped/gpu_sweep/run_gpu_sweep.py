@@ -69,6 +69,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="Subset of scenarios to run (default: all eight).")
     p.add_argument("--cache-dir", type=str, default=str(_REPO / ".weather_cache"))
     p.add_argument("--salt", type=str, default="LiCl")
+    p.add_argument("--progress-every", type=int, default=30,
+                   help="Print a day counter/ETA every N days (0 to silence). A group is "
+                   "one uninterruptible year, so this is the only sign of life during it.")
     p.add_argument("--max-rounds", type=int, default=8, help="Fixed Aitken round count (see FINDINGS.md Result 7)")
     p.add_argument("--output-csv", type=Path, required=True)
     p.add_argument("--resume", action="store_true",
@@ -233,6 +236,7 @@ def run_group(
         c_w_initial=np.array([initial_loading(cfg) for cfg in configs]),
         h_initial=np.array([cfg.hydrogel_thickness_m for cfg in configs]),
         aitken_max_rounds=args.max_rounds,
+        progress_every=args.progress_every,
     )
     elapsed = time.perf_counter() - t0
 

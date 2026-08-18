@@ -8,7 +8,11 @@
 # scenarios put eps=0 through the radiative solve, a genuinely different
 # numerical regime from the Wilson baseline (see docs/gpu_sweep_handoff.md).
 #SBATCH --job-name=sawh-gpu-scenarios-smoke
-#SBATCH --time=02:00:00
+# 4 h, not 2: cost is now ~382 sequential day-steps x 4 scenario groups and barely
+# depends on site count, so 10 sites is not the cheap run it was under the combo
+# sweep -- and a timeout mid-group loses that group's work, since --resume only
+# skips (site, scenario) pairs already written.
+#SBATCH --time=04:00:00
 #SBATCH --partition=serc
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
