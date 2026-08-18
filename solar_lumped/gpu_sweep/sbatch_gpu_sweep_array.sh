@@ -1,32 +1,40 @@
 #!/bin/bash
-# Full 1,405-site x 8-scenario GPU sweep, split across parallel Slurm array tasks
-# (each its own GPU allocation). One scenario sweep replaces the old per-case
-# scripts (Case 1/2/3, the ambient-condenser and DRH variants): the scenario list
-# lives in site_sweep.SCENARIOS and every scenario runs the parameters.xlsx
-# baseline design, so there are no sweep flags to keep in sync here.
+# Full 1,405-site x 8-scenario GPU sweep. One array task = one site chunk x one
+# scenario group, because a task's cost is ~366 sequential day-steps PER GROUP and
+# four groups in one task overruns any sane walltime.
 #
-# Each task computes its own contiguous [start, end) site range (from its array
-# index and the array's total size -- edit only --array below) and writes to its
-# own chunk_<task_id>.csv, avoiding concurrent-write contention. Merge afterward:
-#   (head -1 outputs/gpu_scenario_sweep/chunk_0.csv; tail -n +2 -q outputs/gpu_scenario_sweep/chunk_*.csv) \
+# Measured on the serc A100: ~9.5 s per day-step at 30 instances, i.e. ~320 ms per
+# instance-day against the ~14 ms Result 8/9 measured at 60,000 instances. The GPU is
+# nowhere near saturated at these widths, so per-step time is set by one instance's
+# serial integration and **extra batch width is nearly free** until the two costs
+# cross over, around ~700 instances. Chunking aims at that crossover: 7 site chunks
+# (~200 sites) x 3 scenarios = ~600 instances in the widest group. Wider chunks stop
+# being free; narrower ones pay the ~9.5 s/day floor more times than necessary.
+#
+# ONE KNOB: --array below. Tasks must be a multiple of the scenario-group count (4),
+# and chunks = tasks / groups -- the script fails loudly rather than silently
+# mis-chunking, so only multiples of 4 are valid array sizes. 0-27 = 7 chunks x 4
+# groups. 0-15 = 4 chunks (~350 sites, ~1,050-wide groups -- past the crossover, so
+# more GPU-hours but fewer waves); 0-55 = 14 smaller, cheaper-to-lose chunks.
+#
+# Each task writes its own chunk_<chunk>_group_<group>.csv (no write contention).
+# Merge afterward:
+#   (head -1 outputs/gpu_scenario_sweep/chunk_0_group_0.csv; \
+#    tail -n +2 -q outputs/gpu_scenario_sweep/chunk_*_group_*.csv) \
 #     > outputs/gpu_scenario_sweep/full_sweep.csv
 #
 # Submit from the repo root (/home/groups/cdiazm/SAWH_TEAs/solar_lumped):
 #   sbatch gpu_sweep/sbatch_gpu_sweep_array.sh
 # Smoke-test first with sbatch_gpu_sweep_smoke.sh.
-#
-# The %K suffix caps how many array tasks run *simultaneously*. Sites within one
-# task now share a single compilation (they are the batch axis, see
-# run_gpu_sweep.py), so FEWER, BIGGER tasks are cheaper here than they were for
-# the old per-site combo sweep -- the trade is GPU memory, which grows with
-# sites-per-task x scenarios-in-group x days. 20 tasks is ~70 sites each.
 #SBATCH --job-name=sawh-gpu-scenarios
-#SBATCH --time=04:00:00
+# 6 h against a ~1-2 h expected task: a task that dies writes NOTHING (rows are only
+# appended once a group's whole year finishes), so headroom is cheaper than a retry.
+#SBATCH --time=06:00:00
 #SBATCH --partition=serc
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
-#SBATCH --array=0-19%8
+#SBATCH --array=0-27%8
 #SBATCH --output=gpu_sweep/logs/scenarios_%A_%a.out
 
 set -euo pipefail
@@ -40,25 +48,37 @@ STEP=3.0
 TASK_ID="${SLURM_ARRAY_TASK_ID}"
 NUM_TASKS=$(( SLURM_ARRAY_TASK_MAX - SLURM_ARRAY_TASK_MIN + 1 ))
 
-# grid_land_points() prints a one-time diagnostic ("Loading Natural Earth land
-# polygons...") to stdout on first call -- `tail -1` keeps only the final
-# "start end" line so that diagnostic can't get parsed as the range.
-RANGE=$(python3 -c "
+# Group count, total land sites, and this task's scenario names, from the one place
+# they are defined (site_sweep.scenario_groups). grid_land_points() prints a one-time
+# diagnostic on first call, so `tail -1` keeps only the line we asked for.
+INFO=$(python3 -c "
 import sys
 sys.path.insert(0, 'src')
+from solar_lumped.site_sweep import scenario_groups
 from solar_lumped.weather import grid_land_points
-total = len(grid_land_points(${STEP}))
-num_tasks = ${NUM_TASKS}
-chunk = -(-total // num_tasks)  # ceil division
-start = ${TASK_ID} * chunk
-end = min(start + chunk, total)
-print(start, end)
+groups = list(scenario_groups().values())
+print(len(groups), len(grid_land_points(${STEP})), ' '.join(groups[${TASK_ID} % len(groups)]))
 " | tail -1)
-read -r START END <<< "${RANGE}"
-echo "Task ${TASK_ID}/${NUM_TASKS}: sites [${START}, ${END})"
+read -r NUM_GROUPS TOTAL_SITES SCENARIOS <<< "${INFO}"
 
-if [ "${START}" -ge "${END}" ]; then
-  echo "Empty range for this task (more array tasks than sites) -- nothing to do."
+if (( NUM_TASKS % NUM_GROUPS != 0 )); then
+  echo "ERROR: --array size ${NUM_TASKS} is not a multiple of the ${NUM_GROUPS} scenario groups."
+  echo "Set --array to a multiple of ${NUM_GROUPS} (e.g. 0-$(( NUM_GROUPS * 7 - 1 ))%8)."
+  exit 1
+fi
+
+NUM_CHUNKS=$(( NUM_TASKS / NUM_GROUPS ))
+GROUP_ID=$(( TASK_ID % NUM_GROUPS ))
+CHUNK_ID=$(( TASK_ID / NUM_GROUPS ))
+CHUNK_SIZE=$(( (TOTAL_SITES + NUM_CHUNKS - 1) / NUM_CHUNKS ))   # ceil division
+START=$(( CHUNK_ID * CHUNK_SIZE ))
+END=$(( START + CHUNK_SIZE ))
+if (( END > TOTAL_SITES )); then END=${TOTAL_SITES}; fi
+
+echo "Task ${TASK_ID}: chunk ${CHUNK_ID}/${NUM_CHUNKS} sites [${START}, ${END}) x group ${GROUP_ID}/${NUM_GROUPS}: ${SCENARIOS}"
+
+if (( START >= END )); then
+  echo "Empty site range for this chunk (more chunks than sites) -- nothing to do."
   exit 0
 fi
 
@@ -66,5 +86,6 @@ python3 -c "import jax; print('jax.devices():', jax.devices())"
 
 python3 gpu_sweep/run_gpu_sweep.py \
   --site-range "${START}" "${END}" --step "${STEP}" \
-  --output-csv "outputs/gpu_scenario_sweep/chunk_${TASK_ID}.csv" \
+  --scenarios ${SCENARIOS} \
+  --output-csv "outputs/gpu_scenario_sweep/chunk_${CHUNK_ID}_group_${GROUP_ID}.csv" \
   --resume

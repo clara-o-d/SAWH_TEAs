@@ -123,6 +123,20 @@ SCENARIOS: dict[str, Scenario] = {
 }
 
 
+def scenario_groups(names: list[str] | None = None) -> dict[tuple[bool, bool], list[str]]:
+    """Scenario names bucketed by (instant_equilibrium, condenser_ambient).
+
+    One bucket = one compiled code path = one Slurm task's worth of work, so the
+    bucket ORDER is load-bearing: sbatch_gpu_sweep_array.sh maps its array index onto
+    it. Insertion order of SCENARIOS makes it deterministic -- don't sort here.
+    """
+    groups: dict[tuple[bool, bool], list[str]] = {}
+    for name in names if names is not None else list(SCENARIOS):
+        sc = SCENARIOS[name]
+        groups.setdefault((sc.instant_equilibrium, sc.condenser_ambient), []).append(name)
+    return groups
+
+
 def build_system_config(
     combo: Combo,
     *,

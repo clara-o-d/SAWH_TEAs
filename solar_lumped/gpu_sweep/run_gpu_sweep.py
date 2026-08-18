@@ -103,7 +103,7 @@ def main() -> int:
 
     done = gps._existing_scenarios(args.output_csv) if args.resume else set()
     total_rows = 0
-    for (instant, ambient), names in _scenario_groups(args.scenarios).items():
+    for (instant, ambient), names in gps.scenario_groups(args.scenarios).items():
         instances = [
             (w, name)
             for name in names
@@ -171,16 +171,6 @@ def _load_site(lat: float, lon: float, args: argparse.Namespace, client: Weather
     )
 
 
-def _scenario_groups(names: list[str]) -> dict[tuple[bool, bool], list[str]]:
-    """Scenario names bucketed by (instant_equilibrium, condenser_ambient) -- the two
-    static flags that fix the compiled code path, so one bucket = one compilation."""
-    groups: dict[tuple[bool, bool], list[str]] = {}
-    for name in names:
-        sc = gps.SCENARIOS[name]
-        groups.setdefault((sc.instant_equilibrium, sc.condenser_ambient), []).append(name)
-    return groups
-
-
 def run_group(
     instances: list[tuple[SiteWeather, str]],
     n_days: int,
@@ -217,6 +207,13 @@ def run_group(
         )
         for cfg in configs
     ]
+
+    label = f"{'instant' if instant_equilibrium else 'finite_g'}/{'ambient' if condenser_ambient else 'ode'}"
+    # Printed before the year starts, not just after: a task killed by the walltime
+    # writes no rows, so this is the only record of how wide its batch was -- which is
+    # exactly the number needed to re-size the chunking.
+    print(f"  [{label}] {len(instances)} instance(s) ({len(set(id(w) for w, _n in instances))} "
+          f"site(s) x {len(set(n for _w, n in instances))} scenario(s)), compiling...", flush=True)
 
     t0 = time.perf_counter()
     dt, n_abs_max, n_des_max = year_padding([w.days for w, _n in instances])
@@ -262,11 +259,8 @@ def run_group(
                 "n_periods": n_days,
             },
         )
-    print(
-        f"  [{'instant' if instant_equilibrium else 'finite_g'}/"
-        f"{'ambient' if condenser_ambient else 'ode'}] {len(instances)} instance(s) "
-        f"x {n_days} day(s) in {elapsed:.1f}s", flush=True,
-    )
+    print(f"  [{label}] {len(instances)} instance(s) x {n_days} day(s) done in "
+          f"{elapsed:.1f}s ({elapsed / n_days:.2f}s/day)", flush=True)
     return len(instances)
 
 

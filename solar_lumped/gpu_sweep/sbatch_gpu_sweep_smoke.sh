@@ -12,7 +12,7 @@
 # depends on site count, so 10 sites is not the cheap run it was under the combo
 # sweep -- and a timeout mid-group loses that group's work, since --resume only
 # skips (site, scenario) pairs already written.
-#SBATCH --time=04:00:00
+#SBATCH --time=06:00:00
 #SBATCH --partition=serc
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
