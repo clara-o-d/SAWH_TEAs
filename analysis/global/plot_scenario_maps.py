@@ -63,6 +63,14 @@ RATIOS = (
 )
 VALUE = "mean_yield_kg_m2"
 UNITS = "annual mean yield (kg m$^{-2}$ day$^{-1}$)"
+LCOW_COL = "lcow_usd_per_m3"
+LCOW_UNITS = "LCOW (USD m$^{-3}$)"
+# Affordability bands rather than one more continuous ramp. With a fixed design the cost
+# model has no site-dependent term, so LCOW is exactly K / yield -- the LCOW map's PATTERN
+# is the yield map's reciprocal and carries nothing new. What a cost map adds is the
+# absolute level and where it crosses a threshold, which a banded scale shows and a smooth
+# ramp hides.
+LCOW_BANDS = (0.0, 5.0, 10.0, 20.0, 50.0)
 
 # The land mask is the same grid for every map here and costs a shapely union over the
 # 110m land polygons each time. Ten maps of that is minutes of nothing; memoize it.
@@ -84,6 +92,13 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--csv", type=Path, required=True)
     ap.add_argument("--out-dir", type=Path, default=None)
+    ap.add_argument("--lcow", action="store_true",
+                    help="Also compute LCOW from each row's yield and map it (absolute "
+                         "levels + affordability bands; the pattern is 1/yield).")
+    ap.add_argument("--salt-loading", type=float, default=None,
+                    help="g salt / g polymer the sweep ran at. The sweep CSV does not "
+                         "record it, so LCOW needs it stated; defaults to the "
+                         "parameters.xlsx baseline.")
     args = ap.parse_args()
     out_dir = args.out_dir or args.csv.parent / "maps"
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -143,17 +158,91 @@ def main() -> int:
         print(f"  {hi}/{lo}: median {pct:+.1f}%, range {finite.min():.3f}-{finite.max():.3f}, "
               f"{'diverging' if straddles else 'sequential'}")
 
+    if args.lcow:
+        _lcow_maps(df, wide, present, lons, lats, step, out_dir, args.salt_loading)
+
     print(f"\nWrote maps to {out_dir}")
     return 0
 
 
-def _one_map(lons, lats, vals, step, *, out: Path, title: str, cmap, norm, cbar_label: str) -> None:
+def _lcow_maps(df, wide, present, lons, lats, step, out_dir: Path, salt_loading) -> None:
+    """LCOW per scenario: shared log scale, plus banded affordability maps.
+
+    No ratio maps here. LCOW = annual_cost / (utilization * 365 * yield) and nothing in
+    the cost model varies by site, so an LCOW ratio is exactly the inverse of the yield
+    ratio already mapped -- plotting it again would be the same figure with reciprocal
+    ticks.
+    """
+    from solar_lumped import site_sweep as ss
+    from solar_lumped.economics import LCOEconomicParams, lcow_from_daily_yield
+
+    econ = LCOEconomicParams()
+    loading = ss.BASELINE_SALT_LOADING if salt_loading is None else float(salt_loading)
+    salts = set(df["salt"].unique())
+    if len(salts) != 1:
+        sys.exit(f"LCOW needs one salt per CSV, found {sorted(salts)}")
+    salt = salts.pop()
+    thickness_m = float(df["hydrogel_thickness_mm"].iloc[0]) * 1e-3
+
+    lcow = {}
+    for name in present:
+        lcow[name] = np.array([
+            lcow_from_daily_yield(
+                float(y), salt_name=salt, salt_loading=loading,
+                hydrogel_thickness_m=thickness_m, econ=econ,
+            )
+            for y in wide[name].to_numpy(float)
+        ])
+    pooled = np.concatenate([v for v in lcow.values()])
+    vmin, vmax = float(pooled.min()), float(pooled.max())
+    print(f"\nLCOW: {salt}, {loading:g} g/g, {thickness_m*1e3:g} mm gel, "
+          f"BOM-only capex -> ${vmin:.2f}-${vmax:.2f}/m3 (shared log scale)")
+
+    norm = mcolors.LogNorm(vmin=vmin, vmax=vmax)
+    for name in present:
+        # viridis_r keeps the reader's mapping from the yield maps intact: bright = good,
+        # which for cost means bright = cheap.
+        _one_map(
+            lons, lats, lcow[name], step,
+            out=out_dir / f"map_lcow_{name}.png",
+            title=f"{LABELS.get(name, name)}\n{LCOW_UNITS}, log scale",
+            cmap="viridis_r", norm=norm, cbar_label=LCOW_UNITS,
+            cbar_ticks=[t for t in (3, 4, 5, 7, 10, 15, 20, 30, 50) if vmin <= t <= vmax],
+        )
+
+    band_norm = mcolors.BoundaryNorm(LCOW_BANDS, len(LCOW_BANDS) - 1)
+    band_cmap = mcolors.ListedColormap(
+        plt.get_cmap("viridis_r")(np.linspace(0.15, 0.9, len(LCOW_BANDS) - 1))
+    )
+    for name in present:
+        _one_map(
+            lons, lats, np.clip(lcow[name], LCOW_BANDS[0], LCOW_BANDS[-1] - 1e-9), step,
+            out=out_dir / f"map_lcow_bands_{name}.png",
+            title=f"{LABELS.get(name, name)}\nLCOW band (USD m$^{{-3}}$)",
+            cmap=band_cmap, norm=band_norm, cbar_label=LCOW_UNITS,
+        )
+
+    print("  share of land sites under each threshold:")
+    header = "    " + "scenario".ljust(36) + "".join(f"<${t:g}".rjust(9) for t in LCOW_BANDS[1:])
+    print(header)
+    for name in present:
+        row = "".join(f"{100.0 * float((lcow[name] < t).mean()):8.1f}%" for t in LCOW_BANDS[1:])
+        print("    " + name.ljust(36) + row)
+
+
+def _one_map(lons, lats, vals, step, *, out: Path, title: str, cmap, norm, cbar_label: str,
+             cbar_ticks=None) -> None:
     fig = plt.figure(figsize=(13, 6.5))
     ax = pm.world_ax(fig, 111)
     lon_v, lat_v, grid = pm.interpolate_to_grid(lons, lats, vals, sample_step_deg=step)
     mesh = ax.pcolormesh(lon_v, lat_v, grid, cmap=cmap, norm=norm, shading="auto",
                          transform=pm._ccrs().PlateCarree(), zorder=2)
     cbar = fig.colorbar(mesh, ax=ax, orientation="vertical", shrink=0.75, pad=0.02)
+    if cbar_ticks is not None:
+        # A log norm defaults to "4 x 10^1" style labels, which is wrong for money.
+        cbar.set_ticks(list(cbar_ticks))
+        cbar.set_ticklabels([f"{t:g}" for t in cbar_ticks])
+        cbar.minorticks_off()
     cbar.set_label(cbar_label)
     ax.set_title(title, fontsize=11)
     pm._save(fig, out)
