@@ -104,3 +104,33 @@ def test_no_step_cap_pathology_in_the_equilibrium_temperature() -> None:
     ]
     assert all(np.isfinite(t_eqs))
     assert all(a > b for a, b in zip(t_eqs, t_eqs[1:])), t_eqs
+
+
+def test_equilibrium_temperature_is_found_for_libr() -> None:
+    """LiBr's brine activity correlation is undefined above ~200 C, and
+    _mass_transfer_driving_force maps a non-finite a_w to 0.0 -- so a two-endpoint bracket
+    test on [T_cond, T_cond+200] saw fa*fb == 0 and reported "no root", which the callers
+    read as "cannot desorb". Every LiBr desorption step took that branch and a whole day's
+    yield came out as exactly 0.0, with nothing raised.
+    """
+    config = SystemConfig.baseline(salt_name="LiBr", instant_equilibrium=True)
+    mass = config.mass_params()
+    # A loading LiBr actually reaches after a humid night (~13% of the way up its range).
+    c_w = mass.c_w_min_mol_m3 + 0.13 * (mass.c_w_max_mol_m3 - mass.c_w_min_mol_m3)
+    t_eq = equilibrium_t_gel_desorption_c(
+        c_w, t_cond_c=20.0, params=mass, h_m=config.hydrogel_thickness_m
+    )
+    assert np.isfinite(t_eq), "no equilibrium temperature found for LiBr"
+    assert 20.0 < t_eq < 60.0, t_eq
+
+
+def test_libr_instant_equilibrium_produces_yield() -> None:
+    """The end-to-end version of the above: the zero was only visible as a yield."""
+    profile = baseline_profile()
+    ideal = SystemConfig.baseline(salt_name="LiBr", instant_equilibrium=True)
+    finite = SystemConfig.baseline(salt_name="LiBr")
+    water_ideal, _eta, _a, _d = run_daily_cycle(profile, ideal)
+    water_finite, _eta, _a, _d = run_daily_cycle(profile, finite)
+    assert float(water_ideal) > 0.0
+    # Instant kinetics is an upper bound on the real thing, for LiBr as for LiCl.
+    assert float(water_ideal) > float(water_finite)

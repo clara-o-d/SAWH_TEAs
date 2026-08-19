@@ -259,6 +259,21 @@ def build_system_arrays(configs, *, complex_mode=False, instant_equilibrium=Fals
     # reaches the RHS through make_year_step_fn, not through these arrays. Checking it
     # here is the only place that catches a caller who set it on the configs and then
     # ran a whole sweep at finite g without noticing.
+    # The simple JAX path's isotherm is water_activity_licl_from_c_w -- LiCl's closed
+    # form, hardcoded. Nothing downstream reads salt_name, so another salt would run
+    # LiCl's activity while the sweep CSV's "salt" column claimed otherwise: a wrong
+    # number that looks like a result. The CPU backend does support other salts
+    # (physics.water_activity_from_c_w dispatches on salt_name), so this is a JAX-side
+    # limit, not a modelling one -- run other salts through simulation.run_daily_cycle.
+    # Complex mode is exempt: its chemistry comes from ZSR blend_weights and a host-built
+    # a_w table, not from this closed form.
+    if not complex_mode:
+        salts = {c.salt_name for c in configs}
+        if salts != {"LiCl"}:
+            raise ValueError(
+                f"the simple JAX path implements LiCl's isotherm only, got {sorted(salts)}. "
+                "Use the CPU backend for other salts, or complex mode with ZSR blend weights."
+            )
     if {c.instant_equilibrium for c in configs} != {instant_equilibrium}:
         raise ValueError(
             "instant_equilibrium must be uniform across the batch and match the flag "

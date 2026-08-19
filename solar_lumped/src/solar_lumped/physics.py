@@ -2336,7 +2336,19 @@ def equilibrium_t_gel_desorption_c(
 
     lo = clamp_temperature_c(t_cond_c)
     hi = clamp_temperature_c(t_cond_c + 200.0)
-    return find_root_bracketed(residual, lo, hi)
+    # scan=True, because the two-endpoint bracket test cannot be trusted at the top of
+    # this range. Some salts' activity correlations are undefined there -- LiBr's brine
+    # fraction solve returns nan above ~200 C -- and _mass_transfer_driving_force maps a
+    # non-finite a_w to 0.0, so the upper endpoint reads as "exactly at equilibrium",
+    # fa*fb is 0 rather than negative, and the bracket is rejected even though the root
+    # sits a few kelvin above T_cond. That failure mode is not hypothetical: it returned
+    # nan for every LiBr desorption step, which this function's callers read as "cannot
+    # desorb", and a whole day's yield came out as exactly zero.
+    #
+    # The scan skips non-finite samples and returns at the FIRST sign change walking up
+    # from T_cond, so the common case (a wet gel, whose equilibrium sits <1 K above the
+    # condenser) still costs one or two evaluations rather than forty.
+    return find_root_bracketed(residual, lo, hi, scan=True, n_intervals=40)
 
 
 def dc_w_dt_from_m_des(m_des_kg_s_m2: float, *, h0_ref_m: float) -> float:
