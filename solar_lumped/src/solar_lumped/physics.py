@@ -2262,6 +2262,65 @@ def concentration_ratio_desorption(t_gel_c: float, t_cond_c: float) -> float:
     return (p_c / p_g) * (t_g_k / t_c_k)
 
 
+def equilibrium_t_gel_desorption_c(
+    c_w: float,
+    *,
+    t_cond_c: float,
+    params: MassTransferParams,
+    h_m: float,
+) -> float:
+    """Gel temperature at which desorption's driving force vanishes (deg C).
+
+    The local-equilibrium (g -> infinity) closure. Eq. 5's desorption driving force is
+    ``c_r(T_gel, T_cond) - a_w(c_w, T_gel)``; the ideal-kinetics limit is the constraint
+    that it is exactly zero, i.e. the gel's surface vapour pressure equals the
+    condenser's. Solving that for T_gel replaces the old approach of scaling g by a large
+    factor until the residual was negligible -- same limit, but as an algebraic condition
+    rather than a stiff relaxation, so the ODE that consumes it is not stiff.
+
+    Monotone, hence a unique root: a_w varies weakly with temperature while c_r falls as
+    p_sat(T_gel) grows. At T_gel = T_cond, c_r is exactly 1 and a_w <= 1, so the residual
+    starts non-positive; it turns positive once the gel is hot enough. Returns nan if no
+    bracket exists (e.g. no water left to have an activity), which callers read as "this
+    state cannot desorb".
+    """
+
+    def residual(t_gel_c: float) -> float:
+        # a_w - c_r, i.e. the negated Eq. 5 driving force: positive means desorbing.
+        return -_mass_transfer_driving_force(
+            c_w,
+            t_gel_c=t_gel_c,
+            c_r=concentration_ratio_desorption(t_gel_c, t_cond_c),
+            params=params,
+            h_m=h_m,
+            phase="desorption",
+        )
+
+    lo = clamp_temperature_c(t_cond_c)
+    hi = clamp_temperature_c(t_cond_c + 200.0)
+    return find_root_bracketed(residual, lo, hi)
+
+
+def dc_w_dt_from_m_des(m_des_kg_s_m2: float, *, h0_ref_m: float) -> float:
+    """Inverse of ``m_des_kg_s_m2_from_dc_w``: the loading rate a given desorption flux
+    implies. Under local equilibrium the flux comes from the energy balance rather than
+    from Eq. 5's rate law, so the causality runs this way round."""
+    if m_des_kg_s_m2 <= 0.0:
+        return 0.0
+    return -m_des_kg_s_m2 / (WATER_MOLAR_MASS_KG_MOL * h0_ref_m)
+
+
+def dh_dt_from_dc_w(dc_w_dt_val: float, *, rho_solution_kg_m3: float, h0_ref_m: float) -> float:
+    """Eq. 6 written as a ratio to Eq. 5 rather than as its own rate law.
+
+    dH/dt = dc_w/dt * (MW * H0 / rho_sol) identically in ``dH_dt``, so H and c_w stay on
+    the same trajectory whether the rate came from the mass law or from the energy
+    balance. Deriving it here keeps the equilibrium path from needing a second driving
+    force it is not allowed to have (its driving force is zero by construction).
+    """
+    return dc_w_dt_val * WATER_MOLAR_MASS_KG_MOL * h0_ref_m / rho_solution_kg_m3
+
+
 def _mass_transfer_rate_terms(
     c_w: float,
     *,

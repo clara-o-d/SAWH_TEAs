@@ -21,6 +21,9 @@ from scipy.optimize import brentq
 from solar_lumped._parameters_xlsx import physics_value as _pv
 from solar_lumped.complex_model import ComplexOptions
 from solar_lumped.physics import (
+    dc_w_dt_from_m_des,
+    dh_dt_from_dc_w,
+    equilibrium_t_gel_desorption_c,
     FABRICATION_EQUILIBRIUM_RH,
     CP_AL_J_KG_K,
     DRY_COMPOSITE_DENSITY_KG_M3,
@@ -367,6 +370,15 @@ CyclePhase = Literal["absorption", "desorption"]
 
 _M_DES_BRACKET_MAX = _pv("Desorption mass-flux bracket upper")  # kg/m²/s brentq bracket
 
+# How instant_equilibrium is imposed. True: as the equilibrium constraint itself
+# (_instant_equilibrium_desorption) -- the default, and the only non-stiff route. False:
+# the legacy penalty, g scaled by _INSTANT_EQUILIBRIUM_G_SCALE until Eq. 5's residual is
+# negligible. The penalty route is kept reachable for exactly one reason: it is the
+# independent reference the constraint route is pinned against
+# (tests/test_local_equilibrium.py). Not a config field -- production has no reason to
+# pick the stiff route.
+_INSTANT_EQUILIBRIUM_USE_CONSTRAINT = True
+
 
 @dataclass(frozen=True, slots=True)
 class CoupledRates:
@@ -433,6 +445,91 @@ def _m_des_calc(
     )
     m_calc = m_des_kg_s_m2_from_dc_w(dc, h0_ref_m=mass.h0_ref_m)
     return m_calc, state.t_gel_c, dc, state
+
+
+def _instant_equilibrium_desorption(
+    *,
+    c_w: float,
+    h_m: float,
+    t_cond: float,
+    t_amb_c: float,
+    q_sol: float,
+    h_amb: float,
+    mass: MassTransferParams,
+    thermal: SystemThermalParams,
+    gap_eff: float,
+    config: SystemConfig,
+    t_gel0: float,
+    state0: ThermalState,
+) -> tuple[float, float, float, ThermalState]:
+    """(m_des, T_gel, dc_w/dt, thermal state) for g -> infinity, as a constraint.
+
+    The ideal-kinetics limit is not "a very large g" -- it is the statement that the gel
+    surface sits at equilibrium with the condenser. So pin T_gel there
+    (``equilibrium_t_gel_desorption_c``) and let m_des be whatever the steady thermal
+    balance needs to hold it: desorption becomes energy-limited by construction, which is
+    what the ideal case is meant to represent.
+
+    Numerically this is the point of the exercise. T_gel falls monotonically as latent
+    load rises, so ``T_gel(m) - T_eq`` is a well-scaled monotone root in kelvin. The
+    penalty formulation instead solved ``m_calc(m) - m`` with a slope of order g, which is
+    near-vertical -- stiff for the ODE downstream, and ill-conditioned enough here to have
+    needed the "brentq returned the jump, not the root" fallback below.
+    """
+    if c_w <= mass.c_w_min_mol_m3:
+        # At the hydrate floor there is no more removable water, whatever the energy.
+        return 0.0, t_gel0, 0.0, state0
+
+    t_eq = equilibrium_t_gel_desorption_c(c_w, t_cond_c=t_cond, params=mass, h_m=h_m)
+    if not math.isfinite(t_eq):
+        return 0.0, t_gel0, 0.0, state0
+
+    def _t_gel_gap(m_des_guess: float) -> float:
+        _m, t_gel, _dc, _state = _m_des_calc(
+            m_des_guess,
+            loading=c_w, h_m=h_m, t_cond_c=t_cond, t_amb_c=t_amb_c, q_solar_w_m2=q_sol,
+            h_amb=h_amb, mass=mass, thermal=thermal, vapor_gap_m=gap_eff, config=config,
+            t_guess=(state0.t_gel_c, state0.t_abs_c, state0.t_glass_c),
+        )
+        if not math.isfinite(t_gel):
+            return float("nan")
+        return t_gel - t_eq
+
+    gap_at_zero = _t_gel_gap(0.0)
+    if not math.isfinite(gap_at_zero) or gap_at_zero <= 0.0:
+        # Even carrying no latent load the gel cannot reach equilibrium: the energy is not
+        # there, so nothing desorbs. Same physical branch as the penalty path's
+        # m_at_zero <= 0, reached without consulting a rate law.
+        return 0.0, t_gel0, 0.0, state0
+
+    hi = 1e-6
+    while hi < _M_DES_BRACKET_MAX:
+        gap_hi = _t_gel_gap(hi)
+        if not math.isfinite(gap_hi):
+            return 0.0, t_gel0, 0.0, state0
+        if gap_hi < 0.0:
+            break
+        hi *= 2.0
+    else:
+        # Monotone and still above equilibrium at the physical ceiling: take the ceiling
+        # rather than extrapolate past a bracket that does not exist.
+        hi = _M_DES_BRACKET_MAX
+
+    try:
+        m_star = float(brentq(_t_gel_gap, 0.0, hi, xtol=1e-16, rtol=1e-12))
+    except ValueError:
+        return 0.0, t_gel0, 0.0, state0
+
+    _m, t_gel, _dc, state = _m_des_calc(
+        m_star,
+        loading=c_w, h_m=h_m, t_cond_c=t_cond, t_amb_c=t_amb_c, q_solar_w_m2=q_sol,
+        h_amb=h_amb, mass=mass, thermal=thermal, vapor_gap_m=gap_eff, config=config,
+        t_guess=(state0.t_gel_c, state0.t_abs_c, state0.t_glass_c),
+    )
+    # dc from the flux, not from Eq. 5: under the constraint Eq. 5's driving force is zero
+    # by definition, so it can no longer be the thing that sets the rate.
+    dc = dc_w_dt_from_m_des(m_star, h0_ref_m=mass.h0_ref_m)
+    return m_star, t_gel, dc, state
 
 
 def evaluate_coupled_rates(
@@ -545,6 +642,15 @@ def evaluate_coupled_rates(
         m_des, t_gel, dc, state = 0.0, state0.t_gel_c, 0.0, state0
     elif m_at_zero <= 0.0:
         m_des, t_gel, dc, state = 0.0, t_gel0, dc0, state0
+    elif config.instant_equilibrium and _INSTANT_EQUILIBRIUM_USE_CONSTRAINT:
+        # g -> infinity is imposed as the equilibrium constraint, not as a large g. Eq. 5's
+        # rate law plays no part in setting the rate here; see
+        # _instant_equilibrium_desorption.
+        m_des, t_gel, dc, state = _instant_equilibrium_desorption(
+            c_w=c_w, h_m=h_m, t_cond=t_cond, t_amb_c=t_amb_c, q_sol=q_sol, h_amb=h_amb,
+            mass=mass, thermal=thermal, gap_eff=gap_eff, config=config,
+            t_gel0=t_gel0, state0=state0,
+        )
     else:
         # Cap at the documented search bound. Without it, instant_equilibrium's
         # scaled g makes m_at_zero ~1e3 kg/s/m2 (measured ~1e4 when the scale was 1e6),
@@ -596,17 +702,29 @@ def evaluate_coupled_rates(
                     # conservation guard. Freezing both is the self-consistent state.
                     m_des, t_gel, dc, state = 0.0, t_gel0, 0.0, state0
 
-    _, dh, _ = evaluate_mass_rates(
-        loading=c_w,
-        h_m=h_m,
-        t_gel_c=t_gel,
-        t_cond_c=t_cond,
-        rh=rh,
-        phase="desorption",
-        mass=mass,
-        config=config,
-        vapor_gap_m=vapor_gap_m,
-    )
+    if config.instant_equilibrium and _INSTANT_EQUILIBRIUM_USE_CONSTRAINT:
+        # Eq. 6 shares Eq. 5's driving force, which the constraint sets to zero -- so
+        # reading dH/dt off the rate law here would freeze the gel's thickness while its
+        # water drained. Use the identity dH/dt = dc_w/dt * MW * H0 / rho_sol instead, the
+        # same ratio dH_dt itself carries, so H and c_w stay on one trajectory.
+        dh = dh_dt_from_dc_w(
+            dc, rho_solution_kg_m3=mass.rho_solution_kg_m3, h0_ref_m=mass.h0_ref_m
+        )
+        if c_w <= mass.c_w_min_mol_m3:
+            dh = 0.0
+        dh = min(dh, 0.0)
+    else:
+        _, dh, _ = evaluate_mass_rates(
+            loading=c_w,
+            h_m=h_m,
+            t_gel_c=t_gel,
+            t_cond_c=t_cond,
+            rh=rh,
+            phase="desorption",
+            mass=mass,
+            config=config,
+            vapor_gap_m=vapor_gap_m,
+        )
 
     h_conv_g = state.h_conv_g
     # B4: the design's fan speed is the source of truth for condenser-side
