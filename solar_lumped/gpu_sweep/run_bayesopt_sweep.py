@@ -94,6 +94,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
                    help="Ignored (pinned by design_space.SIMPLE_FIXED).")
     p.add_argument("--tilt-deg", type=float, default=gps.TILT_DEG,
                    help="Ignored: tilt_deg is an optimized dim in both modes.")
+    p.add_argument(
+        "--day-stride", type=int, default=1,
+        help="Evaluate every Nth calendar day instead of all 365. The year is ~366 "
+             "sequential day-steps and ~100%% of an evaluation's cost, so this is the one "
+             "lever that shortens a call (stride 5 ~= 5x cheaper). It is a DIFFERENT "
+             "objective -- the mean is over sampled days and the sorbent state chain "
+             "advances in N-day jumps -- so it gets its own cache key and its numbers do "
+             "not belong in a summary.csv alongside stride-1 rows.",
+    )
     p.add_argument("--case", choices=tuple(CASE_EPS_IR), default="case2")
     p.add_argument(
         "--condenser-ambient", action="store_true",
@@ -219,6 +228,7 @@ def _make_cfg(sites: tuple[SiteSpec, ...], args: argparse.Namespace, bounds: Des
         instant_equilibrium=args.instant_equilibrium,
         de_maxiter=args.de_maxiter,
         de_popsize=args.de_popsize,
+        day_stride=args.day_stride,
     )
 
 
@@ -244,7 +254,10 @@ def _loop_row(site: SiteSpec, result, bounds: DesignBounds, args: argparse.Names
         "case": args.case,
         "condenser_mode": "ambient" if args.condenser_ambient else "ode",
         "kinetics": "instant" if args.instant_equilibrium else "finite_g",
-        "warmup_method": "aitken-gpu-fixed-round", "resolution": "annual",
+        "warmup_method": "aitken-gpu-fixed-round",
+        # Carries the stride, so a strided run's rows can never be silently merged with
+        # full-year ones -- they are different objectives.
+        "resolution": "annual" if args.day_stride == 1 else f"annual-stride{args.day_stride}",
         "best_combined_lcow_usd_m3": f"{best.combined_lcow:.6f}",
         "n_evals": len(result.history),
         # A site where nothing was feasible reports the 1e4 penalty as its "optimum",

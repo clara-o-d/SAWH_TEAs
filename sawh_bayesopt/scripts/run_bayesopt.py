@@ -60,6 +60,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="jax: vmapped/jitted, batches designs x sites -- use for global sweeps. "
              "cpu: sequential solar_lumped ODE path, no GPU stack, single site only.",
     )
+    p.add_argument(
+        "--day-stride", type=int, default=1,
+        help="Evaluate every Nth calendar day instead of all 365. The year is ~366 "
+             "sequential day-steps and ~100%% of an evaluation's cost, so this is the one "
+             "lever that shortens a call (stride 5 ~= 5x cheaper). It is a DIFFERENT "
+             "objective, not an approximation of the same number -- results are not "
+             "comparable to stride-1 runs, and it gets its own cache key.",
+    )
     p.add_argument("--case", choices=tuple(CASE_EPS_IR), default="case2")
     p.add_argument("--weather-cache-dir", type=str, default=str(_REPO / ".weather_cache"))
     p.add_argument("--run-id", type=str, default="run")
@@ -94,6 +102,7 @@ def main(argv: list[str] | None = None) -> int:
         stall_rounds=args.stall_rounds,
         weather_cache_dir=args.weather_cache_dir,
         case=args.case,
+        day_stride=args.day_stride,
     )
 
     run_dir = _REPO / "outputs" / "runs" / args.run_id

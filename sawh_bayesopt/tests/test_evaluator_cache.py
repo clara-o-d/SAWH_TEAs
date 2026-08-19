@@ -10,6 +10,7 @@ from sawh_bayesopt.evaluator import (
     SiteResult,
     design_vector_hash,
     evaluate_batch,
+    evaluate_requests,
 )
 from sawh_bayesopt.sites import SiteSpec
 
@@ -75,7 +76,7 @@ def test_evaluate_batch_skips_cached_points(monkeypatch, tmp_path):
     xs = list(latin_hypercube_design(2, bounds, seed=5))
     sites = _sites(1)
     # No usable day in the frame -> "no weather profiles" short-circuit, no jax needed.
-    monkeypatch.setattr(evaluator, "_profiles_for_design", lambda df, x, complex_mode: [])
+    monkeypatch.setattr(evaluator, "_profiles_for_design", lambda df, x, complex_mode, stride=1: [])
     site_frames = {sites[0].name: object()}
 
     cache = EvalCache(tmp_path / "cache.jsonl")
@@ -97,3 +98,100 @@ def test_evaluate_batch_skips_cached_points(monkeypatch, tmp_path):
     # xs[1] was uncached, so it ran for real (empty profiles -> FAIL_LCO -> penalty).
     assert results[1].combined_lcow == evaluator.PENALTY_LCOW_USD_PER_M3
     assert results[1].combined_lcow != -999.0
+
+
+def test_evaluate_requests_batches_every_site_into_one_call(monkeypatch, tmp_path):
+    """The lockstep sweep's whole economy: many sites, ONE physics call, separate caches.
+
+    A year is ~366 sequential day-steps whatever the batch width, so per-site calls are
+    what a sweep must avoid. This pins the three properties the sweep relies on: one call
+    for the whole request list, per-site cache files, and each site's own elevation on its
+    own instances.
+    """
+    from solar_lumped.economics import LCOEconomicParams
+
+    monkeypatch.setattr(evaluator, "_profiles_for_design", lambda df, x, complex_mode, stride=1: [(1, object())])
+    calls: list[list[int]] = []
+    elevations_seen: list[float] = []
+
+    def fake_run_year(instance_profiles, instance_configs, owner, **_kwargs):
+        calls.append(list(owner))
+        elevations_seen.extend(c.site_elevation_m for c in instance_configs)
+        return {i: 1.0 for i in owner}, {i: 0.5 for i in owner}, None
+
+    monkeypatch.setattr(evaluator, "_run_jax_year", fake_run_year)
+
+    a, b = SiteSpec("a", -23.0, -70.0), SiteSpec("b", 42.0, -71.0)
+    caches = {"a": EvalCache(tmp_path / "a.jsonl"), "b": EvalCache(tmp_path / "b.jsonl")}
+    x1, x2 = latin_hypercube_design(2, DesignBounds(), seed=1)
+    # x1 at site a appears twice: a verification neighbour landing on an evaluated point
+    # is normal, and paying for it twice inside one call would be silent waste.
+    requests = [(a, x1), (b, x1), (a, x2), (b, x2), (a, x1)]
+
+    results = evaluate_requests(
+        requests,
+        caches=caches,
+        econ=LCOEconomicParams(),
+        site_frames={"a": object(), "b": object()},
+        site_elevations={"a": 0.0, "b": 1500.0},
+    )
+
+    assert len(calls) == 1, f"{len(calls)} physics calls for 2 sites -- the batching is gone"
+    assert len(calls[0]) == 4, "the duplicate request should not have been run twice"
+    assert [r.site_results[0].site_name for r in results] == ["a", "b", "a", "b", "a"]
+    assert results[0].combined_lcow == results[4].combined_lcow
+    assert sorted(elevations_seen) == [0.0, 0.0, 1500.0, 1500.0]
+    # Each site's results land in its own cache.jsonl, because each site owns a run dir.
+    assert len(caches["a"]) == 2 and len(caches["b"]) == 2
+    assert (tmp_path / "a.jsonl").is_file() and (tmp_path / "b.jsonl").is_file()
+
+
+def test_evaluate_batch_rejects_multi_site(tmp_path):
+    """Optimization is single-site (site_lcow_or_penalty); many sites means many requests,
+    not many sites per design."""
+    import pytest
+
+    with pytest.raises(ValueError, match="single-site"):
+        evaluate_batch(
+            [latin_hypercube_design(1, DesignBounds(), seed=0)[0]],
+            cache=EvalCache(tmp_path / "c.jsonl"), sites=_sites(2), econ=None,
+        )
+
+
+def test_day_stride_is_part_of_the_cache_key_but_stride_one_is_unchanged():
+    """A strided LCOW is a different objective, not a cheaper route to the same number, so
+    it must not collide with a full-year entry. Stride 1 must keep the existing key, or
+    every cache.jsonl on disk is retired."""
+    x = latin_hypercube_design(1, DesignBounds(), seed=3)[0]
+    full = design_vector_hash(x, sites=("a",))
+    assert design_vector_hash(x, sites=("a",), day_stride=1) == full
+    strided = design_vector_hash(x, sites=("a",), day_stride=5)
+    assert strided != full
+    assert design_vector_hash(x, sites=("a",), day_stride=7) not in (full, strided)
+
+
+def test_evaluate_requests_forwards_day_stride_to_the_profile_build(monkeypatch, tmp_path):
+    """The stride has to reach real_weather_days_from_df; a stride that only changed the
+    cache key would silently return full-year physics under a strided key."""
+    from solar_lumped.economics import LCOEconomicParams
+
+    seen: list[int] = []
+
+    def stub_profiles(df, x, complex_mode, stride=1):
+        seen.append(stride)
+        return [(1, object())]
+
+    monkeypatch.setattr(evaluator, "_profiles_for_design", stub_profiles)
+    monkeypatch.setattr(
+        evaluator, "_run_jax_year",
+        lambda profiles, configs, owner, **kw: ({i: 1.0 for i in owner}, {i: 0.5 for i in owner}, None),
+    )
+    site = SiteSpec("a", 0.0, 0.0)
+    evaluate_requests(
+        [(site, latin_hypercube_design(1, DesignBounds(), seed=4)[0])],
+        caches={"a": EvalCache(tmp_path / "a.jsonl")},
+        econ=LCOEconomicParams(),
+        site_frames={"a": object()},
+        day_stride=5,
+    )
+    assert seen == [5]

@@ -23,6 +23,11 @@ multi-site study is one optimization per site: that is what
 `solar_lumped/gpu_sweep/run_bayesopt_sweep.py` does across the land grid,
 producing a per-site optimum rather than one compromise design.
 
+Those per-site optimizations run in **lockstep groups** (`--sites-per-group`):
+independent GPs and histories, but one shared batched evaluation per round,
+because an evaluation call costs ~the same at any batch width. See
+`docs/design_notes.md`, "Why sites run in lockstep".
+
 ## Scope (v1)
 
 - Design variables: `hydrogel_thickness_m`, `vapor_gap_m`, `tilt_deg`, and the

@@ -39,7 +39,8 @@ class _FakeJaxDailyCycle:
     def make_year_step_fn(self, system, dt, n_abs_max, n_des_max, **_flags):
         return lambda cw, h, weather: (self._water, self._eta, cw, h)
 
-    def run_year_batched(self, step_fn, day_weathers, *, c_w_initial, h_initial, aitken_max_rounds):
+    def run_year_batched(self, step_fn, day_weathers, *, c_w_initial, h_initial,
+                         aitken_max_rounds, progress_every=0):
         return np.asarray(self._water), np.asarray(self._eta)
 
 
@@ -49,7 +50,7 @@ def stub_profiles(monkeypatch):
     design (the schedule offsets are optimized dims), which these tests have no real
     frame for. Return a sentinel profile list instead; the failure paths under test never
     look inside it."""
-    monkeypatch.setattr(evaluator, "_profiles_for_design", lambda df, x, complex_mode: _DUMMY_PROFILES)
+    monkeypatch.setattr(evaluator, "_profiles_for_design", lambda df, x, complex_mode, stride=1: _DUMMY_PROFILES)
 
 
 @pytest.fixture
@@ -140,7 +141,7 @@ def test_evaluate_batch_penalizes_missing_weather(monkeypatch, tmp_path, one_sit
 
     x = _one_x()
     # No usable day in the frame -> never touches jax.
-    monkeypatch.setattr(evaluator, "_profiles_for_design", lambda df, x, complex_mode: [])
+    monkeypatch.setattr(evaluator, "_profiles_for_design", lambda df, x, complex_mode, stride=1: [])
     cache = EvalCache(tmp_path / "cache.jsonl")
     [result] = evaluator.evaluate_batch(
         [x], cache=cache, sites=one_site, site_frames=_DUMMY_FRAMES, econ=econ

@@ -124,6 +124,54 @@ the same peak, without needing a true batch-EI (qEI) implementation.
    `stall_rounds=3` rounds in a row (diminishing returns -- no reason to keep
    spending evaluations once the search has flattened out).
 
+## Why sites run in lockstep (and why batch width is nearly free)
+
+Measured on a `serc` A100, one batched evaluation of the annual objective costs
+**60.1 min for 1 design and 68.2 min for 8** — 8× the work for +13% time — and
+XLA compilation is only ~20 s of that. The reason is structural: a year is ~366
+*sequential* day-steps (`jax_daily_cycle.run_year_batched` walks days in a Python
+loop, each warm-starting from the previous day's end state), and the batch axis
+is the only parallel one. Each of those steps is a small vmapped solve, so the
+GPU is latency-bound, not throughput-bound.
+
+So **cost tracks the number of evaluation calls, not the number of designs.**
+Two consequences shape the drivers:
+
+- `bayesopt.run_bayesopt_sites` advances every site's loop in lockstep: each
+  round's designs across all sites go into one `evaluator.evaluate_requests`
+  call, as do the group's verification and baseline passes. Sites stay fully
+  independent optimizations (own GP, own history, own `cache.jsonl`) — only the
+  call is shared. A site-at-a-time sweep paid ~12 calls per site; a group of 32
+  pays ~12 calls total.
+- For a *single-site* run, where width can only come from `batch_size`, raising
+  it is the only lever — at the cost of Kriging-Believer's approximation getting
+  looser the wider each batch gets. Prefer more sites per group over a wider
+  per-site batch when both are available.
+
+Requests are `(site, design)` pairs rather than a cross product, since a design
+is scored where it will be built (`evaluator.site_lcow_or_penalty`).
+
+The remaining cost is the sequential day loop itself, and there are two levers.
+
+**`--day-stride N`** (implemented) keeps every Nth calendar day: 366 → 74 days at
+stride 5, so ~5× off every evaluation. It is a *different objective*, not a
+cheaper estimate of the same one — the mean is over the sampled days, and each
+sampled day warm-starts from the previous *sampled* day's end state, so the
+sorbent's seasonal history advances in N-day jumps. That is cheap rather than
+free because the cyclic state re-equilibrates within about a day. Because it is a
+different objective it joins the cache key
+(`evaluator.design_vector_hash` → `annual+elev+strideN`) and the `resolution`
+column in `summary.csv`; stride 1 keeps the original key, so no existing
+`cache.jsonl` is retired. Never merge strided and full-year rows into one
+comparison.
+
+**A `lax.scan` over stacked day weather** (untried) would collapse the 366 Python
+dispatches — `run_year_batched` currently calls `np.asarray` on every day's
+outputs, forcing a host sync per day — into one device-side scan. Unlike the
+stride this leaves the objective untouched, so it needs no cache-key change. Its
+payoff depends on how much of the ~9.6 s per day-step is dispatch overhead versus
+the diffrax solve inside a day, which nobody has measured yet.
+
 ## Design-variable provenance
 
 | variable | range used | source |

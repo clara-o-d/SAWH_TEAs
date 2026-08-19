@@ -44,6 +44,14 @@ PENALTY_LCOW_USD_PER_M3: float = 1.0e4
 # (FINDINGS.md Result 7), and run_gpu_sweep.py's own default.
 JAX_AITKEN_MAX_ROUNDS: int = 8
 
+# A year is ~366 sequential day-steps at ~10s each on an A100 (the batch axis is where
+# the parallelism lives, so widening it barely moves this), and run_year_batched reaches
+# disk only when the whole year returns. Without a day counter an hour-long call is
+# indistinguishable from a hung one -- which is exactly how two Sherlock runs got stared
+# at. 30 days is ~12 lines per call: enough to read a s/day rate off, not enough to bury
+# the round-level progress.
+JAX_YEAR_PROGRESS_EVERY: int = 30
+
 # Broken code, not a bad design. The two solver calls below catch Exception so one
 # unphysical design can't kill a 130-evaluation batch -- but that same catch turns a typo
 # in the physics into "every design is infeasible", and the run then reports the 1e4
@@ -102,21 +110,25 @@ def design_vector_hash(
     *,
     sites: tuple[str, ...],
     case: str = "case2",
+    day_stride: int = 1,
 ) -> str:
     """Stable cache key: sig-fig-rounded design vector + sites (+ case when non-default),
     so LHS/EI float jitter doesn't cause spurious misses. The ``case`` default must stay
     in sync with evaluate_batch's, and "case1" is omitted from the payload so
     pre-case-awareness cache.jsonl records stay valid.
 
-    The "annual" resolution tag is a fixed objective-version marker: every evaluation
-    walks the real 365-day year, so pre-refactor mean-day entries (tagged "monthly")
-    can never collide with these.
+    The resolution tag is a fixed objective-version marker: pre-refactor mean-day entries
+    (tagged "monthly") can never collide with a full-year walk. ``day_stride`` > 1 joins
+    that tag because it is a *different objective*, not a cheaper route to the same number
+    -- a mean over every 5th day, with the sorbent state chain stepping 5 days at a time.
+    Stride 1 is omitted, so every existing cache.jsonl entry stays valid.
     """
     rounded = tuple(_round_sig(float(v)) for v in np.asarray(x, dtype=float).reshape(-1))
     # "annual+elev" retires every pre-elevation entry. Site pressure changes yield by
     # ~+2.4%/1000 m, and h_amb's density factor moves even sea-level sites (it tracks
     # ambient temperature as well as pressure), so those results are not comparable.
-    payload = {"x": rounded, "sites": sorted(sites), "resolution": "annual+elev"}
+    resolution = "annual+elev" if day_stride == 1 else f"annual+elev+stride{int(day_stride)}"
+    payload = {"x": rounded, "sites": sorted(sites), "resolution": resolution}
     if case != "case1":
         payload["case"] = case
     blob = json.dumps(payload, sort_keys=True)
@@ -204,20 +216,22 @@ class EvalCache:
 def _run_jax_year(
     instance_profiles: list,
     instance_configs: list,
-    owner: list[tuple[int, int]],
+    owner: list[int],
     *,
     initial_loading,
     complex_mode: bool = False,
     condenser_tracks_ambient: bool = False,
     instant_equilibrium: bool = False,
-) -> tuple[dict[tuple[int, int], float], dict[tuple[int, int], float], str | None]:
-    """Run a full 365-day year for every (design, site) instance and reduce to mean daily
-    yield/eta per pair. Returns (yield, eta, error); on a raised jax/diffrax call, error is
-    set and both dicts are empty.
+) -> tuple[dict[int, float], dict[int, float], str | None]:
+    """Run a full 365-day year for every instance and reduce to mean daily yield/eta,
+    keyed by the caller's ``owner`` index. Returns (yield, eta, error); on a raised
+    jax/diffrax call, error is set and both dicts are empty.
 
-    The batch axis is (design, site): every instance advances through the year in lockstep,
-    one vmapped step per calendar day, so days stay sequential (each warm-starts from the
-    previous day's end state) while designs and sites run in parallel."""
+    Every instance advances through the year in lockstep, one vmapped step per calendar
+    day, so days stay sequential (each warm-starts from the previous day's end state)
+    while instances run in parallel. Days are the sequential axis and instances the
+    parallel one, which is why widening the batch is nearly free -- see
+    :func:`evaluate_requests`."""
     if not instance_profiles:
         return {}, {}, None
 
@@ -246,15 +260,18 @@ def _run_jax_year(
             c_w_initial=np.array([initial_loading(c) for c in instance_configs]),
             h_initial=np.array([c.hydrogel_thickness_m for c in instance_configs]),
             aitken_max_rounds=JAX_AITKEN_MAX_ROUNDS,
+            progress_every=JAX_YEAR_PROGRESS_EVERY,
         )
     except _BUG_EXCEPTIONS:
         raise
     except Exception as exc:  # noqa: BLE001 -- the batched jax/diffrax call can raise
         return {}, {}, str(exc).split("\n", 1)[0][:240]
 
-    yield_by_pair = {pair: float(y) for pair, y in zip(owner, water)}
-    eta_by_pair = {pair: float(e) for pair, e in zip(owner, eta)}
-    return yield_by_pair, eta_by_pair, None
+    return (
+        {i: float(y) for i, y in zip(owner, water)},
+        {i: float(e) for i, e in zip(owner, eta)},
+        None,
+    )
 
 
 def fetch_site_inputs(cfg) -> tuple[dict, dict[str, float]]:
@@ -277,35 +294,42 @@ def fetch_site_inputs(cfg) -> tuple[dict, dict[str, float]]:
     return frames, {name: site_elevation_m(df) for name, df in frames.items()}
 
 
-def evaluate_for_config(xs, *, cfg, cache, econ, site_frames=None, site_elevations=None):
-    """evaluate_batch with every mode argument taken from ``cfg``.
+def evaluate_for_config(
+    requests: list[tuple[SiteSpec, np.ndarray]],
+    *,
+    cfg,
+    caches: dict[str, EvalCache],
+    econ,
+    site_inputs: tuple[dict, dict[str, float]] | None = None,
+) -> list[DesignEvalResult]:
+    """:func:`evaluate_requests` with every mode argument taken from ``cfg``.
 
-    The loop, the verification pass, and the baseline comparison must all evaluate
-    designs identically -- each one that assembled these kwargs by hand was a place
-    to silently drop complex_mode or backend and score a 13-dim design against
-    5-dim physics. ``site_elevations`` was exactly that: omitted here, the verification
-    neighbours and the Wilson baseline ran at sea level while the loop they are compared
-    against ran at the real site pressure. Callers that already fetched weather can pass
-    both through.
+    The loop, the verification pass, and the baseline comparison must all evaluate designs
+    identically -- each place that assembled these kwargs by hand was a place to silently
+    drop complex_mode or backend and score a 13-dim design against 5-dim physics, or (as
+    ``site_elevations`` did) run the verification neighbours at sea level while the loop
+    they are compared against ran at real site pressure.
+
+    ``site_inputs`` is ``fetch_site_inputs``' (frames, elevations); pass it when the caller
+    already has them, which also keeps a many-site pass from re-reading every frame.
     """
-    if site_frames is None or site_elevations is None:
-        site_frames, site_elevations = fetch_site_inputs(cfg)
-    return evaluate_batch(
-        xs,
-        cache=cache,
-        sites=cfg.sites,
+    frames, elevations = fetch_site_inputs(cfg) if site_inputs is None else site_inputs
+    return evaluate_requests(
+        requests,
+        caches=caches,
         econ=econ,
         case=cfg.case,
         complex_mode=cfg.complex_mode,
         condenser_tracks_ambient=cfg.condenser_tracks_ambient,
         instant_equilibrium=cfg.instant_equilibrium,
-        site_frames=site_frames,
-        site_elevations=site_elevations,
+        site_frames=frames,
+        site_elevations=elevations,
         backend=cfg.backend,
+        day_stride=cfg.day_stride,
     )
 
 
-def _profiles_for_design(df, x, complex_mode: bool) -> DailyProfiles:
+def _profiles_for_design(df, x, complex_mode: bool, day_stride: int = 1) -> DailyProfiles:
     """Rebuild a site's per-day profiles under one design's profile-level variables.
 
     Design variables live inside the weather profile itself: A1's seal/open offsets move
@@ -315,6 +339,13 @@ def _profiles_for_design(df, x, complex_mode: bool) -> DailyProfiles:
     design-dependent and the fetch-once-per-site reuse does not apply -- this rebuilds
     them from the site's cached DataFrame, which is the expensive-but-correct option.
 
+    ``day_stride`` > 1 keeps every Nth calendar day, which is the one lever that shortens
+    the year walk -- the sequential day loop is ~100% of an evaluation's cost. It changes
+    the objective (see :func:`design_vector_hash`): the mean is over the sampled days, and
+    each sampled day warm-starts from the previous *sampled* day's end state, so the
+    sorbent's seasonal history advances in N-day jumps. Cheap because the cyclic state
+    re-equilibrates within about a day, not free.
+
     ponytail: one full pandas re-split per (design, site), ~365 groupby days of work that
     only the day/night mask actually depends on. If the simple-mode loop gets weather-
     bound, the upgrade is a re-split that reuses the already-parsed day frames.
@@ -322,7 +353,8 @@ def _profiles_for_design(df, x, complex_mode: bool) -> DailyProfiles:
     from solar_lumped.weather import real_weather_days_from_df
 
     days = real_weather_days_from_df(
-        df, **design_space.to_profile_kwargs(x, complex_mode=complex_mode)
+        df, stride=int(day_stride),
+        **design_space.to_profile_kwargs(x, complex_mode=complex_mode),
     )
     return [(d.timetuple().tm_yday, prof) for d, prof, _group in days]
 
@@ -330,13 +362,13 @@ def _profiles_for_design(df, x, complex_mode: bool) -> DailyProfiles:
 def _run_cpu_year(
     instance_profiles: list,
     instance_configs: list,
-    owner: list[tuple[int, int]],
+    owner: list[int],
     *,
     initial_loading,
     complex_mode: bool = False,
     condenser_tracks_ambient: bool = False,
     instant_equilibrium: bool = False,
-) -> tuple[dict[tuple[int, int], float], dict[tuple[int, int], float], str | None]:
+) -> tuple[dict[int, float], dict[int, float], str | None]:
     """CPU equivalent of :func:`_run_jax_year`. ``condenser_tracks_ambient`` and
     ``instant_equilibrium`` are unused here (already baked into each ``instance_configs``
     entry) -- kept for signature parity with
@@ -350,9 +382,9 @@ def _run_cpu_year(
     """
     from solar_lumped.simulation import find_cyclic_state, run_daily_cycle
 
-    yield_by_pair: dict[tuple[int, int], float] = {}
-    eta_by_pair: dict[tuple[int, int], float] = {}
-    for profiles, config, pair in zip(instance_profiles, instance_configs, owner):
+    yield_by_instance: dict[int, float] = {}
+    eta_by_instance: dict[int, float] = {}
+    for profiles, config, i in zip(instance_profiles, instance_configs, owner):
         if not profiles:
             continue
         try:
@@ -371,9 +403,9 @@ def _run_cpu_year(
             raise
         except Exception as exc:  # noqa: BLE001 -- one bad design must not kill the batch
             return {}, {}, str(exc).split("\n", 1)[0][:240]
-        yield_by_pair[pair] = float(np.mean(yields))
-        eta_by_pair[pair] = float(np.mean(etas))
-    return yield_by_pair, eta_by_pair, None
+        yield_by_instance[i] = float(np.mean(yields))
+        eta_by_instance[i] = float(np.mean(etas))
+    return yield_by_instance, eta_by_instance, None
 
 
 def evaluate_batch(
@@ -381,6 +413,47 @@ def evaluate_batch(
     *,
     cache: EvalCache,
     sites: tuple[SiteSpec, ...],
+    econ,
+    case: str = "case2",
+    complex_mode: bool = False,
+    condenser_tracks_ambient: bool = False,
+    instant_equilibrium: bool = False,
+    site_frames: dict[str, object] | None = None,
+    site_elevations: dict[str, float] | None = None,
+    backend: Backend = "jax",
+    day_stride: int = 1,
+) -> list[DesignEvalResult]:
+    """Every x in *xs* at the one site in *sites*, in one batched call.
+
+    Single-site wrapper over :func:`evaluate_requests`; optimization is single-site (see
+    :func:`site_lcow_or_penalty`), so there is no cross product to take. Sweeping many
+    sites means many requests, not many sites per design -- see
+    ``bayesopt.run_bayesopt_sites``.
+    """
+    if len(sites) != 1:
+        raise ValueError(f"evaluate_batch is single-site, got {len(sites)}; use evaluate_requests")
+    site = sites[0]
+    return evaluate_requests(
+        [(site, x) for x in xs],
+        caches={site.name: cache},
+        econ=econ,
+        case=case,
+        complex_mode=complex_mode,
+        condenser_tracks_ambient=condenser_tracks_ambient,
+        instant_equilibrium=instant_equilibrium,
+        site_frames=site_frames,
+        site_elevations=site_elevations,
+        backend=backend,
+        day_stride=day_stride,
+    )
+
+
+def evaluate_requests(
+    requests: list[tuple[SiteSpec, np.ndarray]],
+    *,
+    # site name -> that site's cache.jsonl. One per site, because each site owns a run
+    # directory; a request whose site has no cache here is an error, not a cache miss.
+    caches: dict[str, EvalCache],
     econ,
     case: str = "case2",
     complex_mode: bool = False,
@@ -395,15 +468,27 @@ def evaluate_batch(
     # air property and the h_amb density derate -- only test paths should want that.
     site_elevations: dict[str, float] | None = None,
     backend: Backend = "jax",
+    # 1 (default) walks every calendar day. >1 keeps every Nth, which shortens the
+    # sequential day loop -- the only part of an evaluation that costs anything -- at the
+    # price of a different objective. It joins the cache key for that reason.
+    day_stride: int = 1,
 ) -> list[DesignEvalResult]:
-    """Evaluate every x in *xs* not already in *cache*. Each (design, site) instance runs
-    all 365 real days, batched across designs and sites. ``case`` picks the IR emissivity
-    variant (design_space.CASE_EPS_IR); "case2" matches solar_lumped base-case physics."""
+    """Evaluate one (site, design) request per element, returning results in that order.
+
+    **The batch axis is the request list.** Every uncached request becomes one instance in
+    a single vmapped call, so 400 requests cost barely more than 8: a year is ~366
+    *sequential* day-steps whatever the width (measured on an A100: 1 design 60.1 min,
+    8 designs 68.2 min -- 8x the work for +13% time), which makes width nearly free and
+    the number of calls the thing that matters. Batch as wide as the caller can.
+
+    Requests are pairs, not a cross product: each site is optimized on its own LCOW, and
+    the lockstep sweep gives every site its own designs. ``case`` picks the IR emissivity
+    variant (design_space.CASE_EPS_IR); "case2" matches solar_lumped base-case physics.
+    """
     from solar_lumped.economics import FAIL_LCO, lcow_from_daily_yield
     from solar_lumped.physics import initial_loading
     from solar_lumped.simulation import SystemConfig
 
-    site_names = tuple(s.name for s in sites)
     # Complex results are not interchangeable with simple ones at the same design
     # vector, so the mode joins the cache key rather than silently colliding.
     key_case = f"{case}+complex" if complex_mode else case
@@ -413,62 +498,67 @@ def evaluate_batch(
         key_case = f"{key_case}+instant_eq"
     if backend != "jax":
         key_case = f"{key_case}+{backend}"
-    keys = [design_vector_hash(x, sites=site_names, case=key_case) for x in xs]
-    results: list[DesignEvalResult | None] = [None] * len(xs)
 
-    to_run = [i for i, key in enumerate(keys) if cache.get_or_none(key) is None]
-    for i, key in enumerate(keys):
-        cached = cache.get_or_none(key)
-        if cached is not None:
-            results[i] = cached
+    missing = {spec.name for spec, _x in requests} - set(caches)
+    if missing:
+        raise ValueError(f"no cache for site(s) {sorted(missing)}")
+    if backend == "cpu" and len({spec.name for spec, _x in requests}) > 1:
+        # The CPU path is the single-location physics reference: one simulation at a
+        # time, one site. Multi-site/global sweeping is the JAX backend's job.
+        raise ValueError("cpu backend is single-site only")
 
+    keys = [
+        design_vector_hash(x, sites=(spec.name,), case=key_case, day_stride=day_stride)
+        for spec, x in requests
+    ]
+    results: list[DesignEvalResult | None] = [
+        caches[spec.name].get_or_none(key) for (spec, _x), key in zip(requests, keys)
+    ]
+
+    # Deduplicated by (site, key): the same design can legitimately appear twice in one
+    # request list (a verification neighbour that lands on an evaluated point), and paying
+    # for it twice inside one call would be silent waste.
+    to_run: dict[tuple[str, str], int] = {}
+    for i, ((spec, _x), key) in enumerate(zip(requests, keys)):
+        if results[i] is None:
+            to_run.setdefault((spec.name, key), i)
     if not to_run:
         assert all(r is not None for r in results)
         return results  # type: ignore[return-value]
 
-    configs = {
-        i: SystemConfig(
+    if site_frames is None:
+        raise ValueError("evaluate_requests needs site_frames (profiles are per-design)")
+
+    # One instance per uncached request. Profiles are per (design, site) because the
+    # schedule offsets and POA tilt reshape them; the config is per (design, site) too,
+    # because elevation is a site property and a shared config would run every site at
+    # whichever elevation happened to be on it.
+    instance_profiles: list[list] = []
+    instance_configs: list = []
+    owner: list[int] = []          # request index for each instance
+    configs: dict[int, object] = {}  # request index -> its SystemConfig
+    no_weather: set[int] = set()
+    for i in to_run.values():
+        spec, x = requests[i]
+        configs[i] = SystemConfig(
             **design_space.to_system_config_kwargs(
-                xs[i], case=case, complex_mode=complex_mode,
+                x, case=case, complex_mode=complex_mode,
                 condenser_tracks_ambient=condenser_tracks_ambient,
                 instant_equilibrium=instant_equilibrium,
             )
         )
-        for i in to_run
-    }
+        profiles = _profiles_for_design(site_frames[spec.name], x, complex_mode, day_stride)
+        if not profiles:
+            no_weather.add(i)
+            continue
+        instance_profiles.append([prof for _doy, prof in profiles])
+        elev = 0.0 if site_elevations is None else site_elevations.get(spec.name, 0.0)
+        instance_configs.append(dataclasses.replace(configs[i], site_elevation_m=elev))
+        owner.append(i)
 
-    # One instance per (design, site); each carries that site's full list of day profiles.
-    instance_profiles: list[list] = []
-    instance_configs = []
-    owner: list[tuple[int, int]] = []  # (design index into xs, site index)
-    no_weather: set[tuple[int, int]] = set()
-    for i in to_run:
-        for si, spec in enumerate(sites):
-            # A1's schedule shift and POA tilt (both modes) plus complex mode's B4
-            # condenser air are design variables that live in the *weather profile*, so
-            # profiles cannot be built once per site and shared.
-            if site_frames is None:
-                raise ValueError("evaluate_batch requires site_frames (profiles are per-design)")
-            profiles = _profiles_for_design(site_frames[spec.name], xs[i], complex_mode)
-            if not profiles:
-                no_weather.add((i, si))
-                continue
-            instance_profiles.append([prof for _doy, prof in profiles])
-            # One config per (design, site), not per design: elevation is a site property,
-            # so the shared config has to be specialised here or every site would run at
-            # whichever elevation happened to be on it.
-            elev = 0.0 if site_elevations is None else site_elevations.get(spec.name, 0.0)
-            instance_configs.append(dataclasses.replace(configs[i], site_elevation_m=elev))
-            owner.append((i, si))
-
-    if backend == "cpu" and len(sites) != 1:
-        # The CPU path is the single-location physics reference: one simulation at a
-        # time, one site. Multi-site/global sweeping is the JAX backend's job
-        # (gpu_sweep/run_gpu_sweep.py, run_bayesopt_sweep.py).
-        raise ValueError(f"cpu backend is single-site only, got {len(sites)} sites")
     run_year = _run_cpu_year if backend == "cpu" else _run_jax_year
     t0 = time.perf_counter()
-    yield_by_pair, eta_by_pair, batch_error = run_year(
+    yield_by_instance, eta_by_instance, batch_error = run_year(
         instance_profiles, instance_configs, owner,
         initial_loading=initial_loading, complex_mode=complex_mode,
         condenser_tracks_ambient=condenser_tracks_ambient,
@@ -476,58 +566,48 @@ def evaluate_batch(
     )
     wall = time.perf_counter() - t0
 
-    new_results: dict[int, DesignEvalResult] = {}
-    for i in to_run:
-        site_results = []
-        for si, spec in enumerate(sites):
-            if (i, si) in no_weather:
-                site_results.append(
-                    SiteResult(spec.name, FAIL_LCO, False, "no weather profiles", float("nan"), float("nan"))
-                )
-                continue
-            if batch_error is not None:
-                site_results.append(
-                    SiteResult(spec.name, FAIL_LCO, False, batch_error, float("nan"), float("nan"))
-                )
-                continue
-
-            mean_yield = yield_by_pair[(i, si)]
-            mean_eta = eta_by_pair[(i, si)]
+    computed: dict[tuple[str, str], DesignEvalResult] = {}
+    for i in to_run.values():
+        spec, x = requests[i]
+        cfg = configs[i]
+        if i in no_weather:
+            site_result = SiteResult(spec.name, FAIL_LCO, False, "no weather profiles", float("nan"), float("nan"))
+        elif batch_error is not None:
+            site_result = SiteResult(spec.name, FAIL_LCO, False, batch_error, float("nan"), float("nan"))
+        else:
+            mean_yield = yield_by_instance[i]
+            mean_eta = eta_by_instance[i]
             if not math.isfinite(mean_yield) or mean_yield <= 0.0:
-                site_results.append(
-                    SiteResult(spec.name, FAIL_LCO, False, "zero or invalid yield", mean_yield, mean_eta)
+                site_result = SiteResult(spec.name, FAIL_LCO, False, "zero or invalid yield", mean_yield, mean_eta)
+            else:
+                lcow = lcow_from_daily_yield(
+                    mean_yield,
+                    salt_name=cfg.salt_name,
+                    salt_loading=cfg.salt_loading,
+                    hydrogel_thickness_m=cfg.hydrogel_thickness_m,
+                    econ=econ,
+                    # Complex mode prices the design itself: B1/B2/B3/B4 move the BOM and
+                    # B8 sets the blended salt price, so LCOW stops being yield-only.
+                    complex_options=cfg.complex,
+                    fin_area_ratio=cfg.fin_area_ratio if cfg.complex is not None else None,
                 )
-                continue
+                if not math.isfinite(lcow) or lcow >= 0.99 * FAIL_LCO:
+                    site_result = SiteResult(spec.name, FAIL_LCO, False, "invalid LCOW", mean_yield, mean_eta)
+                else:
+                    site_result = SiteResult(spec.name, lcow, True, "", mean_yield, mean_eta)
 
-            cfg = configs[i]
-            lcow = lcow_from_daily_yield(
-                mean_yield,
-                salt_name=cfg.salt_name,
-                salt_loading=cfg.salt_loading,
-                hydrogel_thickness_m=cfg.hydrogel_thickness_m,
-                econ=econ,
-                # Complex mode prices the design itself: B1/B2/B3/B4 move the BOM and
-                # B8 sets the blended salt price, so LCOW stops being yield-only.
-                complex_options=cfg.complex,
-                fin_area_ratio=cfg.fin_area_ratio if cfg.complex is not None else None,
-            )
-            if not math.isfinite(lcow) or lcow >= 0.99 * FAIL_LCO:
-                site_results.append(SiteResult(spec.name, FAIL_LCO, False, "invalid LCOW", mean_yield, mean_eta))
-                continue
-
-            site_results.append(SiteResult(spec.name, lcow, True, "", mean_yield, mean_eta))
-
-        combined = site_lcow_or_penalty(tuple(site_results))
-        new_results[i] = DesignEvalResult(
-            design_vector=tuple(float(v) for v in np.asarray(xs[i], dtype=float).reshape(-1)),
-            site_results=tuple(site_results),
-            combined_lcow=combined,
+        result = DesignEvalResult(
+            design_vector=tuple(float(v) for v in np.asarray(x, dtype=float).reshape(-1)),
+            site_results=(site_result,),
+            combined_lcow=site_lcow_or_penalty((site_result,)),
             wall_time_s=wall,
         )
+        computed[(spec.name, keys[i])] = result
+        caches[spec.name].put(keys[i], result)
 
-    for i in to_run:
-        results[i] = new_results[i]
-        cache.put(keys[i], new_results[i])
+    for i, ((spec, _x), key) in enumerate(zip(requests, keys)):
+        if results[i] is None:
+            results[i] = computed[(spec.name, key)]
 
     assert all(r is not None for r in results)
     return results  # type: ignore[return-value]

@@ -58,39 +58,83 @@ def verify_optimum(
     seed: int = 0,
     artifact_tolerance: float = 0.02,
 ) -> VerificationReport:
+    """One site's verification. Wrapper over :func:`verify_optima` so the single-site CLI
+    and the global sweep verify identically."""
+    if len(cfg.sites) != 1:
+        raise ValueError(f"verify_optimum is single-site, got {len(cfg.sites)}; use verify_optima")
+    name = cfg.sites[0].name
+    return verify_optima(
+        {name: result}, cfg, {name: Path(run_dir)},
+        n_neighbors=n_neighbors, perturbation_frac=perturbation_frac,
+        seed=seed, artifact_tolerance=artifact_tolerance,
+    )[name]
+
+
+def verify_optima(
+    results: dict[str, BayesOptResult],
+    cfg: BayesOptConfig,
+    run_dirs: dict[str, Path],
+    *,
+    n_neighbors: int = 5,
+    perturbation_frac: float = 0.10,
+    seed: int = 0,
+    artifact_tolerance: float = 0.02,
+    site_inputs: tuple[dict, dict[str, float]] | None = None,
+) -> dict[str, VerificationReport]:
+    """Verify every site's reported optimum in ONE batched evaluation.
+
+    Every site's (best + neighbours) go into a single request list, because an evaluation
+    call costs ~the same at any batch width -- verifying site-by-site would pay a full
+    ~1 h call per site for what fits in one (see ``evaluator.evaluate_requests``).
+    """
     from solar_lumped.economics import LCOEconomicParams
 
-    run_dir = Path(run_dir)
     econ = LCOEconomicParams()
-    cache = EvalCache(run_dir / "cache.jsonl")
+    caches = {
+        name: EvalCache(Path(run_dirs[name]) / "cache.jsonl") for name in results
+    }
+    specs = {spec.name: spec for spec in cfg.sites}
 
-    x_best = np.array(result.best.design_vector, dtype=float)
-    neighbors = _perturbed_neighbors(
-        x_best, cfg.bounds, n=n_neighbors, frac=perturbation_frac, seed=seed
+    requests: list[tuple] = []
+    spans: dict[str, tuple[int, int]] = {}
+    for name, result in results.items():
+        x_best = np.array(result.best.design_vector, dtype=float)
+        neighbors = _perturbed_neighbors(
+            x_best, cfg.bounds, n=n_neighbors, frac=perturbation_frac, seed=seed
+        )
+        start = len(requests)
+        requests.extend((specs[name], x) for x in (x_best, *neighbors))
+        spans[name] = (start, len(requests))
+
+    evaluated = evaluate_for_config(
+        requests, cfg=cfg, caches=caches, econ=econ, site_inputs=site_inputs
     )
-    xs = [x_best, *neighbors]
-    results = evaluate_for_config(xs, cfg=cfg, cache=cache, econ=econ)
 
-    best_true = results[0].combined_lcow
-    neighbor_results = results[1:]
-    neighbor_lcows = [r.combined_lcow for r in neighbor_results]
+    reports: dict[str, VerificationReport] = {}
+    for name, result in results.items():
+        lo, hi = spans[name]
+        site_evaluated = evaluated[lo:hi]
+        best_true = site_evaluated[0].combined_lcow
+        neighbor_results = site_evaluated[1:]
+        neighbor_lcows = [r.combined_lcow for r in neighbor_results]
 
-    improvements = [
-        (best_true - v) / best_true
-        for v in neighbor_lcows
-        if math.isfinite(v) and math.isfinite(best_true) and best_true != 0.0
-    ]
-    max_improvement = max(improvements) if improvements else 0.0
+        improvements = [
+            (best_true - v) / best_true
+            for v in neighbor_lcows
+            if math.isfinite(v) and math.isfinite(best_true) and best_true != 0.0
+        ]
+        max_improvement = max(improvements) if improvements else 0.0
+        x_best = np.array(result.best.design_vector, dtype=float)
+        mu, sigma = predict(result.surrogate, x_best)
 
-    mu, sigma = predict(result.surrogate, x_best)
-
-    return VerificationReport(
-        best_design_vector=tuple(float(v) for v in x_best),
-        best_true_combined_lcow=best_true,
-        best_surrogate_mu=mu,
-        best_surrogate_sigma=sigma,
-        neighbor_results=neighbor_results,
-        neighbor_combined_lcows=neighbor_lcows,
-        max_neighbor_improvement_frac=max_improvement,
-        flagged_as_surrogate_artifact=max_improvement > artifact_tolerance,
-    )
+        reports[name] = VerificationReport(
+            best_design_vector=tuple(float(v) for v in x_best),
+            best_true_combined_lcow=best_true,
+            best_surrogate_mu=mu,
+            best_surrogate_sigma=sigma,
+            neighbor_results=neighbor_results,
+            neighbor_combined_lcows=neighbor_lcows,
+            max_neighbor_improvement_frac=max_improvement,
+            flagged_as_surrogate_artifact=max_improvement > artifact_tolerance,
+        )
+    return reports

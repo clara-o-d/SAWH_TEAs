@@ -40,6 +40,9 @@ def write_run_config(cfg: BayesOptConfig, path: str | Path) -> None:
         "stall_rel_tol": cfg.stall_rel_tol,
         "stall_rounds": cfg.stall_rounds,
         "case": cfg.case,
+        # Part of what the run optimized, not a tuning detail: a strided run's LCOW is a
+        # different objective and its numbers are not comparable to a stride-1 run's.
+        "day_stride": cfg.day_stride,
     }
     path.write_text(json.dumps(payload, indent=2))
 
@@ -114,23 +117,19 @@ def write_convergence_plot(history: list[DesignEvalResult], path: str | Path) ->
     plt.close(fig)
 
 
-def evaluate_baseline(cfg: BayesOptConfig, run_dir: str | Path) -> DesignEvalResult:
-    """Wilson Table S3 baseline system (SystemConfig.baseline()), run through
-    the same two-site pipeline, for an apples-to-apples comparison."""
-    from solar_lumped.economics import LCOEconomicParams
+def baseline_design_vector(cfg: BayesOptConfig) -> np.ndarray:
+    """Wilson Table S3's system expressed in this run's design order.
+
+    In complex mode the extra dimensions come from ComplexOptions' own defaults, which are
+    exactly the simple model -- so the baseline stays Wilson's system, not a partly-complex
+    hybrid. Site-independent: the same design is what every site is compared against.
+    """
+    from solar_lumped.complex_model import ComplexOptions
     from solar_lumped.simulation import SystemConfig
 
-    run_dir = Path(run_dir)
-    econ = LCOEconomicParams()
-    cache = EvalCache(run_dir / "cache.jsonl")
-    baseline_cfg = SystemConfig.baseline()
-    # Wilson's Table S3 system expressed in this run's design order. In complex
-    # mode the extra dimensions come from ComplexOptions' own defaults, which are
-    # exactly the simple model -- so the baseline stays Wilson's system, not a
-    # partly-complex hybrid.
-    from solar_lumped.complex_model import ComplexOptions
     from sawh_bayesopt.design_space import GLAZING_CONFIGS
 
+    baseline_cfg = SystemConfig.baseline()
     defaults = ComplexOptions()
     baseline_extra = {
         "eps_abs_ir": defaults.eps_abs_ir,
@@ -141,15 +140,46 @@ def evaluate_baseline(cfg: BayesOptConfig, run_dir: str | Path) -> DesignEvalRes
         "blend_u": 1.0,  # stick-breaking coords for pure LiCl
         "blend_v": 0.0,
     }
-    x_baseline = np.array(
+    return np.array(
         [
             baseline_extra[name] if name in baseline_extra else getattr(baseline_cfg, name)
             for name in cfg.bounds.names()
         ],
         dtype=float,
     )
-    [result] = evaluate_for_config([x_baseline], cfg=cfg, cache=cache, econ=econ)
-    return result
+
+
+def evaluate_baseline(cfg: BayesOptConfig, run_dir: str | Path) -> DesignEvalResult:
+    """One site's Wilson Table S3 baseline. Wrapper over :func:`evaluate_baselines`."""
+    if len(cfg.sites) != 1:
+        raise ValueError(f"evaluate_baseline is single-site, got {len(cfg.sites)}; use evaluate_baselines")
+    name = cfg.sites[0].name
+    return evaluate_baselines(cfg, {name: Path(run_dir)})[name]
+
+
+def evaluate_baselines(
+    cfg: BayesOptConfig,
+    run_dirs: dict[str, Path],
+    *,
+    site_inputs: tuple[dict, dict[str, float]] | None = None,
+) -> dict[str, DesignEvalResult]:
+    """The Table S3 baseline at every site, in ONE batched evaluation.
+
+    Same design vector at every site, so this is one request per site. Batched for the
+    same reason verification is: an evaluation call costs ~the same at any width, so a
+    baseline-per-site loop would pay a full call per site.
+    """
+    from solar_lumped.economics import LCOEconomicParams
+
+    econ = LCOEconomicParams()
+    x_baseline = baseline_design_vector(cfg)
+    specs = [spec for spec in cfg.sites if spec.name in run_dirs]
+    caches = {spec.name: EvalCache(Path(run_dirs[spec.name]) / "cache.jsonl") for spec in specs}
+    results = evaluate_for_config(
+        [(spec, x_baseline) for spec in specs],
+        cfg=cfg, caches=caches, econ=econ, site_inputs=site_inputs,
+    )
+    return {spec.name: result for spec, result in zip(specs, results)}
 
 
 def _best_sweep_reference() -> dict | None:
@@ -186,8 +216,12 @@ def write_final_report(
     run_dir: str | Path,
     verification: VerificationReport,
     path: str | Path,
+    # Pass the already-evaluated baseline when a many-site pass batched them all into one
+    # call (evaluate_baselines); None evaluates this site's on its own.
+    baseline_result: DesignEvalResult | None = None,
 ) -> dict:
-    baseline_result = evaluate_baseline(cfg, run_dir)
+    if baseline_result is None:
+        baseline_result = evaluate_baseline(cfg, run_dir)
     sweep_ref = _best_sweep_reference()
 
     # Verification's perturbed neighbors are full true-model evaluations, not surrogate
