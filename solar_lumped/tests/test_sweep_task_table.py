@@ -34,9 +34,11 @@ def test_every_site_scenario_pair_is_covered_exactly_once() -> None:
 
 
 def test_coarse_grid_is_a_subset_of_the_fine_one() -> None:
-    """The instant-sorption groups run the 6-degree grid for cost. That is only a
-    defensible comparison if those sites also appear in the 3-degree grid the other
-    groups use -- otherwise the ideal-case rows pair with nothing."""
+    """Every group runs the 3-degree grid today, so this guards the option rather than the
+    current config: if a group is ever re-coarsened for cost (the instant groups were, while
+    they were still a stiff penalty), its rows must still pair with the others' at the same
+    sites. A 6-degree grid that were not a subset would silently break every
+    scenario-vs-scenario comparison."""
     fine = {tuple(p) for p in grid_land_points(3.0)}
     coarse = {tuple(p) for p in grid_land_points(6.0)}
     assert coarse, "6-degree grid is empty"
@@ -56,12 +58,12 @@ def test_task_indices_are_grouped_contiguously() -> None:
     assert gids == sorted(gids)
 
 
-@pytest.mark.parametrize("step", [3.0, 6.0])
-def test_chunks_are_within_the_configured_width(step: float) -> None:
-    widths = [
-        end - start
-        for _gid, s, start, end, _names in array_tasks(lambda st: len(grid_land_points(st)))
-        if s == step
-    ]
-    limit = max(r.sites_per_chunk for r in GROUP_RUNS.values() if r.step_deg == step)
-    assert widths and max(widths) <= limit
+def test_chunks_are_within_the_configured_width() -> None:
+    """Parametrized over the steps GROUP_RUNS actually configures, not a fixed list: when
+    every group moved back to 3 degrees, a hardcoded 6.0 case asserted on an empty set."""
+    tasks = array_tasks(lambda step: len(grid_land_points(step)))
+    for step in {r.step_deg for r in GROUP_RUNS.values()}:
+        widths = [end - start for _gid, s, start, end, _n in tasks if s == step]
+        limit = max(r.sites_per_chunk for r in GROUP_RUNS.values() if r.step_deg == step)
+        assert widths, f"no tasks at {step} deg"
+        assert max(widths) <= limit

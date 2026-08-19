@@ -1,44 +1,41 @@
 #!/bin/bash
-# 8-scenario GPU sweep. One array task = one site chunk x one scenario group, from
-# site_sweep.array_tasks() -- 61 tasks, RAGGED in both grid and width because the groups
-# do not cost remotely the same (see site_sweep.GroupRun):
+# Full 1,405-site x 8-scenario GPU sweep. One array task = one site chunk x one scenario
+# group, from site_sweep.array_tasks() -- 32 tasks, all four groups on the 3-degree grid:
 #
-#   tasks  0-7   group 0  finite_g/ode      3 deg, 1405 sites, 200/chunk (600 inst) ~1.5 h
-#   tasks  8-37  group 1  instant/ode       6 deg,  360 sites,  12/chunk  (24 inst)
-#   tasks 38-45  group 2  finite_g/ambient  3 deg, 1405 sites, 200/chunk (400 inst) ~1.3 h
-#   tasks 46-60  group 3  instant/ambient   6 deg,  360 sites,  24/chunk  (24 inst)
+#   tasks  0-7   group 0  finite_g/ode      200 sites x 3 scenarios = 600 instances  ~1.5 h
+#   tasks  8-15  group 1  instant/ode       200 sites x 2 scenarios = 400 instances
+#   tasks 16-23  group 2  finite_g/ambient  200 sites x 2 scenarios = 400 instances  ~1.3 h
+#   tasks 24-31  group 3  instant/ambient   200 sites x 1 scenario  = 200 instances
 #
-# The instant groups run the COARSER 6-degree grid: even with the step-cap fix they cost
-# ~50x per instance-day (stiff c_w relaxation -> stability-limited explicit steps) and,
-# unlike finite-g, do not amortize with batch width, so full 3-degree coverage would be
-# ~1,000 GPU-hours. 6 deg is a strict subset of 3 deg, so every instant row still pairs
-# with finite-g rows at the same site -- tests/test_sweep_task_table.py pins that.
+# The instant groups used to need a coarser grid and 4x narrower chunks, when g -> infinity
+# was a stiff penalty costing ~50x per instance-day. They are now imposed as the
+# equilibrium constraint and cost slightly LESS than finite g (their absorption half needs
+# no ODE at all), so all eight scenarios are back at full 3-degree resolution and pair
+# site-by-site.
 #
 # Submit everything:
 #   sbatch gpu_sweep/sbatch_gpu_sweep_array.sh
-# Or one group at a time (--array on the command line overrides the header) -- e.g. just
-# the instant groups, if the finite-g rows are already in hand:
-#   sbatch --array=8-37,46-60%8 gpu_sweep/sbatch_gpu_sweep_array.sh
+# Or one group (--array on the command line overrides the header) -- e.g. just the instant
+# groups, if the finite-g rows are already in hand:
+#   sbatch --array=8-15,24-31%8 gpu_sweep/sbatch_gpu_sweep_array.sh
 #
 # Each task writes outputs/gpu_scenario_sweep/step<deg>_sites<start>-<end>_group<gid>.csv.
 # Merge, de-duplicating in case runs with different chunk boundaries were mixed:
 #   python3 -c "
 #   import glob, pandas as pd
-#   f = glob.glob('outputs/gpu_scenario_sweep/*_group_*.csv')
+#   f = glob.glob('outputs/gpu_scenario_sweep/*_group*.csv')
 #   d = pd.concat(map(pd.read_csv, f)).drop_duplicates(['lat','lon','scenario'])
 #   d.to_csv('outputs/gpu_scenario_sweep/full_sweep.csv', index=False)
 #   print(len(d), 'rows from', len(f), 'files')"
 #SBATCH --job-name=sawh-gpu-scenarios
-# 12 h serves the whole array: the finite-g tasks need ~1.5 h, but the instant tasks'
-# per-instance-day cost is extrapolated, not measured post-fix, and a task that dies
-# writes NOTHING (rows land only when a group's whole year completes). If serc refuses
-# 12 h, lower it and shrink GROUP_RUNS[...].sites_per_chunk in the same proportion.
-#SBATCH --time=12:00:00
+# 6 h against ~1.5 h expected: a task that dies writes NOTHING (rows land only when a
+# group's whole year completes), so headroom is cheaper than a retry.
+#SBATCH --time=06:00:00
 #SBATCH --partition=serc
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
-#SBATCH --array=0-60%8
+#SBATCH --array=0-31%8
 #SBATCH --output=gpu_sweep/logs/scenarios_%A_%a.out
 
 set -euo pipefail

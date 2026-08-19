@@ -466,6 +466,29 @@ class MassParams:
         self.p_atm_pa = p_atm_pa
 
 
+def desorption_driving_force(c_w, *, t_gel_c, t_cond_c, h_m, mass: MassParams):
+    """Eq. 5's desorption driving force c_r - a_w (dimensionless).
+
+    Negative means the gel's surface vapour pressure exceeds the condenser's, i.e. it
+    desorbs. Zero is the local-equilibrium constraint that instant_equilibrium imposes --
+    see _joint_residuals, which uses THIS rather than a g-scaled rate as its fourth
+    residual. Mirrors physics._mass_transfer_driving_force's desorption branch.
+    """
+    c_r = concentration_ratio_desorption(t_gel_c, t_cond_c)
+    if mass.aw_table is None:
+        aw = water_activity_licl_from_c_w(
+            c_w, c_s=mass.c_s_mol_m3, h0_ref_m=mass.h0_ref_m,
+            formula_weight_g_mol=mass.formula_weight_g_mol, temperature_c=t_gel_c,
+        )
+    else:
+        aw = blend_water_activity_from_c_w(
+            c_w, c_s=mass.c_s_mol_m3, h0_ref_m=mass.h0_ref_m,
+            formula_weight_g_mol=mass.formula_weight_g_mol, temperature_c=t_gel_c,
+            aw_table=mass.aw_table,
+        )
+    return jnp.where(jnp.isfinite(aw), c_r - aw, 0.0)
+
+
 def dc_dh_desorption(c_w, *, t_gel_c, t_cond_c, h_m, mass: MassParams):
     """Eqs. 5-6 desorption branch (dc_w/dt, dH/dt), before the clip-to-<=0 in sorbent.py."""
     gap_m = jnp.clip(mass.vapor_gap_m - h_m, 0.0, None)
@@ -480,25 +503,9 @@ def dc_dh_desorption(c_w, *, t_gel_c, t_cond_c, h_m, mass: MassParams):
         g = mass_transfer_g_from_h_conv_m_s(h_conv, t_gel_c, t_cond_c, mass.p_atm_pa)
         g = jnp.where(gap_m < VAPOR_GAP_TRANSPORT_MIN_M, 0.0, g)
 
-    c_r = concentration_ratio_desorption(t_gel_c, t_cond_c)
-    if mass.aw_table is None:
-        aw = water_activity_licl_from_c_w(
-            c_w,
-            c_s=mass.c_s_mol_m3,
-            h0_ref_m=mass.h0_ref_m,
-            formula_weight_g_mol=mass.formula_weight_g_mol,
-            temperature_c=t_gel_c,
-        )
-    else:
-        aw = blend_water_activity_from_c_w(
-            c_w,
-            c_s=mass.c_s_mol_m3,
-            h0_ref_m=mass.h0_ref_m,
-            formula_weight_g_mol=mass.formula_weight_g_mol,
-            temperature_c=t_gel_c,
-            aw_table=mass.aw_table,
-        )
-    driving = jnp.where(jnp.isfinite(aw), c_r - aw, 0.0)
+    driving = desorption_driving_force(
+        c_w, t_gel_c=t_gel_c, t_cond_c=t_cond_c, h_m=h_m, mass=mass
+    )
 
     t_k = jnp.clip(t_gel_c + 273.15, 200.0, None)
     p_sat = saturation_vapor_pressure_pa(t_gel_c)
@@ -685,9 +692,22 @@ def _joint_residuals(z, *, c_w, h_m, t_cond_c, t_amb_c, q_solar_w_m2, h_amb, the
         ),
     )
     t_gel = x[0]
-    dc, _ = dc_dh_desorption(c_w, t_gel_c=t_gel, t_cond_c=t_cond_c, h_m=h_m, mass=mass)
-    m_calc = m_des_kg_s_m2_from_dc_w(dc, h0_ref_m=mass.h0_ref_m)
-    r_m = m_calc - z[n]
+    if mass.instant_equilibrium:
+        # g -> infinity as a constraint: the gel surface sits at equilibrium with the
+        # condenser, and m_des is whatever the thermal balances need to hold it there
+        # (energy-limited, which is what the ideal case means). Static branch.
+        #
+        # This is also why the reformulation matters numerically. The penalty residual
+        # below carries a slope of order g, so the Newton system -- and the ODE it feeds
+        # -- are stiff in proportion to the scale factor. The driving force is O(1) and
+        # g-free, so neither is.
+        r_m = desorption_driving_force(
+            c_w, t_gel_c=t_gel, t_cond_c=t_cond_c, h_m=h_m, mass=mass
+        )
+    else:
+        dc, _ = dc_dh_desorption(c_w, t_gel_c=t_gel, t_cond_c=t_cond_c, h_m=h_m, mass=mass)
+        m_calc = m_des_kg_s_m2_from_dc_w(dc, h0_ref_m=mass.h0_ref_m)
+        r_m = m_calc - z[n]
     return jnp.concatenate([r_thermal, jnp.array([r_m])])
 
 
@@ -725,13 +745,35 @@ def solve_desorption_state_joint(
         t_cond_c=t_cond_c, t_amb_c=t_amb_c, q_solar_w_m2=q_solar_w_m2, m_des=0.0,
         h_amb=h_amb, params=thermal, h_m=h_m, gap_eff_m=gap_eff_m, x0=x0,
     )
-    dc0, _ = dc_dh_desorption(c_w, t_gel_c=x_at_zero[0], t_cond_c=t_cond_c, h_m=h_m, mass=mass)
-    m_calc0 = m_des_kg_s_m2_from_dc_w(dc0, h0_ref_m=mass.h0_ref_m)
-    no_desorption = m_calc0 <= 0.0
+    # Carrying no latent load, can the gel desorb at all? If not, m_des = 0 with the
+    # thermal state solved there.
+    if mass.instant_equilibrium:
+        # Off the driving force's sign, since the constraint route uses no rate law. Also
+        # mask the hydrate floor explicitly, which is where this differs from the test
+        # below: dc_dh_desorption clamps dc to 0 at the floor, so the penalty path reports
+        # no-desorption there and keeps x_at_zero. Matching that exactly matters -- the
+        # finite-g path is unchanged by this whole reformulation and has already produced
+        # rows.
+        driving0 = desorption_driving_force(
+            c_w, t_gel_c=x_at_zero[0], t_cond_c=t_cond_c, h_m=h_m, mass=mass
+        )
+        no_desorption = (driving0 >= 0.0) | (c_w <= mass.c_w_min_mol_m3)
+    else:
+        dc0, _ = dc_dh_desorption(c_w, t_gel_c=x_at_zero[0], t_cond_c=t_cond_c, h_m=h_m, mass=mass)
+        m_calc0 = m_des_kg_s_m2_from_dc_w(dc0, h0_ref_m=mass.h0_ref_m)
+        no_desorption = m_calc0 <= 0.0
 
     x_final = jnp.where(no_desorption, x_at_zero, x_star)
     m_final = jnp.where(no_desorption, 0.0, m_star)
-    dc_final, _ = dc_dh_desorption(c_w, t_gel_c=x_final[0], t_cond_c=t_cond_c, h_m=h_m, mass=mass)
+    if mass.instant_equilibrium:
+        # Eq. 5's driving force is zero by construction here, so it cannot be what sets
+        # the rate: invert the flux instead (CPU: dc_w_dt_from_m_des).
+        dc_final = -m_final / (WATER_MOLAR_MASS_KG_MOL * mass.h0_ref_m)
+        dc_final = jnp.where(c_w <= mass.c_w_min_mol_m3, 0.0, jnp.minimum(dc_final, 0.0))
+    else:
+        dc_final, _ = dc_dh_desorption(
+            c_w, t_gel_c=x_final[0], t_cond_c=t_cond_c, h_m=h_m, mass=mass
+        )
     return m_final, x_final, dc_final
 
 
@@ -774,7 +816,14 @@ def desorption_rhs(
     )
     t_gel, t_abs, t_glass = x_star[0], x_star[1], x_star[2]
 
-    _, dh = dc_dh_desorption(c_w, t_gel_c=t_gel, t_cond_c=t_cond_c, h_m=h_m, mass=mass)
+    if mass.instant_equilibrium:
+        # dH/dt = dc_w/dt * MW * H0 / rho, the ratio dc_dh_desorption itself carries.
+        # Taking it from the rate law would freeze the gel's thickness (zero driving
+        # force) while its water drained. Mirrors CPU dh_dt_from_dc_w.
+        dh = dc * WATER_MOLAR_MASS_KG_MOL * h0_ref_m / RHO_GEL_KG_M3
+        dh = jnp.where(c_w <= mass.c_w_min_mol_m3, 0.0, jnp.minimum(dh, 0.0))
+    else:
+        _, dh = dc_dh_desorption(c_w, t_gel_c=t_gel, t_cond_c=t_cond_c, h_m=h_m, mass=mass)
 
     h_conv_g = vapor_gap_h_conv_w_m2_k(
         gap_eff_m, t_gel, t_cond_c, tilt_deg=thermal.tilt_deg, p_atm_pa=thermal.p_atm_pa
@@ -879,6 +928,38 @@ def dc_dh_absorption(c_w, *, t_gel_c, rh, h_m, mass: "MassParams", salt_loading)
     dh = jnp.where(jnp.isfinite(dh), dh, 0.0)
     dh = jnp.where(c_w <= mass.c_w_min_mol_m3, jnp.maximum(dh, 0.0), dh)
     return dc, dh
+
+
+def equilibrium_c_w_absorption(*, rh, t_gel_c, mass: "MassParams", salt_loading, n_iter=50):
+    """Gel water concentration in equilibrium with ambient air (mol/m3).
+
+    The g -> infinity limit for absorption: the gel tracks ambient RH exactly, so c_w
+    solves a_w,eff(c_w) = c_r(rh). Mirrors physics.equilibrium_c_w_absorption, but by
+    fixed-count bisection rather than brentq -- a data-dependent trip count cannot be
+    vmapped, and 50 halvings of the [floor, ceiling] range land far inside float64.
+
+    Monotone (a_w rises with water content), so bisection is unambiguous, and it converges
+    onto whichever bound the equilibrium lies outside -- the same clamping the CPU does
+    explicitly.
+    """
+    # physics.concentration_ratio_absorption is the identity on rh -- the ambient air's
+    # own water activity -- which is why dc_dh_absorption drives on (rh - a_w) directly.
+    c_r = jnp.asarray(rh, dtype=float)
+
+    def body(bounds, _):
+        lo, hi = bounds
+        mid = 0.5 * (lo + hi)
+        aw = absorption_effective_water_activity(
+            mid, t_gel_c=t_gel_c, mass=mass, salt_loading=salt_loading
+        )
+        too_dry = (c_r - aw) > 0.0        # ambient wetter than the gel: go up
+        return (jnp.where(too_dry, mid, lo), jnp.where(too_dry, hi, mid)), None
+
+    (lo, hi), _ = jax.lax.scan(
+        body, (mass.c_w_min_mol_m3 * jnp.ones_like(c_r), mass.c_w_max_mol_m3 * jnp.ones_like(c_r)),
+        None, length=n_iter,
+    )
+    return 0.5 * (lo + hi)
 
 
 def absorption_rhs(y, *, t_amb_c, rh, h0_ref_m, h_floor_m, h_max_m, mass: "MassParams", salt_loading):

@@ -21,8 +21,11 @@ from scipy.optimize import brentq
 from solar_lumped._parameters_xlsx import physics_value as _pv
 from solar_lumped.complex_model import ComplexOptions
 from solar_lumped.physics import (
+    concentration_ratio_absorption,
+    _absorption_effective_water_activity,
     dc_w_dt_from_m_des,
     dh_dt_from_dc_w,
+    equilibrium_c_w_absorption,
     equilibrium_t_gel_desorption_c,
     FABRICATION_EQUILIBRIUM_RH,
     CP_AL_J_KG_K,
@@ -804,6 +807,81 @@ def _profile_index(t: float, dt_s: float, n: int) -> int:
     return min(int(t / dt_s), n - 1)
 
 
+def _absorb_at_equilibrium(
+    c_w0: float,
+    h0: float,
+    profile: PhaseProfile,
+    config: SystemConfig,
+    *,
+    mass: MassTransferParams,
+    h_min: float,
+    h_max: float,
+    t_eval: np.ndarray,
+) -> PhaseResult:
+    """Absorption under the local-equilibrium closure -- no ODE at all.
+
+    T_gel is T_amb here (Note S1 Eq. S1) so nothing on this half-cycle is heat-limited,
+    and the weather is piecewise-constant on dt (which is why the ODE path pins
+    max_step=dt). Instant kinetics on piecewise-constant forcing therefore means the gel
+    is at the equilibrium loading for the *current* interval, always: the trajectory is a
+    staircase and the exact solution is one isotherm inversion per interval.
+
+    Which removes the last stiff term in the ideal case. The penalty route integrated a
+    relaxation of rate ~g toward this same staircase, which needed >16,384 explicit steps
+    per day in the JAX backend and silently truncated when it ran out.
+
+    H follows c_w by Eq. 6's identity dH = dc_w * MW * H0 / rho_sol, accumulated interval
+    by interval so the swelling clamps bite where they would have during integration
+    rather than only at the end.
+    """
+    n = len(profile.temperature_c)
+    ratio = WATER_MOLAR_MASS_KG_MOL * mass.h0_ref_m / mass.rho_solution_kg_m3
+    c_w = float(c_w0)
+    h_m = min(max(float(h0), h_min), h_max)
+
+    c_hist, h_hist, t_gel_hist = [c_w], [h_m], [float(profile.temperature_c[0])]
+    for k in range(1, len(t_eval)):
+        i = _profile_index(float(t_eval[k]), profile.dt_s, n)
+        t_amb = float(profile.temperature_c[i])
+        c_eq = equilibrium_c_w_absorption(
+            rh=float(profile.relative_humidity[i]), t_gel_c=t_amb, params=mass, h_m=h_m
+        )
+        if math.isfinite(c_eq):
+            h_m = min(max(h_m + (c_eq - c_w) * ratio, h_min), h_max)
+            c_w = float(c_eq)
+        c_hist.append(c_w)
+        h_hist.append(h_m)
+        t_gel_hist.append(t_amb)
+
+    # The invariant this path asserts is its own definition: it ends ON the isotherm.
+    # (The ODE path cannot check that directly -- hence its rate-ratio guard -- because it
+    # only approaches equilibrium.) Cheap and exact, so it is checked rather than argued.
+    i_last = _profile_index(float(t_eval[-1]), profile.dt_s, n)
+    residual = abs(
+        concentration_ratio_absorption(float(profile.relative_humidity[i_last]))
+        - _absorption_effective_water_activity(
+            c_w, t_gel_c=float(profile.temperature_c[i_last]), params=mass, h_m=h_m
+        )
+    )
+    at_bound = c_w <= mass.c_w_min_mol_m3 * (1.0 + 1e-9) or c_w >= mass.c_w_max_mol_m3 * (1.0 - 1e-9)
+    if residual > 1e-6 and not at_bound:
+        raise RuntimeError(
+            f"Local-equilibrium absorption did not land on the isotherm: |c_r - a_w| "
+            f"{residual:.3e} at c_w {c_w:.1f} mol/m3 (bounds "
+            f"{mass.c_w_min_mol_m3:.1f}-{mass.c_w_max_mol_m3:.1f})"
+        )
+
+    return PhaseResult(
+        time_s=np.asarray(t_eval, dtype=float),
+        c_w=np.asarray(c_hist, dtype=float),
+        H=np.asarray(h_hist, dtype=float),
+        t_cond_c=None,
+        t_gel_c=np.asarray(t_gel_hist, dtype=float),
+        water_collected_kg_m2=0.0,
+        m_des_kg_s_m2=np.zeros(len(t_eval)),
+    )
+
+
 def _integrate_absorption(
     c_w0: float,
     h0: float,
@@ -851,6 +929,11 @@ def _integrate_absorption(
             dh = 0.0
         t_guess = _thermal_guess(rates.thermal)
         return np.array([rates.dc_w_dt, dh])
+
+    if config.instant_equilibrium and _INSTANT_EQUILIBRIUM_USE_CONSTRAINT:
+        return _absorb_at_equilibrium(
+            c_w0, h0, profile, config, mass=mass, h_min=h_min, h_max=h_max, t_eval=t_eval
+        )
 
     # LSODA, matching _integrate_desorption -- one integrator for the whole cycle.
     # Absorption has no thermal Newton solve (T_gel is just T_amb) so it never had

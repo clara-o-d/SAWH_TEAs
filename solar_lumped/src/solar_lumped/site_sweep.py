@@ -141,29 +141,31 @@ def scenario_groups(names: list[str] | None = None) -> dict[tuple[bool, bool], l
 class GroupRun:
     """How one scenario group is run across Slurm array tasks.
 
-    Not uniform across groups, because the groups do not cost the same. Measured on the
-    serc A100: the finite-g groups run ~23 ms per instance-day at 400-600 instances wide.
-    The instant-sorption groups are ~50x that even after the step-cap fix, because g x
-    1e5 makes the c_w relaxation stiff and explicit steps become stability-limited -- and
-    unlike finite-g, their cost does not amortize with batch width (measured flat from 20
-    to 100 instances), since under vmap diffrax steps the batch until its WORST instance
-    finishes its day.
+    Per-group rather than global because this was, for a while, badly unequal: with
+    instant equilibrium imposed as a stiff g-penalty, those two groups cost ~50x per
+    instance-day and had to run a coarser grid in narrow chunks to fit a walltime at all.
+    Imposing the limit as a constraint instead removed that gap entirely -- the ideal case
+    now costs slightly LESS than finite g, since its absorption half needs no ODE -- so
+    every group is back on the 3-degree grid at one width.
 
-    So the instant groups run on the coarser 6-degree grid (360 sites, a strict SUBSET of
-    the 3-degree grid's 1,405 -- see tests/test_sweep_task_table.py, which is what keeps
-    them paired against the finite-g rows at the same sites) in narrow chunks that fit a
-    walltime. Full 3-degree coverage of those two groups would be ~1,000 GPU-hours.
+    Kept as a per-group structure anyway: it is the natural place for the next scenario
+    whose cost is genuinely different, and it is what the array script indexes.
     """
 
     step_deg: float
     sites_per_chunk: int
 
 
+# 200 sites/chunk measured ~1.5 h per task for the widest group (600 instances) on the
+# serc A100, against a 6 h walltime. Batch width is nearly free below GPU saturation
+# (~700 instances), so this sits near the useful ceiling.
+_STANDARD_RUN = GroupRun(step_deg=3.0, sites_per_chunk=200)
+
 GROUP_RUNS: dict[tuple[bool, bool], GroupRun] = {
-    (False, False): GroupRun(step_deg=3.0, sites_per_chunk=200),   # 600 instances, ~1.5 h
-    (True, False): GroupRun(step_deg=6.0, sites_per_chunk=12),     # 24 instances
-    (False, True): GroupRun(step_deg=3.0, sites_per_chunk=200),    # 400 instances, ~1.3 h
-    (True, True): GroupRun(step_deg=6.0, sites_per_chunk=24),      # 24 instances
+    (False, False): _STANDARD_RUN,
+    (True, False): _STANDARD_RUN,
+    (False, True): _STANDARD_RUN,
+    (True, True): _STANDARD_RUN,
 }
 
 

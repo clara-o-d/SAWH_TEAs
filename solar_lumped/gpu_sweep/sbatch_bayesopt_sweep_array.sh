@@ -15,16 +15,27 @@
 # Submit from the repo root (/home/groups/cdiazm/SAWH_TEAs/solar_lumped):
 #   sbatch gpu_sweep/sbatch_bayesopt_sweep_array.sh
 #
-# Tune the --array range/throttle below to how many concurrent serc GPU
-# allocations your account can realistically get -- see
-# sbatch_gpu_sweep_array.sh's comment on the %K suffix.
+# Sizing, now that sites run in lockstep groups: cost is (rounds x call time), and a
+# call costs ~the same for 96 instances as for 8, so a task's cost is set by how many
+# GROUPS it holds, not how many sites. With SITES_PER_GROUP=32 and 44 array tasks, each
+# task is one group of ~32 sites = one set of rounds:
+#
+#   1405 sites / 44 tasks = 32 sites/task = 1 group
+#   1 group = (1 init + ~9 infill + 1 verify + 1 baseline) calls x ~70 min = ~16 h
+#   44 tasks at 8 concurrent = ~88 h wall clock
+#
+# Before lockstep this was 12 calls PER SITE (~8,400 GPU-h). Raise SITES_PER_GROUP if the
+# width probe shows per-call cost still flat above 96 instances; lower it only on GPU OOM.
+#
+# Tune the --array throttle (%K) to how many concurrent serc GPU allocations your account
+# can realistically get -- see sbatch_gpu_sweep_array.sh's comment on the %K suffix.
 #SBATCH --job-name=sawh-bayesopt-sweep-full
-#SBATCH --time=04:00:00
+#SBATCH --time=20:00:00
 #SBATCH --partition=serc
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=4
 #SBATCH --mem=64G
-#SBATCH --array=0-39%8
+#SBATCH --array=0-43%8
 #SBATCH --output=gpu_sweep/logs/bayesopt_%A_%a.out
 
 set -euo pipefail
@@ -35,6 +46,7 @@ source .venv_gpu/bin/activate
 export PYTHONUNBUFFERED=True
 
 STEP=3.0
+SITES_PER_GROUP=32
 TASK_ID="${SLURM_ARRAY_TASK_ID}"
 NUM_TASKS=$(( SLURM_ARRAY_TASK_MAX - SLURM_ARRAY_TASK_MIN + 1 ))
 
@@ -64,5 +76,6 @@ python3 -c "import jax; print('jax.devices():', jax.devices())"
 
 python3 gpu_sweep/run_bayesopt_sweep.py \
   --site-range "${START}" "${END}" --step "${STEP}" \
+  --sites-per-group "${SITES_PER_GROUP}" \
   --output-dir "outputs/gpu_bayesopt_sweep/task_${TASK_ID}" \
   --resume

@@ -4,6 +4,13 @@ selection CLI and 12-month Aitken JAX fast path, optimizing hydrogel_thickness /
 vapor_gap over the min/max of the sweep's own combo lists, plus tilt and the A1
 seal/open schedule offsets (design_space.VAR_ORDER).
 
+Sites run in lockstep groups of --sites-per-group: every site keeps its own GP, history
+and cache, but each round's designs across the whole group go into ONE batched evaluation,
+as do the group's verification and baseline passes. That is the throughput lever here --
+an evaluation call costs ~the same at any batch width because a year is ~366 *sequential*
+day-steps (measured on an A100: 60.1 min for 1 design, 68.2 min for 8), so cost tracks the
+number of calls, not the number of designs.
+
 Each site writes the same artifacts hp_sweep.py records per combination (history.csv,
 convergence.png, gp_state.joblib, de_diagnostics.json, report.json, gp_regression_report
 .json, gp_slices.png). A failing stage lands in an "error"/"verify_error"/
@@ -18,6 +25,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import dataclasses
 import json
 import sys
 import time
@@ -38,14 +46,16 @@ from solar_lumped import site_sweep as gps  # noqa: E402
 from run_gpu_sweep import _site_list  # noqa: E402
 
 import gp_diagnostics  # noqa: E402
-from sawh_bayesopt.bayesopt import BayesOptConfig, run_bayesopt  # noqa: E402
+from sawh_bayesopt.bayesopt import BayesOptConfig, run_bayesopt_sites  # noqa: E402
 from sawh_bayesopt.design_space import (  # noqa: E402
     CASE_EPS_IR,
     COMPLEX_VAR_ORDER,
     SIMPLE_FIXED,
     DesignBounds,
 )
+from sawh_bayesopt.evaluator import fetch_site_inputs  # noqa: E402
 from sawh_bayesopt.reporting import (  # noqa: E402
+    evaluate_baselines,
     write_convergence_plot,
     write_de_diagnostics,
     write_final_report,
@@ -54,7 +64,7 @@ from sawh_bayesopt.reporting import (  # noqa: E402
 )
 from sawh_bayesopt.sites import SiteSpec  # noqa: E402
 from sawh_bayesopt.surrogate import save_state  # noqa: E402
-from sawh_bayesopt.verification import verify_optimum  # noqa: E402
+from sawh_bayesopt.verification import verify_optima  # noqa: E402
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -126,6 +136,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--n-verify-neighbors", type=int, default=5)
     p.add_argument("--verify-perturbation-frac", type=float, default=0.10)
 
+    p.add_argument(
+        "--sites-per-group", type=int, default=32,
+        help="How many sites share each batched evaluation call. An evaluation costs ~the "
+             "same at any width (a year is ~366 sequential day-steps regardless), so this "
+             "is the sweep's main throughput lever: N sites in a group pay one set of "
+             "rounds instead of N. Lower it only if the GPU runs out of memory, or to "
+             "shorten the interval between summary.csv writes.",
+    )
     p.add_argument("--output-dir", type=Path, required=True, help="Per-site run dirs (history/config/gp_state) go here.")
     p.add_argument("--resume", action="store_true", help="Skip a site entirely if it's already in --output-dir/summary.csv")
     return p.parse_args(argv)
@@ -183,20 +201,11 @@ def _write_summary_rows(path: Path, rows: list[dict]) -> None:
         w.writerows(rows)
 
 
-def run_site(lat: float, lon: float, args: argparse.Namespace, bounds: DesignBounds) -> dict:
-    """One site's full BayesOpt loop plus every diagnostic hp_sweep.py records. Each stage
-    past the optimization loop is isolated, so a diagnostics failure neither discards a
-    good result nor kills this task's remaining sites."""
-    site = SiteSpec(name=f"{lat:+.4f}_{lon:+.4f}", lat=lat, lon=lon, year=args.year)
-    run_dir = args.output_dir / site.name
-    run_dir.mkdir(parents=True, exist_ok=True)
-
-    row: dict = {"lat": lat, "lon": lon}
-
-    cfg = BayesOptConfig(
+def _make_cfg(sites: tuple[SiteSpec, ...], args: argparse.Namespace, bounds: DesignBounds) -> BayesOptConfig:
+    return BayesOptConfig(
         bounds=bounds,
         complex_mode=args.complex,
-        sites=(site,),
+        sites=sites,
         n_init=args.n_init,
         n_total=args.n_total,
         batch_size=args.batch_size,
@@ -211,23 +220,17 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, bounds: DesignBou
         de_maxiter=args.de_maxiter,
         de_popsize=args.de_popsize,
     )
-    write_run_config(cfg, run_dir / "config.json")
 
-    t0 = time.perf_counter()
-    try:
-        result = run_bayesopt(cfg, run_dir)
-    except Exception as exc:  # noqa: BLE001 -- isolate one site's failure from the rest of this task's sites
-        row["error"] = f"run_bayesopt: {exc!r}"
-        print(f"  ({lat:+.4f}, {lon:+.4f}): ERROR {row['error']}", flush=True)
-        return row
-    elapsed = time.perf_counter() - t0
 
+def _loop_row(site: SiteSpec, result, bounds: DesignBounds, args: argparse.Namespace, elapsed: float) -> dict:
+    """One site's summary.csv row from its finished loop, before verification."""
     best = result.best
     # Every optimized dim by name, so complex mode's 7 extra dims land in summary.csv
     # instead of only living in the per-site report.json. SIMPLE_FIXED underneath so the
     # pinned geometry still reports its value in simple mode, where it is not a dim.
     best_by_name = {**SIMPLE_FIXED, **dict(zip(bounds.names(), best.design_vector))}
-    row.update({
+    return {
+        "lat": site.lat, "lon": site.lon,
         "hydrogel_thickness_mm": best_by_name["hydrogel_thickness_m"] * 1000.0,
         "vapor_gap_mm": best_by_name["vapor_gap_m"] * 1000.0,
         "fin_area_ratio": best_by_name["fin_area_ratio"],
@@ -251,72 +254,135 @@ def run_site(lat: float, lon: float, args: argparse.Namespace, bounds: DesignBou
         "n_feasible": sum(1 for r in result.history if r.is_feasible),
         "stopped_reason": result.stopped_reason,
         "wall_time_s": f"{elapsed:.1f}",
-    })
+    }
 
-    write_history_csv(result.history, run_dir / "history.csv", var_order=bounds.names())
-    write_convergence_plot(result.history, run_dir / "convergence.png")
-    save_state(result.surrogate, run_dir / "gp_state.joblib")
-    write_de_diagnostics(result.de_diagnostics, run_dir / "diagnostics" / "de_diagnostics.json")
 
+def run_group(
+    coords: list[tuple[float, float]], args: argparse.Namespace, bounds: DesignBounds
+) -> list[dict]:
+    """Optimize every site in *coords* together, and return one summary row each.
+
+    Three batched evaluation phases, not three per site: the lockstep loop
+    (bayesopt.run_bayesopt_sites), one verification call across all sites, one baseline
+    call across all sites. An evaluation call costs ~the same at any batch width -- a year
+    is ~366 sequential day-steps regardless -- so a site-at-a-time sweep multiplied every
+    one of those calls by the site count for nothing. Everything after them is CPU-only
+    per-site bookkeeping.
+    """
+    sites = tuple(
+        SiteSpec(name=f"{lat:+.4f}_{lon:+.4f}", lat=lat, lon=lon, year=args.year)
+        for lat, lon in coords
+    )
+    run_dirs = {s.name: args.output_dir / s.name for s in sites}
+    for d in run_dirs.values():
+        d.mkdir(parents=True, exist_ok=True)
+    cfg = _make_cfg(sites, args, bounds)
+    # Each site's config.json describes *its* single-site optimization -- the lockstep
+    # grouping is an execution detail, and the per-run diagnostics scripts read this file
+    # expecting one site.
+    single_cfgs = {s.name: dataclasses.replace(cfg, sites=(s,)) for s in sites}
+    for s in sites:
+        write_run_config(single_cfgs[s.name], run_dirs[s.name] / "config.json")
+
+    t0 = time.perf_counter()
     try:
-        verification = verify_optimum(
-            result, cfg, run_dir,
+        site_inputs = fetch_site_inputs(cfg)
+        results = run_bayesopt_sites(cfg, run_dirs, site_inputs=site_inputs)
+    except Exception as exc:  # noqa: BLE001 -- isolate this group's failure from the rest of the task
+        # One row per site so --resume does not silently retry a group that dies every
+        # time, and so the failure is visible in summary.csv rather than only in the log.
+        err = f"run_bayesopt_sites: {exc!r}"
+        print(f"  group of {len(sites)}: ERROR {err}", flush=True)
+        return [{"lat": s.lat, "lon": s.lon, "error": err} for s in sites]
+    elapsed = time.perf_counter() - t0
+
+    rows = {s.name: _loop_row(s, results[s.name], bounds, args, elapsed) for s in sites}
+    for s in sites:
+        result, run_dir = results[s.name], run_dirs[s.name]
+        write_history_csv(result.history, run_dir / "history.csv", var_order=bounds.names())
+        write_convergence_plot(result.history, run_dir / "convergence.png")
+        save_state(result.surrogate, run_dir / "gp_state.joblib")
+        write_de_diagnostics(result.de_diagnostics, run_dir / "diagnostics" / "de_diagnostics.json")
+
+    # Both batched across the whole group; a failure here costs the group its reports, not
+    # its loops (already written above).
+    try:
+        verifications = verify_optima(
+            results, cfg, run_dirs,
             n_neighbors=args.n_verify_neighbors,
             perturbation_frac=args.verify_perturbation_frac,
             seed=args.seed,
+            site_inputs=site_inputs,
         )
-        report = write_final_report(result, cfg, run_dir, verification, run_dir / "report.json")
-        row["improvement_vs_baseline_frac"] = report["improvement_vs_baseline_frac"]
-        row["flagged_as_surrogate_artifact"] = verification.flagged_as_surrogate_artifact
-        row["max_neighbor_improvement_frac"] = f"{verification.max_neighbor_improvement_frac:.6f}"
-        # write_final_report recommends the best of (loop optimum, verified neighbors), so
-        # take its answer rather than leaving summary.csv on a design report.json rejected.
-        row["recommended_from"] = report["recommended_from"]
-        if report["recommended_from"] == "verification_neighbor":
-            rec = {**SIMPLE_FIXED, **report["recommended_design"]}
-            row.update({
-                "hydrogel_thickness_mm": rec["hydrogel_thickness_m"] * 1000.0,
-                "vapor_gap_mm": rec["vapor_gap_m"] * 1000.0,
-                "insulation_gap_mm": rec["insulation_gap_m"] * 1000.0,
-                "fin_area_ratio": rec["fin_area_ratio"],
-                "tilt_deg": rec["tilt_deg"],
-                "salt_loading": rec["salt_loading"],
-                **{name: rec[name] for name in COMPLEX_VAR_ORDER if name in rec},
-                "best_combined_lcow_usd_m3": f"{report['recommended_combined_lcow_usd_per_m3']:.6f}",
-            })
-            print(
-                f"  ({lat:+.4f}, {lon:+.4f}): a verified neighbor beat the loop optimum by "
-                f"{verification.max_neighbor_improvement_frac:.2%} -- recommending the neighbor.",
-                flush=True,
-            )
+        baselines = evaluate_baselines(cfg, run_dirs, site_inputs=site_inputs)
     except Exception as exc:  # noqa: BLE001
-        row["verify_error"] = f"verify_optimum/write_final_report: {exc!r}"
+        for row in rows.values():
+            row["verify_error"] = f"verify_optima/evaluate_baselines: {exc!r}"
+        verifications, baselines = {}, {}
 
-    try:
-        gp_diagnostics.main(["--run-dir", str(run_dir), "--seed", str(args.seed)])
-        gp_report = json.loads((run_dir / "diagnostics" / "gp_regression_report.json").read_text())
-        cv = gp_report["cross_validation"]
-        row["cv_rmse"] = cv["cv_rmse"]
-        row["standardized_residual_mean"] = cv["standardized_residual_mean"]
-        row["standardized_residual_std"] = cv["standardized_residual_std"]
-        row["msll_gp_minus_trivial"] = cv["msll_gp_minus_trivial"]
-        row["n_hyperparameter_warnings"] = len(gp_report["hyperparameter_convergence_warnings"])
-        de_summary = gp_report.get("de_diagnostics_summary")
-        if de_summary and de_summary.get("n_de_calls"):
-            row["n_de_calls"] = de_summary["n_de_calls"]
-            row["frac_de_hit_maxiter"] = de_summary["frac_hit_maxiter"]
-            row["frac_de_not_success"] = de_summary["frac_not_success"]
-    except Exception as exc:  # noqa: BLE001
-        row["diagnostics_error"] = f"gp_diagnostics: {exc!r}"
+    for s in sites:
+        row, run_dir = rows[s.name], run_dirs[s.name]
+        if s.name in verifications:
+            verification = verifications[s.name]
+            try:
+                report = write_final_report(
+                    results[s.name], single_cfgs[s.name], run_dir, verification,
+                    run_dir / "report.json", baseline_result=baselines[s.name],
+                )
+                row["improvement_vs_baseline_frac"] = report["improvement_vs_baseline_frac"]
+                row["flagged_as_surrogate_artifact"] = verification.flagged_as_surrogate_artifact
+                row["max_neighbor_improvement_frac"] = f"{verification.max_neighbor_improvement_frac:.6f}"
+                # write_final_report recommends the best of (loop optimum, verified
+                # neighbors), so take its answer rather than leaving summary.csv on a
+                # design report.json rejected.
+                row["recommended_from"] = report["recommended_from"]
+                if report["recommended_from"] == "verification_neighbor":
+                    rec = {**SIMPLE_FIXED, **report["recommended_design"]}
+                    row.update({
+                        "hydrogel_thickness_mm": rec["hydrogel_thickness_m"] * 1000.0,
+                        "vapor_gap_mm": rec["vapor_gap_m"] * 1000.0,
+                        "insulation_gap_mm": rec["insulation_gap_m"] * 1000.0,
+                        "fin_area_ratio": rec["fin_area_ratio"],
+                        "tilt_deg": rec["tilt_deg"],
+                        "salt_loading": rec["salt_loading"],
+                        **{name: rec[name] for name in COMPLEX_VAR_ORDER if name in rec},
+                        "best_combined_lcow_usd_m3": f"{report['recommended_combined_lcow_usd_per_m3']:.6f}",
+                    })
+                    print(
+                        f"  ({s.lat:+.4f}, {s.lon:+.4f}): a verified neighbor beat the loop optimum by "
+                        f"{verification.max_neighbor_improvement_frac:.2%} -- recommending the neighbor.",
+                        flush=True,
+                    )
+            except Exception as exc:  # noqa: BLE001
+                row["verify_error"] = f"write_final_report: {exc!r}"
 
-    # Reads the row, not result.best, so the log line cannot disagree with summary.csv
-    # when verification promoted a neighbor (it falls back to the loop optimum when
-    # verification errored and never updated the row).
-    print(
-        f"  ({lat:+.4f}, {lon:+.4f}): {len(result.history)} eval(s), stopped={result.stopped_reason}, "
-        f"best_lcow={float(row['best_combined_lcow_usd_m3']):.4f} USD/m3, {elapsed:.1f}s", flush=True,
-    )
-    return row
+        try:
+            gp_diagnostics.main(["--run-dir", str(run_dir), "--seed", str(args.seed)])
+            gp_report = json.loads((run_dir / "diagnostics" / "gp_regression_report.json").read_text())
+            cv = gp_report["cross_validation"]
+            row["cv_rmse"] = cv["cv_rmse"]
+            row["standardized_residual_mean"] = cv["standardized_residual_mean"]
+            row["standardized_residual_std"] = cv["standardized_residual_std"]
+            row["msll_gp_minus_trivial"] = cv["msll_gp_minus_trivial"]
+            row["n_hyperparameter_warnings"] = len(gp_report["hyperparameter_convergence_warnings"])
+            de_summary = gp_report.get("de_diagnostics_summary")
+            if de_summary and de_summary.get("n_de_calls"):
+                row["n_de_calls"] = de_summary["n_de_calls"]
+                row["frac_de_hit_maxiter"] = de_summary["frac_hit_maxiter"]
+                row["frac_de_not_success"] = de_summary["frac_not_success"]
+        except Exception as exc:  # noqa: BLE001
+            row["diagnostics_error"] = f"gp_diagnostics: {exc!r}"
+
+        # Reads the row, not result.best, so the log line cannot disagree with summary.csv
+        # when verification promoted a neighbor (it falls back to the loop optimum when
+        # verification errored and never updated the row).
+        result = results[s.name]
+        print(
+            f"  ({s.lat:+.4f}, {s.lon:+.4f}): {len(result.history)} eval(s), "
+            f"stopped={result.stopped_reason}, "
+            f"best_lcow={float(row['best_combined_lcow_usd_m3']):.4f} USD/m3", flush=True,
+        )
+    return [rows[s.name] for s in sites]
 
 
 def main() -> int:
@@ -333,9 +399,13 @@ def main() -> int:
 
     bounds = _bounds(args)
     t0 = time.perf_counter()
-    for lat, lon in sites:
-        rows.append(run_site(lat, lon, args, bounds))
-        _write_summary_rows(summary_csv, rows)  # rewritten after every site -- see _write_summary_rows
+    groups = [
+        sites[i : i + args.sites_per_group] for i in range(0, len(sites), args.sites_per_group)
+    ]
+    for gi, group in enumerate(groups):
+        print(f"group {gi + 1}/{len(groups)}: {len(group)} site(s) in lockstep", flush=True)
+        rows.extend(run_group(group, args, bounds))
+        _write_summary_rows(summary_csv, rows)  # rewritten after every group -- see _write_summary_rows
     print(f"Done: {len(sites)} site(s) in {time.perf_counter() - t0:.1f}s total.", flush=True)
     return 0
 

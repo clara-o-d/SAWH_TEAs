@@ -2262,6 +2262,44 @@ def concentration_ratio_desorption(t_gel_c: float, t_cond_c: float) -> float:
     return (p_c / p_g) * (t_g_k / t_c_k)
 
 
+def equilibrium_c_w_absorption(
+    *,
+    rh: float,
+    t_gel_c: float,
+    params: MassTransferParams,
+    h_m: float,
+) -> float:
+    """Gel water concentration in equilibrium with ambient air (mol/m3).
+
+    Absorption's counterpart to ``equilibrium_t_gel_desorption_c``: the g -> infinity
+    limit says the gel tracks the ambient RH exactly, so c_w solves
+    ``a_w,eff(c_w, T) = c_r(rh)``. Monotone -- a_w rises with water content -- so bisection
+    on [c_w_min, c_w_max] is unambiguous, and the two ends are returned directly when the
+    equilibrium lies outside them (gel drier than the hydrate floor allows, or wetter than
+    the dilution ceiling).
+
+    T_gel is T_amb throughout open absorption (Note S1 Eq. S1), which is why this needs no
+    energy balance: unlike desorption, nothing here is rate-limited by heat.
+    """
+    c_r = concentration_ratio_absorption(rh)
+
+    def driving(c_w: float) -> float:
+        # c_r - a_w, decreasing in c_w. Same function Eq. 5's rate is built from.
+        return _mass_transfer_driving_force(
+            c_w, t_gel_c=t_gel_c, c_r=c_r, params=params, h_m=h_m, phase="absorption"
+        )
+
+    lo, hi = params.c_w_min_mol_m3, params.c_w_max_mol_m3
+    d_lo, d_hi = driving(lo), driving(hi)
+    if not (math.isfinite(d_lo) and math.isfinite(d_hi)):
+        return float("nan")
+    if d_lo <= 0.0:
+        return lo   # already wetter than ambient equilibrium even at the floor
+    if d_hi >= 0.0:
+        return hi   # ambient would fill it past the ceiling
+    return find_root_bracketed(driving, lo, hi)
+
+
 def equilibrium_t_gel_desorption_c(
     c_w: float,
     *,

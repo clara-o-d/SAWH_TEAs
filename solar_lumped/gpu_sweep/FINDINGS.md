@@ -476,6 +476,58 @@ values that originally triggered the `ZeroDivisionError` bug fix). **Both Case
 2 and Case 3 smoke tests are verified; both full 1,405-site grids
 (`sbatch_gpu_sweep_array_case2.sh`/`_case3.sh`) are cleared to run.**
 
+## Result 14: the instant-equilibrium scenarios were silently truncating, and the fix made them cheaper than finite g
+
+Found while sizing the scenario sweep's array tasks, not by a failing test.
+
+**The bug.** `diffeqsolve` runs `max_steps=16384` with `throw=False`, so an instance
+that exhausts the budget returns a **truncated day and no error**. The
+instant-equilibrium path did exactly that: `g` was scaled by 1e5-1e6 to make Eq. 5's
+residual driving force negligible, which makes `dc_w/dt` stiff in proportion, and
+explicit Tsit5 then needs far more than 16,384 steps. How much real physics got
+integrated before the cap depended on the stiffness, so the g -> infinity limit
+appeared **unconverged**: a probe at 1e4/1e5/1e6 measured up to **62% yield drift**
+between factors, monotonically downward. Every instant number this repo had produced
+was measuring the step cap. The parity test passed throughout, at 5e-4, because the
+CPU reference (LSODA, implicit) was fine and the JAX side's truncation happened to
+land close on that one profile.
+
+**Why it was not a chunking problem.** Measured cost was flat in batch width
+(1.18 s/instance-day at 20 instances, 1.06 at 100) where finite-g falls 14x from 30
+to 603 instances. Under `vmap`, diffrax steps the whole batch until *every* instance
+finishes its day, so a group's cost tracks its worst instance -- and by ~20 instances
+the worst case is in every batch. Narrower chunks split the bill without shrinking it.
+Raising the cap made it correct and *more* expensive: ~430 GPU-hours for the two
+instant groups at 3 degrees, before this rose again once absorption was solved honestly.
+
+**The fix: impose the limit, do not approximate it.** g -> infinity is not "a large g",
+it is the statement that the gel surface sits at local equilibrium. Desorption's
+`c_r - a_w = 0` becomes the fourth residual of the existing joint Newton solve
+(replacing `m_calc(m) - m`, whose slope was of order g), so `m_des` is whatever the
+energy balance needs to hold the gel there -- energy-limited by construction, which is
+what the ideal case always meant. Absorption needs no ODE at all: `T_gel` is `T_amb`
+and the weather is piecewise-constant on `dt`, so the exact trajectory is a staircase
+of isotherm inversions.
+
+**Measured, same yield to 0.024% against the g x 1e6 reference:**
+
+| | finite g | instant (constraint) | instant (penalty 1e6) |
+|---|---|---|---|
+| CPU (LSODA) | 9.85 s/day | 10.08 s/day (1.02x) | 43.7 s/day (4.4x) |
+| JAX (Tsit5) | 311 ms/day | 249 ms/day (**0.80x**) | 1556 ms/day (4.7x) |
+
+The ideal case is now *cheaper* than the real one, because its absorption half is
+algebra rather than an ODE. Consequences: the 16,384 cap is ample again (verified
+`solver_ok=True` with identical yield), the `g` scale factor is no longer on any
+production path, and all eight scenarios run the full 3-degree grid -- the instant
+groups had been dropped to 6 degrees purely to afford the penalty.
+
+**Guards added, since the failure was silent.** `single()` returns whether both solves
+reached `t1`; `run_year_batched` NaNs any instance that ever hit the cap and prints a
+count; the parity test asserts the flag rather than trusting the comparison.
+Kvaerno3 was tried and is ~5x slower -- the vector field carries an inner Newton
+thermal solve, so implicit stages cost more than the stability limit saves.
+
 ## Next steps, in order
 
 1. **Run `sbatch_gpu_sweep_array.sh` and see if the chunked/parallel approach

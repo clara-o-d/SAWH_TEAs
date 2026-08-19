@@ -47,19 +47,15 @@ WEATHER_KEYS: tuple[str, ...] = (
 _RTOL, _ATOL = 1e-4, 1e-7
 
 # Per-solve step ceiling. Both solves run throw=False, so exceeding it is SILENT: the
-# instance returns a truncated day that reads like a result. 16384 is ample for the
-# finite-g path, but instant equilibrium scales g by _INSTANT_EQUILIBRIUM_G_SCALE (1e5)
-# and the resulting c_w relaxation
-# is stiff, so explicit steps become stability-limited and a day needs far more of them.
-# Measured: at 16384 the instant path truncated hard enough to swing yield by ~60% and to
-# make the g -> infinity limit look unconverged. With the ceiling raised, the limit
-# converges monotonically (1e4: 0.79% off, 1e5: 0.12%, 1e6: reference).
-#
-# Kvaerno3 was tried here and is ~5x SLOWER end-to-end, not faster: the vector field
-# carries an inner Newton thermal solve, so implicit stages cost more than the stability
-# limit saves. Tsit5 with a high ceiling is the cheaper correct option.
-_MAX_STEPS_FINITE_G = 16384
-_MAX_STEPS_INSTANT = 1 << 20
+# instance returns a truncated day that reads like a result. That is not hypothetical --
+# the instant-equilibrium path used to blow this cap and swing yields by ~60%, which is
+# why single() now returns whether both solves reached t1 and run_year_batched NaNs any
+# instance that ever did not. The cause was the g-penalty formulation's stiffness; with
+# the limit imposed as a constraint instead (physics.equilibrium_t_gel_desorption_c,
+# jax_physics.desorption_driving_force) the ideal case costs LESS than finite g and this
+# ceiling is ample for both. Kvaerno3 was also tried and is ~5x slower: the vector field
+# carries an inner Newton thermal solve, so implicit stages cost more than they save.
+_MAX_STEPS = 16384
 
 
 def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_tracks_ambient=False,
@@ -111,7 +107,6 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
             h_des_isosteric=h_des_isosteric,
             p_atm_pa=p_atm_pa,
         )
-        max_steps = _MAX_STEPS_INSTANT if instant_equilibrium else _MAX_STEPS_FINITE_G
         h_max_m = jnp.maximum(vapor_gap_m - jp.VAPOR_GAP_TRANSPORT_MIN_M, h0_ref_m + 1e-6)
 
         def idx_abs(t):
@@ -161,15 +156,44 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
             dy4 = jnp.concatenate([dy, jnp.array([m_des])])
             return jnp.where(i < n_des_real, dy4, 0.0)
 
-        y0_abs = jnp.array([c_w_initial, jnp.maximum(h_initial, h_floor_m)])
-        sol_abs = diffrax.diffeqsolve(
-            diffrax.ODETerm(abs_vf), diffrax.Tsit5(), t0=0.0, t1=dt * n_abs_max, dt0=dt, y0=y0_abs, args=None,
-            saveat=diffrax.SaveAt(t1=True),
-            stepsize_controller=diffrax.PIDController(rtol=_RTOL, atol=_ATOL, dtmax=dt),
-            max_steps=max_steps, adjoint=diffrax.DirectAdjoint(), throw=False,
-        )
-        c_w_mid = jnp.clip(sol_abs.ys[0, 0], c_w_min_mol_m3, c_w_max_mol_m3)
-        h_mid = jnp.clip(sol_abs.ys[0, 1], h_floor_m, h_max_m)
+        if instant_equilibrium:
+            # No ODE on this half-cycle. T_gel is T_amb (nothing heat-limited) and the
+            # weather is piecewise-constant on dt, so instant kinetics means the gel sits
+            # at the current interval's equilibrium loading: the exact trajectory is a
+            # staircase, one isotherm inversion per interval. This is what removes the
+            # last stiff term -- the penalty route integrated a rate-~g relaxation toward
+            # this same staircase and needed >16,384 steps a day to do it.
+            ratio = jp.WATER_MOLAR_MASS_KG_MOL * h0_ref_m / jp.RHO_GEL_KG_M3
+
+            def absorb_interval(carry, i):
+                c_w_k, h_k = carry
+                c_eq = jp.equilibrium_c_w_absorption(
+                    rh=rh_abs[i], t_gel_c=t_amb_abs[i], mass=mass, salt_loading=salt_loading,
+                )
+                c_eq = jnp.clip(c_eq, c_w_min_mol_m3, c_w_max_mol_m3)
+                h_next = jnp.clip(h_k + (c_eq - c_w_k) * ratio, h_floor_m, h_max_m)
+                # Past the instance's real day length the state freezes, exactly as the
+                # padded vector fields do (dy = 0 there).
+                real = i < n_abs_real
+                return (jnp.where(real, c_eq, c_w_k), jnp.where(real, h_next, h_k)), None
+
+            (c_w_mid, h_mid), _ = jax.lax.scan(
+                absorb_interval,
+                (c_w_initial, jnp.maximum(h_initial, h_floor_m)),
+                jnp.arange(n_abs_max),
+            )
+            abs_ok = jnp.array(True)
+        else:
+            y0_abs = jnp.array([c_w_initial, jnp.maximum(h_initial, h_floor_m)])
+            sol_abs = diffrax.diffeqsolve(
+                diffrax.ODETerm(abs_vf), diffrax.Tsit5(), t0=0.0, t1=dt * n_abs_max, dt0=dt, y0=y0_abs, args=None,
+                saveat=diffrax.SaveAt(t1=True),
+                stepsize_controller=diffrax.PIDController(rtol=_RTOL, atol=_ATOL, dtmax=dt),
+                max_steps=_MAX_STEPS, adjoint=diffrax.DirectAdjoint(), throw=False,
+            )
+            c_w_mid = jnp.clip(sol_abs.ys[0, 0], c_w_min_mol_m3, c_w_max_mol_m3)
+            h_mid = jnp.clip(sol_abs.ys[0, 1], h_floor_m, h_max_m)
+            abs_ok = sol_abs.result == diffrax.RESULTS.successful
 
         t_cond0 = jp.clamp_temperature_c(t_amb_des[0])
         y0_des = jnp.array([c_w_mid, h_mid, t_cond0, 0.0])
@@ -177,7 +201,7 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
             diffrax.ODETerm(des_vf), diffrax.Tsit5(), t0=0.0, t1=dt * n_des_max, dt0=dt, y0=y0_des, args=None,
             saveat=diffrax.SaveAt(t1=True),
             stepsize_controller=diffrax.PIDController(rtol=_RTOL, atol=_ATOL, dtmax=dt),
-            max_steps=max_steps, adjoint=diffrax.DirectAdjoint(), throw=False,
+            max_steps=_MAX_STEPS, adjoint=diffrax.DirectAdjoint(), throw=False,
         )
         water = jnp.maximum(0.0, sol_des.ys[0, 3])
 
@@ -190,8 +214,7 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
         # but that means an instance which exhausts max_steps returns a TRUNCATED day and
         # no error, i.e. a plausible-looking wrong yield. Report it instead: this flag is
         # what run_year_batched turns into NaN rather than a silently short year.
-        ok = ((sol_abs.result == diffrax.RESULTS.successful)
-              & (sol_des.result == diffrax.RESULTS.successful))
+        ok = abs_ok & (sol_des.result == diffrax.RESULTS.successful)
         return water, eta, c_w_end, h_end, ok
 
     return single
