@@ -48,7 +48,8 @@ _RTOL, _ATOL = 1e-4, 1e-7
 
 # Per-solve step ceiling. Both solves run throw=False, so exceeding it is SILENT: the
 # instance returns a truncated day that reads like a result. 16384 is ample for the
-# finite-g path, but instant equilibrium scales g by 1e6 and the resulting c_w relaxation
+# finite-g path, but instant equilibrium scales g by _INSTANT_EQUILIBRIUM_G_SCALE (1e5)
+# and the resulting c_w relaxation
 # is stiff, so explicit steps become stability-limited and a day needs far more of them.
 # Measured: at 16384 the instant path truncated hard enough to swing yield by ~60% and to
 # make the g -> infinity limit look unconverged. With the ceiling raised, the limit

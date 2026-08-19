@@ -36,7 +36,7 @@ import jax_physics  # noqa: E402
 import run_gpu_sweep as driver  # noqa: E402
 from solar_lumped.weather import WeatherClient  # noqa: E402
 
-SCALES = (1e4, 1e5, 1e6)
+SCALES = (1e4, 1e5, 1e6)  # 1e5 is now the workbook value; 1e6 is the old reference
 SITES, DAYS, SCENARIO = 20, 20, "improved_instant_g"
 
 

@@ -547,7 +547,8 @@ def evaluate_coupled_rates(
         m_des, t_gel, dc, state = 0.0, t_gel0, dc0, state0
     else:
         # Cap at the documented search bound. Without it, instant_equilibrium's
-        # 1e6-scaled g makes m_at_zero ~1e4 kg/s/m2, and brentq on a bracket seven
+        # scaled g makes m_at_zero ~1e3 kg/s/m2 (measured ~1e4 when the scale was 1e6),
+        # and brentq on a bracket seven
         # orders wide -- flat at -m over all but its first 1e-4 -- returns a point
         # nowhere near the real root, which then feeds the ODE a nonsense rate.
         hi = min(max(m_at_zero * 2.0, 1e-8), _M_DES_BRACKET_MAX)
@@ -576,7 +577,7 @@ def evaluate_coupled_rates(
                     t_guess=(state0.t_gel_c, state0.t_abs_c, state0.t_glass_c),
                 )
                 # brentq only guarantees a SIGN CHANGE in [0, hi], and with
-                # instant_equilibrium's 1e6-scaled g this residual has a jump: m_calc is
+                # instant_equilibrium's scaled g this residual has a jump: m_calc is
                 # enormous below the crossing and plummets past it. Bisection then returns
                 # the jump rather than a root, and m_des here -- which is m_calc at that
                 # point, not m_star -- came back at 2.4e3 kg/s/m2 against a 1e-2 bracket.
@@ -793,7 +794,7 @@ def _integrate_absorption(
     # orders inside WATER_BALANCE_TOL.
     #
     # instant_equilibrium gets a different invariant rather than no invariant. It scales g
-    # by 1e6, and absorption *starts* off-equilibrium (gel at the fabrication RH, air at
+    # by _INSTANT_EQUILIBRIUM_G_SCALE, and absorption *starts* off-equilibrium (gel at the fabrication RH, air at
     # the profile RH), so dc_w/dt spikes and decays entirely inside the first output
     # interval; the trapezoid on the reporting grid cannot resolve that and reads ~2.6e3x
     # high while the integration itself is fine. What that mode asserts instead is its own

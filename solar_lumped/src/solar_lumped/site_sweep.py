@@ -137,35 +137,53 @@ def scenario_groups(names: list[str] | None = None) -> dict[tuple[bool, bool], l
     return groups
 
 
-# Sites per array-task chunk, PER SCENARIO GROUP -- deliberately not one number.
-# Measured on the serc A100 (366-day years): the finite-g groups cost ~23-28 ms per
-# instance-day at 400-600 instances wide, the instant-sorption groups ~250 ms. Under
-# vmap, diffrax steps the whole batch until *every* instance has finished its day, so a
-# group's cost tracks its WORST site's adaptive step count, not the mean -- and instant
-# equilibrium's 1e6-scaled g has a heavy tail. Narrow chunks are what cuts that tail,
-# which is why these two numbers differ by 4x. Re-measure with
-# gpu_sweep/sbatch_gpu_sweep_probe.sh before trusting them on other hardware.
-GROUP_SITES_PER_CHUNK: dict[tuple[bool, bool], int] = {
-    (False, False): 200,
-    (True, False): 50,
-    (False, True): 200,
-    (True, True): 50,
+@dataclass(frozen=True, slots=True)
+class GroupRun:
+    """How one scenario group is run across Slurm array tasks.
+
+    Not uniform across groups, because the groups do not cost the same. Measured on the
+    serc A100: the finite-g groups run ~23 ms per instance-day at 400-600 instances wide.
+    The instant-sorption groups are ~50x that even after the step-cap fix, because g x
+    1e5 makes the c_w relaxation stiff and explicit steps become stability-limited -- and
+    unlike finite-g, their cost does not amortize with batch width (measured flat from 20
+    to 100 instances), since under vmap diffrax steps the batch until its WORST instance
+    finishes its day.
+
+    So the instant groups run on the coarser 6-degree grid (360 sites, a strict SUBSET of
+    the 3-degree grid's 1,405 -- see tests/test_sweep_task_table.py, which is what keeps
+    them paired against the finite-g rows at the same sites) in narrow chunks that fit a
+    walltime. Full 3-degree coverage of those two groups would be ~1,000 GPU-hours.
+    """
+
+    step_deg: float
+    sites_per_chunk: int
+
+
+GROUP_RUNS: dict[tuple[bool, bool], GroupRun] = {
+    (False, False): GroupRun(step_deg=3.0, sites_per_chunk=200),   # 600 instances, ~1.5 h
+    (True, False): GroupRun(step_deg=6.0, sites_per_chunk=12),     # 24 instances
+    (False, True): GroupRun(step_deg=3.0, sites_per_chunk=200),    # 400 instances, ~1.3 h
+    (True, True): GroupRun(step_deg=6.0, sites_per_chunk=24),      # 24 instances
 }
 
 
-def array_tasks(total_sites: int) -> list[tuple[int, int, int, list[str]]]:
-    """(group index, site start, site end, scenario names) for each Slurm array task.
+def array_tasks(site_count) -> list[tuple[int, float, int, int, list[str]]]:
+    """(group index, grid step, site start, site end, scenario names) per Slurm task.
 
-    Ragged on purpose: groups are chunked at their own width, so index *i* of this list
-    is array task *i* and ``len()`` is the --array size that covers the whole grid.
-    Group order follows ``scenario_groups()`` -- appending to SCENARIOS is safe, but
-    reordering it renumbers tasks, which invalidates a half-finished sweep's chunk files.
+    ``site_count(step_deg)`` returns how many land sites that grid has -- passed in
+    rather than imported so this stays testable without the Natural Earth shapefiles.
+
+    Ragged by design: each group is chunked over its own grid at its own width, so index
+    *i* of this list is array task *i* and ``len()`` is the --array size covering
+    everything. Group order follows ``scenario_groups()``; appending to SCENARIOS is
+    safe, reordering it renumbers tasks and invalidates a half-finished sweep.
     """
-    tasks: list[tuple[int, int, int, list[str]]] = []
+    tasks: list[tuple[int, float, int, int, list[str]]] = []
     for gid, (key, names) in enumerate(scenario_groups().items()):
-        per_chunk = GROUP_SITES_PER_CHUNK[key]
-        for start in range(0, total_sites, per_chunk):
-            tasks.append((gid, start, min(start + per_chunk, total_sites), names))
+        run = GROUP_RUNS[key]
+        total = site_count(run.step_deg)
+        for start in range(0, total, run.sites_per_chunk):
+            tasks.append((gid, run.step_deg, start, min(start + run.sites_per_chunk, total), names))
     return tasks
 
 
