@@ -216,6 +216,14 @@ def plot_slices(state: SurrogateState, X: np.ndarray, y: np.ndarray, bounds: Des
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 3.2 * n_rows))
     axes = np.atleast_1d(axes).reshape(-1)
 
+    # A couple of feasible-but-terrible designs (LCOW tens to hundreds against a single-digit
+    # optimum) span the axis two orders of magnitude wider than the region the slices are
+    # about, flattening every curve into a horizontal line. Scale to the non-outliers and
+    # say how many fell off, rather than dropping them silently or keeping an unreadable plot.
+    outliers = detect_outliers(y)
+    y_in_view = y[~outliers] if (~outliers).any() else y
+    view_lo, view_hi = float(np.min(y_in_view)), float(np.max(y_in_view))
+
     for d, name in enumerate(VAR_ORDER):
         lo, hi = bounds_arr[d]
         grid = np.linspace(lo, hi, n_points)
@@ -226,15 +234,33 @@ def plot_slices(state: SurrogateState, X: np.ndarray, y: np.ndarray, bounds: Des
         ax = axes[d]
         ax.plot(grid, mu, "C0-", label="posterior mean")
         ax.fill_between(grid, mu - 1.96 * sigma, mu + 1.96 * sigma, color="C0", alpha=0.25, label="95% CI")
-        ax.scatter(X[:, d], y, color="k", s=12, alpha=0.6, zorder=5, label="evaluated points")
+        ax.scatter(X[~outliers, d], y[~outliers], color="k", s=12, alpha=0.6, zorder=5, label="evaluated points")
+        # Off-scale points still get a mark at the top edge, so a flat-looking dimension
+        # cannot hide the fact that something was evaluated there.
+        if outliers.any():
+            ax.scatter(X[outliers, d], np.full(int(outliers.sum()), view_hi), marker="^",
+                       facecolors="none", edgecolors="0.4", s=28, zorder=6,
+                       clip_on=False, label="off-scale (see subtitle)")
         ax.axvline(x_best[d], color="C1", linestyle="--", linewidth=1, label="x_best")
         ax.set_title(name, fontsize=9)
         ax.tick_params(labelsize=7)
 
+    # Scaled to the observations, not the posterior: near a box edge the GP extrapolates
+    # toward the excluded outliers and its mean/CI reach two orders of magnitude above the
+    # region this figure is about. Mean and band are still drawn and simply run out of
+    # frame, which reads as "LCOW explodes here" -- the useful message.
+    pad = 0.08 * max(view_hi - view_lo, 1e-9)
+    for ax in axes[:n_dims]:
+        ax.set_ylim(view_lo - pad, view_hi + pad)
     for ax in axes[n_dims:]:
         ax.axis("off")
     axes[0].legend(fontsize=7, loc="best")
-    fig.suptitle("GP posterior slices through the incumbent best design (1D, others held fixed)")
+    title = "GP posterior slices through the incumbent best design (1D, others held fixed)"
+    if outliers.any():
+        vals = ", ".join(f"{v:.3g}" for v in sorted(y[outliers].tolist()))
+        title += (f"\n{int(outliers.sum())} point(s) above the axis (Tukey far-out fence): {vals}"
+                  " -- axis scaled to the rest; mean/CI may run out of frame")
+    fig.suptitle(title, fontsize=10)
     fig.tight_layout()
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out_path, dpi=150)
