@@ -11,7 +11,7 @@ Chamber boundary conditions from the paper SI:
   - T_amb = 25 °C (isothermal)
   - H₀ from Table S3 (mm, at equilibrium with RH = 20 %)
   - c_s from Methods pour inventory (12.8 mL for PAM-LiCl 2 g/g; 8 mL otherwise),
-    anchored to the 4 g/g DVS dry-basis calibration; 2 g/g uses the 4 g/g reference
+    anchored to the 4 g/g dry-basis calibration; 2 g/g uses the 4 g/g reference
     H₀ (2.34 mm) for c_s per SI Note S7 constant 20 % density (Table S3 H₀ in g/H₀)
   - Uptake axis: U = (U_dry − U₂₀) / (1 + U₂₀)  (Methods)
   - RH switch times: from digitized reference curves (``reference/figure5/*.csv``;

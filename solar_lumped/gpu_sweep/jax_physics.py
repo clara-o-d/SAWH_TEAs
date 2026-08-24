@@ -851,30 +851,6 @@ def desorption_rhs(
 
 
 # ---- Absorption phase (Note S1, no thermal root-solve -- T_gel == T_amb) ----
-# Wilson Note S2 PAM-LiCl DVS isotherm (RH %, g/g), verbatim from PAM-LiCL_isotherm.csv.
-# The inverse lookup replicates np.interp exactly, non-monotonic first two points included.
-_DVS_RH_PCT = jnp.array([
-    0.0, 4.912669270074408, 9.915874958714616, 14.900817936313652,
-    19.908297876474123, 24.81513862174817, 29.92286918847506, 34.83048707038915,
-    39.8375784422296, 44.845058382390086, 49.85176118591051, 54.95716034271725,
-    59.86205824639115, 64.96551456159779, 69.96522313535777, 74.7624876143848,
-    79.9560917798372, 84.8419498358299, 90.01806842688116,
-])
-_DVS_UPTAKE_G_G = jnp.array([
-    0.011627906976745095, 0.0, 0.27906976744186096, 1.1046511627906987,
-    1.2558139534883725, 1.4186046511627906, 1.5697674418604652, 1.7093023255813957,
-    1.8720930232558146, 2.0232558139534884, 2.1976744186046515, 2.4186046511627914,
-    2.6395348837209305, 2.9186046511627914, 3.3023255813953494, 3.744186046511628,
-    4.325581395348838, 5.116279069767442, 6.220930232558139,
-])
-
-
-def pam_licl_water_activity_from_uptake_g_g(uptake_g_g):
-    u = jnp.clip(uptake_g_g, _DVS_UPTAKE_G_G[0], _DVS_UPTAKE_G_G[-1])
-    aw_pct = jnp.interp(u, _DVS_UPTAKE_G_G, _DVS_RH_PCT)
-    return jnp.clip(aw_pct / 100.0, 0.0, 1.0)
-
-
 def pam_licl_gravimetric_uptake_g_g(c_w, *, h0_ref_m, c_s_mol_m3, formula_weight_g_mol, salt_loading, salt_weight_factor=1.0):
     mw_eff = formula_weight_g_mol * salt_weight_factor
     mass_salt = jnp.clip(c_s_mol_m3, 0.0, None) * h0_ref_m * mw_eff / 1000.0
@@ -885,29 +861,25 @@ def pam_licl_gravimetric_uptake_g_g(c_w, *, h0_ref_m, c_s_mol_m3, formula_weight
 
 
 def absorption_effective_water_activity(c_w, *, t_gel_c, mass: "MassParams", salt_loading):
-    """max(brine activity, PAM-LiCl DVS cap) -- salt_properties.py's LiCl branch.
+    """Gel water activity during absorption: the salt-in-water activity, nothing else.
 
-    Complex mode takes the brine alone: the DVS cap is a measurement of the PAM-LiCl
-    composite specifically, so it does not describe a ZSR blend, and applying it to
-    the pure-LiCl corner only would put a cliff there. Mirrors
-    solar_lumped.physics._absorption_effective_water_activity under use_dvs_cap=False.
+    Water in the gel has the chemical potential of pure water plus RT ln(x_w gamma_w), so
+    the activity model IS the isotherm. This used to return max(brine, PAM-LiCl DVS cap);
+    that cap was a measured composite curve which contradicted the activity model between
+    RH 0.73 and 0.90 and then switched itself off above 0.90 where its data ran out.
+    Mirrors solar_lumped.physics._absorption_effective_water_activity.
     """
+    del salt_loading  # dry-mass bookkeeping only; not needed for the activity
     if mass.aw_table is not None:
         return blend_water_activity_from_c_w(
             c_w, c_s=mass.c_s_mol_m3, h0_ref_m=mass.h0_ref_m,
             formula_weight_g_mol=mass.formula_weight_g_mol, temperature_c=t_gel_c,
             aw_table=mass.aw_table,
         )
-    aw_brine = water_activity_licl_from_c_w(
+    return water_activity_licl_from_c_w(
         c_w, c_s=mass.c_s_mol_m3, h0_ref_m=mass.h0_ref_m,
         formula_weight_g_mol=mass.formula_weight_g_mol, temperature_c=t_gel_c,
     )
-    u = pam_licl_gravimetric_uptake_g_g(
-        c_w, h0_ref_m=mass.h0_ref_m, c_s_mol_m3=mass.c_s_mol_m3,
-        formula_weight_g_mol=mass.formula_weight_g_mol, salt_loading=salt_loading,
-    )
-    aw_dvs = pam_licl_water_activity_from_uptake_g_g(u)
-    return jnp.maximum(aw_brine, aw_dvs)
 
 
 def dc_dh_absorption(c_w, *, t_gel_c, rh, h_m, mass: "MassParams", salt_loading):

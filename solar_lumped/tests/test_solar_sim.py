@@ -177,10 +177,13 @@ def test_baseline_yield_from_desorption_flux():
     assert y == des.water_collected_kg_m2
     assert y >= 0.0
     # Paper Fig. 2 baseline ~1.7 L/m²/day (25°C, 50% RH, 600 W/m²). The model does NOT
-    # reproduce that: it sat at 2.50 under the paper's own Hollands gap correlation (+47%)
-    # and moved to 2.75 (+61%) once the gap switched to the ISO 15099 heated-from-above
-    # treatment (physics.vapor_gap_h_conv_w_m2_k) that the device's geometry actually
-    # calls for. This bound is a regression guard on the current model, not evidence of
+    # reproduce that: on this config it sits at 2.58 (+52%), and would sit at 2.42 (+42%)
+    # under the paper's own Hollands gap correlation instead of the ISO 15099
+    # heated-from-above treatment (physics.vapor_gap_h_conv_w_m2_k) the device's geometry
+    # actually calls for. So the correlation swap accounts for +6.7% of the yield, not the
+    # discrepancy: Hollands over-predicts gap Nu ~1.8-2x, but on days that fully desorb
+    # the gel (e.g. 30°C/30% RH/800 W/m²) yield is inventory-limited and the two agree to
+    # the digit. This bound is a regression guard on the current model, not evidence of
     # agreement with Fig. 2 -- the residual gap is unexplained and worth chasing.
     assert 0.8 < y < 3.0
 
@@ -242,27 +245,29 @@ def test_cycled_initial_uses_post_desorption_state():
 
 
 def test_baseline_starts_at_fabrication_equilibrium():
+    """The cast gel's water ACTIVITY is the fabrication RH -- that is the definition now
+    that uptake comes from the salt-in-water activity model rather than a measured
+    composite uptake curve. This used to compare gravimetric uptake against the DVS
+    isotherm's value at that RH; asserting on a_w keeps the test in the same currency as
+    the model it is testing, and it is an equality rather than a 0.05 g/g tolerance.
+    """
     from solar_lumped.physics import (
         FABRICATION_EQUILIBRIUM_RH,
-        pam_licl_uptake_g_g_at_rh,
+        _absorption_effective_water_activity,
     )
     from solar_lumped.weather import baseline_initial_c_w
 
     config = SystemConfig.baseline()
     h0 = config.hydrogel_thickness_m
     c_w0 = baseline_initial_c_w(h_m=h0)
-    _, _, abs_res, _ = run_daily_cycle(
-        baseline_profile(),
-        config,
-        c_w_initial=c_w0,
+    aw0 = _absorption_effective_water_activity(
+        c_w0, t_gel_c=25.0, params=config.mass_params(), h_m=h0
     )
-    from solar_lumped.physics import pam_licl_gravimetric_uptake_g_g
+    assert aw0 == pytest.approx(FABRICATION_EQUILIBRIUM_RH, rel=1e-4)
 
-    u0 = pam_licl_gravimetric_uptake_g_g(
-        float(abs_res.c_w[0]), float(abs_res.H[0]), h0_ref_m=h0
-    )
-    u_eq = pam_licl_uptake_g_g_at_rh(FABRICATION_EQUILIBRIUM_RH)
-    assert abs(u0 - u_eq) < 0.05
+    # And the cycle actually starts there when handed that loading.
+    _, _, abs_res, _ = run_daily_cycle(baseline_profile(), config, c_w_initial=c_w0)
+    assert float(abs_res.c_w[0]) == pytest.approx(c_w0, rel=1e-9)
 
 
 def test_fig_s1_replay_matches_note_s1d():

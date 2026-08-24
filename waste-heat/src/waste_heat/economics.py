@@ -155,7 +155,7 @@ _LCOW_DEFAULTS: dict[str, Any] = {f.name: _SCALARS[f.name] for f in fields(LCOEc
 
 
 def dry_composite_mass_kg(hydrogel_thickness_m: float) -> float:
-    """Dry (solids-only) composite mass per m² at the given thickness, using the DVS
+    """Dry (solids-only) composite mass per m² at the given thickness, using the
     dry-basis density -- Table S3's rho_gel is measured at 20% RH and already carries
     ~126% water, while the hydrogel cost below is priced per kg of dry solids."""
     return float(hydrogel_thickness_m) * DRY_COMPOSITE_DENSITY_KG_M3

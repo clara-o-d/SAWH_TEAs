@@ -129,11 +129,14 @@ sorbate mass used for activity/uptake calculations is referenced to the fixed fa
 thickness $H_0$, not the swollen $H(t)$ -- swelling only feeds back into vapor-gap convection
 ($L_g-H$) and gel--absorber conductance ($H/k_{gel}$). This avoids double-counting dilution (see
 \code{salt\_properties.py::pam\_licl\_gravimetric\_uptake\_g\_g}).
-\item \textbf{Water activity (LiCl):} brine activity from the Conde (2004) correlation, capped
-during absorption only by the measured PAM--LiCl DVS isotherm, i.e.\ $a_w =
-\max(a_{w,brine}, a_{w,DVS})$ in absorption; brine activity alone in desorption. Non-LiCl salts
-(NaCl, CaCl$_2$, MgCl$_2$) use brine activity only, with no DVS cap (no isotherm digitized for
-them) -- out of this document's primary scope but present in code.
+\item \textbf{Water activity:} brine activity from the Conde (2004) correlation, in both
+half-cycles and for every salt. Water in the gel has the chemical potential of pure water plus
+$RT\ln(x_w\gamma_w)$, so the salt-in-water activity model \emph{is} the sorption isotherm. An
+earlier version capped absorption with the measured PAM--LiCl DVS isotherm, $a_w =
+\max(a_{w,brine}, a_{w,DVS})$; that cap contradicted the activity model between RH 0.73 and 0.90
+(cutting equilibrium uptake up to 24\%) and then switched itself off above RH 0.90 where the
+measured curve ran out of data, producing a slope discontinuity in the wettest climates. It also
+applied to LiCl alone, putting a cliff at the pure-LiCl corner of the blend simplex.
 \item \textbf{Mass-transfer coefficient:} absorption uses a fixed empirical open-chamber
 convection coefficient $g_{chamber}$; desorption derives $g$ from the Hollands natural-convection
 $h_{conv,g}$ via a Lewis-number-unity heat/mass analogy (Note~S1 Eq.~S5). No forced convection is
@@ -150,7 +153,7 @@ LiCl/CaCl$_2$ and is evaluated at the gel's actual temperature bucket, not a fix
 $\sim$30$\times$ error in the desorption driving force $(C_R-a_w)$ for a gel dried past
 saturation.
 \item \textbf{Initial condition:} $c_w$ initializes at equilibrium with the $\sim$\SI{20}{\percent}
-RH ambient the gel is fabricated at (DVS isotherm, LiCl), unless a cyclic steady-state or explicit
+RH ambient the gel is fabricated at (brine activity), unless a cyclic steady-state or explicit
 override is requested instead.
 \end{itemize}
 
@@ -288,8 +291,8 @@ g &= g_{chamber} && \text{(absorption)} \\
 g &= h_{conv,g}\,\frac{D_{air}}{k_{air}} && \text{(desorption; Lewis-number analogy, Note~S1 Eq.~S5)}
 \end{align}
 
-\textbf{Water activity $a_w$ (PAM--LiCl):} brine activity from salt thermodynamics, capped by the
-measured DVS isotherm during absorption (Note~S2). During desorption, brine activity alone.
+\textbf{Water activity $a_w$:} brine activity from salt thermodynamics, in both half-cycles.
+No measured-uptake cap -- see the note above.
 
 \textbf{Saturation vapor pressure $P_{sat}(T)$:} Conde (2004) Saul--Wagner correlation, with a
 Tetens-equation fallback if the primary correlation is non-finite
@@ -330,7 +333,7 @@ $H_0$ in desorption.
 \item Vapor gap below \SI{7}{\milli\metre} (Wilson's thermobuoyancy/transport floor,
 $L_g - H$) is treated as mass-transfer-inhibited: $g \to 0$ rather than extrapolating the
 Hollands correlation outside its validated range.
-\item Initial $c_w$ from fabrication equilibrium RH (DVS isotherm at $H_0$) unless overridden.
+\item Initial $c_w$ from fabrication equilibrium RH (brine activity at $H_0$) unless overridden.
 \item Daily water yield is the condenser-collected mass over one desorption phase; thermal
 efficiency $\eta_{th} = \dot{m}_{water}\,h_{fg} / \int Q_{solar}\,dt$, integrated over the
 desorption phase only (blending in the near-zero-solar absorption phase would dilute the ratio
@@ -397,10 +400,11 @@ where $m_{dry} = H_0\,\rho_{gel,dry}$ is the dry (solids-only) composite mass pe
 $H_0$ is the \code{Hydrogel reference thickness (H0)} row (\SI{4}{\milli\metre}, Physics sheet).
 $\rho_{gel,dry}$ is \emph{not} the Table~S3 \code{Composite (hydrogel) density at 20\% RH
 (rho\_gel)} row (\SI{1250.2}{\kilo\gram\per\cubic\metre}) directly -- that density is measured on
-the composite already equilibrated at \SI{20}{\percent} RH, which the PAM--LiCl DVS isotherm
-(\code{physics.py::pam\_licl\_uptake\_g\_g\_at\_rh}) puts at $\approx$\SI{126}{\percent} bound
-water by dry mass, i.e.\ using it as-is would overstate the purchased dry-solids mass (and hence
-$C_{sorbent}$) by $1+u_{20} \approx 2.26\times$. Instead
+the composite already equilibrated at \SI{20}{\percent} RH, whose measured moisture content is
+$\approx$\SI{126}{\percent} by dry mass, i.e.\ using it as-is would overstate the purchased
+dry-solids mass (and hence $C_{sorbent}$) by $1+u_{20} \approx 2.26\times$. That single measured
+number is now the \code{Dry composite density (rho\_dry)} Physics row -- a mass calibration, not a
+sorption model. Instead
 $\rho_{gel,dry} = \rho_{gel}/(1+u_{20})$
 (\code{physics.py::DRY\_COMPOSITE\_DENSITY\_KG\_M3}, $\approx$\SI{553}{\kilo\gram\per\cubic\metre}),
 the same dry-basis density physics.py already uses for its own gravimetric-uptake and

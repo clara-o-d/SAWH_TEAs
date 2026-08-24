@@ -53,7 +53,7 @@ from solar_lumped.physics import (
     ThermalState,
     clamp_temperature_c,
     # Private, deliberately: this is the exact a_w the desorption ODE differences against
-    # c_r, DVS/ZSR branches included. Re-deriving it here would let the plot drift.
+    # c_r, ZSR branches included. Re-deriving it here would let the plot drift.
     _mass_transfer_driving_force,
     concentration_ratio_desorption,
     condenser_h_conv_w_m2_k,
@@ -106,8 +106,8 @@ class SystemConfig:
     thermal: SystemThermalParams | None = None
     # Override catalog salt formula weight (g/mol) for sensitivity sweeps.
     salt_formula_weight_g_mol: float | None = None
-    # Scales MW_salt in gravimetric uptake only (DVS cap during absorption).
-    salt_weight_factor: float = _pv("Salt weight factor (DVS-cap MW scaling)")
+    # Scales MW_salt in the gravimetric-uptake bookkeeping (dry composite mass).
+    salt_weight_factor: float = _pv("Salt weight factor (dry-mass MW scaling)")
     # Uniform surface/gel temperature at desorption start. None → algebraic steady
     # state (quasi_steady solves Eqs 1/3/4 algebraically each ODE step).
     segregated_initial_temp_c: float | None = None
@@ -262,7 +262,6 @@ class SystemConfig:
             salt_loading=self.salt_loading,
             salt_weight_factor=self.salt_weight_factor,
             blend_weights=blend_weights,
-            use_dvs_cap=self.complex is None,
             instant_equilibrium=self.instant_equilibrium,
         )
 
@@ -1000,9 +999,9 @@ def _integrate_absorption(
     # interval; the trapezoid on the reporting grid cannot resolve that and reads ~2.6e3x
     # high while the integration itself is fine. What that mode asserts instead is its own
     # definition -- the gel ends at equilibrium, so the residual driving force is zero.
-    # That needs no closed-form target for the equilibrium c_w, which matters because
-    # which ceiling binds (brine isotherm vs DVS uptake cap) changes with RH: at RH 0.8
-    # the DVS cap sets the endpoint, at 0.95 the brine isotherm does.
+    # That needs no closed-form target for the equilibrium c_w, which is convenient
+    # because the binding ceiling still varies with RH (brine isotherm vs the dilution
+    # ceiling / hydrate floor).
     # Desorption needs neither special case: it starts from where absorption ended, i.e.
     # already at equilibrium, so it has no opening spike.
     if config.instant_equilibrium:
@@ -1018,7 +1017,14 @@ def _integrate_absorption(
     else:
         state_change = float(sol.y[0, -1] - sol.y[0, 0])
         rhs_integral = float(np.trapezoid(dc_w_dt_hist, sol.t))
-        if abs(rhs_integral - state_change) > WATER_BALANCE_TOL * max(abs(state_change), 1e-12):
+        # The denominator needs an absolute floor on the SCALE OF THE LOADING, not 1e-12
+        # mol/m3, which is ~1e-16 relative and below float dust. Now that the fabrication
+        # loading and the absorption equilibrium come from one function, a gel cast at the
+        # ambient RH starts exactly at equilibrium and legitimately does not move; a purely
+        # relative tolerance then divides by zero-change and trips on the trapezoid's last
+        # bits. A real imbalance is a fraction of the loading, so scale the floor to it.
+        scale = max(abs(state_change), 1e-9 * max(abs(float(sol.y[0, 0])), 1.0))
+        if abs(rhs_integral - state_change) > WATER_BALANCE_TOL * scale:
             raise RuntimeError(
                 f"Absorption integration did not conserve water: dc_w/dt integral "
                 f"{rhs_integral:.1f} mol/m3 vs c_w state change {state_change:.1f} mol/m3 "

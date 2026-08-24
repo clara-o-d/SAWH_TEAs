@@ -23,7 +23,7 @@ from solar_lumped.physics import (
     H_AMB_W_M2_K,
     TILT_DEG,
     c_w_from_water_in_gel_l_m2,
-    equilibrium_c_w_from_dvs_at_rh,
+    fabrication_c_w_initial,
     wind_to_h_amb_w_m2_k,
 )
 
@@ -645,16 +645,21 @@ def baseline_profile(
     return DailyWeatherProfile(absorption=abs_prof, desorption=des_prof)
 
 
-# Wilson Methods: hydrogel cast at DVS equilibrium with ~20% RH before cycling.
+# Wilson Methods: hydrogel cast at equilibrium with ~20% RH before cycling.
 BASELINE_INITIAL_EQUILIBRIUM_RH = FABRICATION_EQUILIBRIUM_RH
 
 
 def baseline_initial_c_w(*, h_m: float = H0_M) -> float:
     """Initial brine state for baseline / Fig. 2 replay (fabrication at ~20% RH)."""
-    return equilibrium_c_w_from_dvs_at_rh(
-        BASELINE_INITIAL_EQUILIBRIUM_RH,
-        h_m=h_m,
-        h0_ref_m=h_m,
+    from solar_lumped.physics import SALT_LOADING_DEFAULT
+
+    # fabrication_c_w_initial is the one place that turns "cast at 20% RH" into a loading,
+    # for every salt, so the baseline replay and a swept config cannot start from
+    # different conventions.
+    return fabrication_c_w_initial(
+        salt_name="LiCl",
+        salt_loading=SALT_LOADING_DEFAULT,
+        hydrogel_thickness_m=h_m,
     )
 
 

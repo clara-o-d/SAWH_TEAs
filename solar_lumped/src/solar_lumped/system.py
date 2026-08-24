@@ -116,7 +116,7 @@ def build_system_config(
     ``analysis/performance/physics/run_annual.py``).
 
     Sorption/brine state uses ``SystemConfig``'s default dry-basis composite density
-    (DVS isotherm); gel thermal mass in the ODE uses ``RHO_COMPOSITE_KG_M3``.
+    (dry-basis density); gel thermal mass in the ODE uses ``RHO_COMPOSITE_KG_M3``.
     """
     get_salt(salt)
     kwargs: dict[str, object] = {

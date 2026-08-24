@@ -1151,7 +1151,7 @@ _LICL_BATCH_G_BY_SL: dict[int, float] = {
     4: 16.72,
     8: 33.44,
 }
-# Table S3 reference for anchoring synthesis c_s to the 4 g/g DVS dry-basis density.
+# Table S3 reference for anchoring synthesis c_s to the 4 g/g dry-basis density.
 _CHAMBER_CS_CALIB_SL: float = _pv("Chamber c_s calibration salt loading")
 _CHAMBER_CS_CALIB_H0_MM: float = _pv("Chamber c_s calibration hydrogel thickness")
 _CHAMBER_CS_CALIB_POUR_ML: float = _PAM_LICL_STANDARD_POUR_ML
@@ -1192,10 +1192,10 @@ def chamber_c_s_from_synthesis(
     *,
     formula_weight_g_mol: float = 42.394,
     pour_ml: float | None = None,
-    calibrate_to_dvs: bool = True,
+    calibrate_to_dry_basis: bool = True,
 ) -> float:
     """Fixed c_s for Eq. 8: poured LiCl moles spread over footprint × H₀ (SI Note S9),
-    with the 4 g/g reference scaled to DRY_COMPOSITE_DENSITY for DVS consistency."""
+    with the 4 g/g reference scaled to DRY_COMPOSITE_DENSITY for dry-basis consistency."""
     pour = pour_ml if pour_ml is not None else chamber_pour_volume_ml(salt_loading)
     cs_synth = _chamber_c_s_from_pour_inventory(
         salt_loading,
@@ -1203,10 +1203,10 @@ def chamber_c_s_from_synthesis(
         pour_ml=pour,
         formula_weight_g_mol=formula_weight_g_mol,
     )
-    if not calibrate_to_dvs:
+    if not calibrate_to_dry_basis:
         return cs_synth
 
-    cs_dvs_ref = salt_molarity_from_composite(
+    cs_dry_ref = salt_molarity_from_composite(
         _CHAMBER_CS_CALIB_SL,
         DRY_COMPOSITE_DENSITY_KG_M3,
         formula_weight_g_mol,
@@ -1217,7 +1217,7 @@ def chamber_c_s_from_synthesis(
         pour_ml=_CHAMBER_CS_CALIB_POUR_ML,
         formula_weight_g_mol=formula_weight_g_mol,
     )
-    return cs_dvs_ref * (cs_synth / cs_synth_ref)
+    return cs_dry_ref * (cs_synth / cs_synth_ref)
 
 
 def chamber_c_s_with_constant_density(
@@ -1247,25 +1247,12 @@ def chamber_c_s_with_constant_density(
     return cs_ref * (_CHAMBER_CS_CALIB_H0_MM / h0_mm)
 
 
-@lru_cache(maxsize=1)
-def _load_pam_licl_dvs_isotherm() -> tuple[np.ndarray, np.ndarray]:
-    """Note S2 DVS isotherm: RH (%), gravimetric uptake (g water / g dry composite)."""
-    path = Path(__file__).resolve().parent / "data" / "materials" / "PAM-LiCL_isotherm.csv"
-    return load_two_column_csv(path)
-
-
-def pam_licl_uptake_g_g_at_rh(rh_fraction: float) -> float:
-    """Forward DVS isotherm: equilibrium uptake (g/g) at relative humidity."""
-    rh_pct, uptake = _load_pam_licl_dvs_isotherm()
-    r = max(0.0, min(100.0, float(rh_fraction) * 100.0))
-    return float(np.interp(r, rh_pct, uptake))
-
-
-# Dry-basis composite density = rho_composite(20% RH) / (1 + uptake(20% RH)); the wet
-# density would over-count dry sorbent mass by (1 + u20) ≈ 2.26x.
-DRY_COMPOSITE_DENSITY_KG_M3: float = RHO_COMPOSITE_KG_M3 / (
-    1.0 + pam_licl_uptake_g_g_at_rh(0.20)
-)
+# Dry-basis composite density, measured: rho_composite(20% RH) / (1 + u(20% RH)). The wet
+# density would over-count dry sorbent mass by (1 + u20) ~ 2.26x. This is a mass/density
+# calibration, NOT a sorption model -- water uptake comes from the salt-in-water activity
+# model (water_activity_from_c_w) alone. It is a workbook scalar rather than a value derived
+# from a measured uptake curve, because that curve is no longer part of this model.
+DRY_COMPOSITE_DENSITY_KG_M3: float = _pv("Dry composite density (rho_dry)")
 
 
 def pam_licl_dry_mass_kg_m2(
@@ -1273,7 +1260,7 @@ def pam_licl_dry_mass_kg_m2(
     *,
     dry_density_kg_m3: float = DRY_COMPOSITE_DENSITY_KG_M3,
 ) -> float:
-    """Dry PAM-LiCl composite mass per m² at reference thickness H₀ (DVS basis)."""
+    """Dry PAM-LiCl composite mass per m² at reference thickness H₀ (dry-basis density)."""
     return dry_density_kg_m3 * h0_ref_m
 
 
@@ -1290,7 +1277,7 @@ def pam_licl_gravimetric_uptake_g_g(
 ) -> float:
     """Gravimetric moisture content m_w/m_dry (g/g) per footprint, referenced to the fixed
     fabrication thickness H₀ (Note S1), not swollen H(t) -- ``h_m`` is unused. With composite
-    state, dry mass uses ``formula_weight_g_mol * salt_weight_factor``; else the DVS density."""
+    state, dry mass uses ``formula_weight_g_mol * salt_weight_factor``; else the dry-basis density."""
     del h_m
     if (
         c_s_mol_m3 is not None
@@ -1443,24 +1430,6 @@ def equilibrium_c_w_at_rh(
 FABRICATION_EQUILIBRIUM_RH: float = _pv("Fabrication equilibrium RH")
 
 
-def equilibrium_c_w_from_dvs_at_rh(
-    rh: float,
-    *,
-    h_m: float,
-    h0_ref_m: float,
-    dry_density_kg_m3: float = DRY_COMPOSITE_DENSITY_KG_M3,
-) -> float:
-    """Paper Note S2: DVS isotherm sets sorbent equilibrium uptake at ambient RH."""
-    del h_m  # inventory referenced to H₀ (see pam_licl_gravimetric_uptake_g_g)
-    if rh <= 0.0:
-        return C_W_MIN_MOL_M3
-    u = pam_licl_uptake_g_g_at_rh(rh)
-    m_dry = dry_density_kg_m3 * h0_ref_m
-    mass_water_kg_m2 = u * m_dry
-    c_w = mass_water_kg_m2 / (h0_ref_m * WATER_MOLAR_MASS_KG_MOL)
-    return max(C_W_MIN_MOL_M3, min(C_W_MAX_MOL_M3, c_w))
-
-
 def desorption_water_activity(
     condenser_temperature_c: float,
     gel_temperature_c: float,
@@ -1485,14 +1454,16 @@ def fabrication_c_w_initial(
     hydrogel_density_kg_m3: float = DRY_COMPOSITE_DENSITY_KG_M3,
     formula_weight_g_mol: float | None = None,
     blend_weights: tuple[float, ...] | None = None,
-    use_dvs_cap: bool = True,
 ) -> float:
     """Initial gel water state after fabrication at ~20% RH ambient.
 
-    A ZSR blend (complex mode, B8) never takes the PAM-LiCl DVS branch: that
-    isotherm was measured on the LiCl composite and says nothing about a mixed
-    brine. It also casts at the blend's own clamped fabrication RH, since CaCl2 and
-    MgCl2 have no brine at 20% RH and would otherwise start the gel bone dry --
+    One route for every salt: the loading whose salt-in-water activity equals the
+    fabrication RH. LiCl used to be special-cased onto a measured composite uptake curve
+    instead; the two agreed to ~2% at this RH, and the activity model is the one that
+    stays valid outside the range where that curve had data.
+
+    A ZSR blend (complex mode, B8) casts at the blend's own clamped fabrication RH, since
+    CaCl2 and MgCl2 have no brine at 20% RH and would otherwise start the gel bone dry --
     which silently zeroed a blend's whole year.
     """
     h0 = hydrogel_thickness_m
@@ -1519,13 +1490,6 @@ def fabrication_c_w_initial(
             h_m=h0,
             h0_ref_m=h0,
             blend_weights=blend_weights,
-        )
-    if salt_name == "LiCl" and use_dvs_cap:
-        return equilibrium_c_w_from_dvs_at_rh(
-            FABRICATION_EQUILIBRIUM_RH,
-            h_m=h0,
-            h0_ref_m=h0,
-            dry_density_kg_m3=hydrogel_density_kg_m3,
         )
     s = get_salt(salt_name)
     fw = formula_weight_g_mol if formula_weight_g_mol is not None else s.formula_weight_g_mol
@@ -2095,9 +2059,15 @@ def _absorption_effective_water_activity(
     params: MassTransferParams,
     h_m: float,
 ) -> float:
-    """Composite gel a_w for Eq. 5 during open absorption: LiCl uses brine activity plus
-    the PAM-LiCl DVS cap (Note S2); other salts use brine only."""
-    aw_brine = water_activity_from_c_w(
+    """Composite gel a_w for Eq. 5 during open absorption: the salt-in-water activity.
+
+    Water in the gel has the chemical potential of pure water plus RT ln(x_w gamma_w), so
+    the salt-in-water activity model IS the sorption isotherm -- a separately measured
+    composite uptake curve is not needed, and using one as a cap made the model disagree
+    with its own thermodynamics (and, where that curve ran out of data, switch itself off
+    mid-range). Kept as a named wrapper because absorption reads a_w through one place.
+    """
+    return water_activity_from_c_w(
         c_w,
         c_s=params.c_s_mol_m3,
         ions_per_formula=params.ions_per_formula,
@@ -2110,29 +2080,6 @@ def _absorption_effective_water_activity(
         salt_weight_factor=params.salt_weight_factor,
         blend_weights=params.blend_weights,
     )
-    # The DVS cap is a measurement of *PAM-LiCl* specifically (Note S2): it applies
-    # only to the pure-LiCl composite, never to a ZSR blend (whose polymer-bound
-    # uptake was never characterized), and complex mode disables it outright via
-    # use_dvs_cap so the whole simplex rests on one brine model.
-    if params.salt_name != "LiCl" or params.blend_weights is not None or not params.use_dvs_cap:
-        return aw_brine
-    u = pam_licl_gravimetric_uptake_g_g(
-        c_w,
-        h_m,
-        h0_ref_m=params.h0_ref_m,
-        c_s_mol_m3=params.c_s_mol_m3,
-        formula_weight_g_mol=params.formula_weight_g_mol,
-        salt_loading=params.salt_loading,
-        salt_weight_factor=params.salt_weight_factor,
-    )
-    rh_pct, uptake = _load_pam_licl_dvs_isotherm()
-    if u <= float(uptake[0]):
-        aw_dvs = max(0.0, float(rh_pct[0]) / 100.0)
-    elif u >= float(uptake[-1]):
-        aw_dvs = min(1.0, float(rh_pct[-1]) / 100.0)
-    else:
-        aw_dvs = max(0.0, min(1.0, float(np.interp(u, uptake, rh_pct)) / 100.0))
-    return max(aw_brine, aw_dvs)
 
 
 def _mass_transfer_driving_force(
@@ -2203,11 +2150,6 @@ class MassTransferParams:
     # equilibrium isotherm at every instant (a_w == c_r, zero driving force).
     # See mass_transfer_g_m_s and SystemConfig.instant_equilibrium.
     instant_equilibrium: bool = False
-    # The PAM-LiCl DVS cap (Note S2) is a measurement of the LiCl composite only.
-    # Complex mode switches it off so the brine model is self-consistent across the
-    # whole blend simplex -- otherwise the pure-LiCl corner sits on a cliff that a
-    # GP would chase for a modeling reason rather than a physical one.
-    use_dvs_cap: bool = True
     # Site ambient pressure (see SystemThermalParams.p_atm_pa). Desorption's g runs on
     # D_air/k_air, both pressure-dependent, so this has to reach the mass side too.
     p_atm_pa: float = P_ATM_SEA_LEVEL_PA
@@ -2657,7 +2599,6 @@ def initial_loading(config: SystemConfig) -> float:
         hydrogel_thickness_m=config.hydrogel_thickness_m,
         hydrogel_density_kg_m3=config.hydrogel_density_kg_m3,
         blend_weights=mass.blend_weights,
-        use_dvs_cap=mass.use_dvs_cap,
     )
 
 
@@ -2666,10 +2607,10 @@ def water_in_gel_l_m2(
     h_m: float,
     *,
     h0_ref_m: float = H0_M,
-    dvs_basis: bool = True,
+    gravimetric_basis: bool = True,
 ) -> float:
-    """Water in gel (L/m²). Paper Fig. S1D uses DVS gravimetric basis (g/g × m_dry)."""
-    if dvs_basis:
+    """Water in gel (L/m²). Paper Fig. S1D reports a gravimetric basis (g/g × m_dry)."""
+    if gravimetric_basis:
         u = pam_licl_gravimetric_uptake_g_g(c_w, h_m, h0_ref_m=h0_ref_m)
         return u * pam_licl_dry_mass_kg_m2(h0_ref_m)
     return max(0.0, c_w) * h_m * WATER_MOLAR_MASS_KG_MOL

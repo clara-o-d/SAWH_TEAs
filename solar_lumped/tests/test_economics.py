@@ -38,10 +38,10 @@ def test_maintenance_cost_ignores_total_investment_factor():
     assert npv_base.annual_opex_usd_per_m2 == npv_inflated.annual_opex_usd_per_m2
 
 
-def test_dry_composite_mass_uses_dvs_dry_basis_not_wet_20rh_density():
+def test_dry_composite_mass_uses_dry_basis_not_wet_20rh_density():
     # rho_gel (Table S3) is measured at 20% RH and includes ~126% equilibrium
     # water by mass -- using it directly would price purchased dry solids at
-    # ~2.26x their real mass. dry_composite_mass_kg must use the DVS-corrected
+    # ~2.26x their real mass. dry_composite_mass_kg must use the moisture-corrected
     # dry-basis density instead (physics.py::DRY_COMPOSITE_DENSITY_KG_M3).
     assert DRY_COMPOSITE_DENSITY_KG_M3 < HYDROGEL_DENSITY_KG_M3
     thickness_m = 0.004

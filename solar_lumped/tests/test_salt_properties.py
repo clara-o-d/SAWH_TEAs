@@ -24,11 +24,11 @@ def test_chamber_pour_volume_ml_pam_licl_2gg():
     assert chamber_pour_volume_ml(4.0) == pytest.approx(8.0)
 
 
-def test_chamber_c_s_from_synthesis_anchors_4gg_to_dvs():
+def test_chamber_c_s_from_synthesis_anchors_4gg_to_dry_basis():
     fw = 42.394
-    cs_dvs = salt_molarity_from_composite(4.0, DRY_COMPOSITE_DENSITY_KG_M3, fw)
+    cs_dry = salt_molarity_from_composite(4.0, DRY_COMPOSITE_DENSITY_KG_M3, fw)
     cs_synth = chamber_c_s_from_synthesis(4.0, 2.34, formula_weight_g_mol=fw)
-    assert cs_synth == pytest.approx(cs_dvs, rel=1e-6)
+    assert cs_synth == pytest.approx(cs_dry, rel=1e-6)
 
 
 def test_chamber_c_s_from_synthesis_scales_with_h0_at_fixed_sl():
@@ -106,7 +106,7 @@ def test_desorption_water_activity_decreases_with_gel_temp():
     assert aw_hot < aw_cool
 
 
-def test_gravimetric_uptake_component_basis_matches_dvs_density():
+def test_gravimetric_uptake_component_basis_matches_dry_density():
     from solar_lumped.physics import pam_licl_gravimetric_uptake_g_g
 
     config = SystemConfig.baseline()

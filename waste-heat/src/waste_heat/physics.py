@@ -203,40 +203,11 @@ def saturation_vapor_pressure_pa(temperature_c: float) -> float:
     return 1000.0 * 0.61078 * math.exp(17.27 * t / (t + 237.3))
 
 
-@lru_cache(maxsize=1)
-def _load_pam_licl_dvs_isotherm() -> tuple[np.ndarray, np.ndarray]:
-    """Note S2 DVS isotherm: RH (%), gravimetric uptake (g water / g dry composite)."""
-    path = Path(__file__).resolve().parent / "data" / "materials" / "PAM-LiCL_isotherm.csv"
-    rh_pct: list[float] = []
-    uptake_g_g: list[float] = []
-    with path.open() as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            parts = line.split(",")
-            rh_pct.append(float(parts[0].strip()))
-            uptake_g_g.append(float(parts[1].strip()))
-    if not rh_pct:
-        raise ValueError(f"No isotherm data in {path}")
-    order = np.argsort(rh_pct)
-    rh = np.array(rh_pct, dtype=float)[order]
-    uptake = np.array(uptake_g_g, dtype=float)[order]
-    return rh, uptake
-
-
-def pam_licl_uptake_g_g_at_rh(rh_fraction: float) -> float:
-    """Forward DVS isotherm: equilibrium uptake (g/g) at relative humidity."""
-    rh_pct, uptake = _load_pam_licl_dvs_isotherm()
-    r = max(0.0, min(100.0, float(rh_fraction) * 100.0))
-    return float(np.interp(r, rh_pct, uptake))
-
-
-# Dry-basis composite density = rho_composite(20% RH) / (1 + uptake(20% RH)); the wet
-# density would over-count dry sorbent mass by (1 + u20) ≈ 2.26x.
-DRY_COMPOSITE_DENSITY_KG_M3: float = RHO_COMPOSITE_KG_M3 / (
-    1.0 + pam_licl_uptake_g_g_at_rh(0.20)
-)
+# Dry-basis composite density, measured: rho_composite(20% RH) / (1 + u(20% RH)). The wet
+# density would over-count dry sorbent mass by (1 + u20) ~ 2.26x. A mass/density
+# calibration, NOT a sorption model -- water uptake comes from the salt-in-water activity
+# model (water_activity_from_c_w) alone, here as in solar_lumped.
+DRY_COMPOSITE_DENSITY_KG_M3: float = _pv("Dry composite density (rho_dry)")
 
 
 def pam_licl_dry_mass_kg_m2(
@@ -244,7 +215,7 @@ def pam_licl_dry_mass_kg_m2(
     *,
     dry_density_kg_m3: float = DRY_COMPOSITE_DENSITY_KG_M3,
 ) -> float:
-    """Dry PAM-LiCl composite mass per m² at reference thickness H₀ (DVS basis)."""
+    """Dry PAM-LiCl composite mass per m² at reference thickness H₀ (dry-basis density)."""
     return dry_density_kg_m3 * h0_ref_m
 
 
@@ -394,27 +365,6 @@ def equilibrium_c_w_at_rh(
 
 # Methods: hydrogel cast at equilibrium with ~20% RH ambient.
 FABRICATION_EQUILIBRIUM_RH: float = _pv("Fabrication equilibrium RH")
-
-
-def equilibrium_c_w_from_dvs_at_rh(
-    rh: float,
-    *,
-    h_m: float,
-    h0_ref_m: float,
-    dry_density_kg_m3: float = DRY_COMPOSITE_DENSITY_KG_M3,
-) -> float:
-    """Paper Note S2: DVS isotherm sets sorbent equilibrium uptake at ambient RH."""
-    if rh <= 0.0:
-        return C_W_MIN_MOL_M3
-    # Forward DVS isotherm: equilibrium uptake (g/g) at relative humidity.
-    rh_pct, uptake = _load_pam_licl_dvs_isotherm()
-    r = max(0.0, min(100.0, float(rh) * 100.0))
-    u = float(np.interp(r, rh_pct, uptake))
-    m_dry = dry_density_kg_m3 * h0_ref_m
-    mass_water_kg_m2 = u * m_dry
-    h = max(h_m, h0_ref_m * 0.25)
-    c_w = mass_water_kg_m2 / (h * WATER_MOLAR_MASS_KG_MOL)
-    return max(C_W_MIN_MOL_M3, min(C_W_MAX_MOL_M3, c_w))
 
 
 def m_des_kg_s_m2(
@@ -617,16 +567,10 @@ def _absorption_effective_water_activity(
         h_m=h_m,
         h0_ref_m=params.h0_ref_m,
     )
-    # Invert DVS isotherm: water activity from gravimetric uptake.
-    u = pam_licl_gravimetric_uptake_g_g(c_w, h_m, h0_ref_m=params.h0_ref_m)
-    rh_pct, uptake = _load_pam_licl_dvs_isotherm()
-    if u <= float(uptake[0]):
-        aw_dvs = max(0.0, float(rh_pct[0]) / 100.0)
-    elif u >= float(uptake[-1]):
-        aw_dvs = min(1.0, float(rh_pct[-1]) / 100.0)
-    else:
-        aw_dvs = max(0.0, min(1.0, float(np.interp(u, uptake, rh_pct)) / 100.0))
-    return max(aw_brine, aw_dvs)
+    # No measured-uptake cap: water in the gel has the chemical potential of pure water
+    # plus RT ln(x_w gamma_w), so the salt-in-water activity IS the isotherm. Mirrors
+    # solar_lumped.physics._absorption_effective_water_activity.
+    return aw_brine
 
 
 def _mass_transfer_driving_force(
@@ -897,15 +841,26 @@ def water_in_gel_l_m2(
     *,
     config: SystemConfig,
 ) -> float:
-    """Water in gel (L/m²) on Wilson Fig. S1 DVS gravimetric basis."""
+    """Water in gel (L/m²) on Wilson Fig. S1's gravimetric basis."""
     u = pam_licl_gravimetric_uptake_g_g(loading, h_m, h0_ref_m=config.hydrogel_thickness_m)
     return u * pam_licl_dry_mass_kg_m2(config.hydrogel_thickness_m)
 
 
 def initial_bed_states(config: SystemConfig) -> tuple[BedState, BedState]:
     h0 = config.hydrogel_thickness_m
-    c_ads = equilibrium_c_w_from_dvs_at_rh(RH_AMB * 0.65, h_m=h0, h0_ref_m=h0)
-    c_regen = equilibrium_c_w_from_dvs_at_rh(FABRICATION_EQUILIBRIUM_RH, h_m=h0, h0_ref_m=h0)
+    # Brine equilibrium at each bed's RH, the same route solar_lumped's
+    # fabrication_c_w_initial takes.
+    mp = mass_transfer_params(config)
+    c_ads = equilibrium_c_w_at_rh(
+        RH_AMB * 0.65, c_s=mp.c_s_mol_m3, ions_per_formula=mp.ions_per_formula,
+        salt_name=mp.salt_name, formula_weight_g_mol=mp.formula_weight_g_mol,
+        salt_loading=config.salt_loading, h0_ref_m=h0,
+    )
+    c_regen = equilibrium_c_w_at_rh(
+        FABRICATION_EQUILIBRIUM_RH, c_s=mp.c_s_mol_m3, ions_per_formula=mp.ions_per_formula,
+        salt_name=mp.salt_name, formula_weight_g_mol=mp.formula_weight_g_mol,
+        salt_loading=config.salt_loading, h0_ref_m=h0,
+    )
     return BedState(c_ads, h0), BedState(c_regen, h0)
 
 
