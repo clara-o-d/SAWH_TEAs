@@ -23,15 +23,23 @@ from solar_lumped.weather import fetch_year_weather
 from solar_lumped.weather import real_weather_days_from_df, site_elevation_m
 
 
-def default_output_path(lat: float, lon: float, year: int) -> Path:
-    tag = f"annual_{lat:+.4f}_{lon:+.4f}_{year}".replace("+", "")
+def default_output_path(lat: float | None, lon: float | None, year: int) -> Path:
+    tag = "annual_stanford_measured_%d" % year if lat is None else (
+        f"annual_{lat:+.4f}_{lon:+.4f}_{year}".replace("+", "")
+    )
     return _REPO / "outputs" / "annual_sim" / f"{tag}.csv"
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--lat", type=float, required=True)
-    p.add_argument("--lon", type=float, required=True)
+    p.add_argument("--lat", type=float, default=None)
+    p.add_argument("--lon", type=float, default=None)
+    # Measured Stanford Met Tower export instead of an Open-Meteo fetch. Compute nodes and
+    # offline runs aside, this is a different instrument, so lat/lon are read off the frame.
+    p.add_argument(
+        "--stanford-measured", action="store_true",
+        help="Use weather.stanford_year_weather(year) rather than fetching --lat/--lon.",
+    )
     p.add_argument("--year", type=int, default=2024)
     p.add_argument("--cache-dir", type=str, default=str(_REPO / ".weather_cache"))
     p.add_argument("--stride", type=int, default=1, help="Simulate every Nth day (default: 1)")
@@ -54,7 +62,14 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--insulation-gap-mm", type=float, default=5.0)
     p.add_argument("--tilt-deg", type=float, default=TILT_DEG)
     p.add_argument("--fin-area-ratio", type=float, default=7.1)
-    return p.parse_args(argv)
+    # A1 schedule offsets. These are not SystemConfig fields -- they move the day/night
+    # split inside the weather profile, so they have to reach real_weather_days_from_df.
+    p.add_argument("--seal-offset-h", type=float, default=0.0)
+    p.add_argument("--open-offset-h", type=float, default=0.0)
+    args = p.parse_args(argv)
+    if not args.stanford_measured and (args.lat is None or args.lon is None):
+        p.error("--lat/--lon are required unless --stanford-measured is given")
+    return args
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -62,11 +77,21 @@ def main(argv: list[str] | None = None) -> int:
     output = args.output or default_output_path(args.lat, args.lon, args.year)
     timeseries_dir = output.parent / output.stem / "timeseries"
 
-    print(
-        f"Fetching {args.year} weather for ({args.lat:+.4f}, {args.lon:+.4f})…",
-        flush=True,
-    )
-    df = fetch_year_weather(args.lat, args.lon, args.year, cache_dir=args.cache_dir)
+    if args.stanford_measured:
+        from solar_lumped.weather import stanford_year_weather
+
+        df = stanford_year_weather(args.year)
+        print(
+            f"Measured Stanford Met Tower {args.year}: {len(df)} rows, "
+            f"{df.index.min().date()} to {df.index.max().date()}",
+            flush=True,
+        )
+    else:
+        print(
+            f"Fetching {args.year} weather for ({args.lat:+.4f}, {args.lon:+.4f})…",
+            flush=True,
+        )
+        df = fetch_year_weather(args.lat, args.lon, args.year, cache_dir=args.cache_dir)
 
     # Config after the fetch, because the site's elevation comes off the frame: it sets
     # ambient pressure, hence every gap air property and the h_amb density derate. A real
@@ -82,7 +107,10 @@ def main(argv: list[str] | None = None) -> int:
         site_elevation_m=site_elevation_m(df),
     )
 
-    day_items = real_weather_days_from_df(df, stride=args.stride, poa_tilt_deg=args.tilt_deg)
+    day_items = real_weather_days_from_df(
+        df, stride=args.stride, poa_tilt_deg=args.tilt_deg,
+        seal_offset_h=args.seal_offset_h, open_offset_h=args.open_offset_h,
+    )
     if not day_items:
         print("No valid weather days found.", file=sys.stderr)
         return 1

@@ -399,10 +399,17 @@ def _write_cost_breakdown_csv(
 
 
 def _uses_cycled_initial(weather_mode: str, *, initial_water_l_m2: float | None) -> bool:
-    """Atacama / real weather start from post-cycle gel state unless overridden."""
+    """Atacama / real weather start from post-cycle gel state unless overridden.
+
+    stanford-measured belongs here for the same reason "real" does: one arbitrary calendar
+    day reported from the fabrication-RH initial condition is a transient, not that day's
+    steady behaviour, and the gel state dominates the yield.
+    """
     if initial_water_l_m2 is not None:
         return False
-    return weather_mode in ("real", "atacama-replay", "cambridge-replay")
+    return weather_mode in (
+        "real", "stanford-measured", "atacama-replay", "cambridge-replay",
+    )
 
 
 def register_cyclic_warmup_arguments(p: argparse.ArgumentParser) -> None:
@@ -459,7 +466,8 @@ def register_solar_sim_arguments(p: argparse.ArgumentParser) -> None:
     """CLI arguments shared by ``run_solar_sim.py`` and site LCOW breakdown scripts."""
     p.add_argument(
         "--weather-mode",
-        choices=("real", "baseline", "atacama-replay", "cambridge-replay", "fig-s1-replay"),
+        choices=("real", "stanford-measured", "baseline", "atacama-replay",
+                 "cambridge-replay", "fig-s1-replay"),
         default="baseline",
     )
     p.add_argument("--lat", type=float, default=None)
@@ -478,6 +486,10 @@ def register_solar_sim_arguments(p: argparse.ArgumentParser) -> None:
     p.add_argument("--hydrogel-thickness-mm", type=float, default=4.0)
     p.add_argument("--vapor-gap-mm", type=float, default=40.0)
     p.add_argument("--insulation-gap-mm", type=float, default=5.0)
+    # A1 schedule offsets. Not SystemConfig fields -- they move the day/night split inside
+    # the weather profile, so they only bite on the modes that build a profile from a frame.
+    p.add_argument("--seal-offset-h", type=float, default=0.0)
+    p.add_argument("--open-offset-h", type=float, default=0.0)
     p.add_argument(
         "--tilt-deg",
         type=float,
@@ -510,6 +522,15 @@ def resolve_solar_sim_arguments(args: argparse.Namespace, parser: argparse.Argum
             parser.error("--weather-mode real requires --lat and --lon")
         if args.day is None:
             args.day = date(args.year, 6, 15)
+        elif args.day.year != args.year:
+            parser.error(f"--day {args.day.isoformat()} is not in --year {args.year}")
+    elif args.weather_mode == "stanford-measured":
+        # Defaults to the latest day that spans a full diurnal cycle, not the last calendar
+        # date in the export -- that one is usually truncated wherever the download stopped.
+        from solar_lumped.weather import stanford_last_complete_day
+
+        if args.day is None:
+            args.day = stanford_last_complete_day(args.year)
         elif args.day.year != args.year:
             parser.error(f"--day {args.day.isoformat()} is not in --year {args.year}")
     elif args.weather_mode not in ("baseline", "fig-s1-replay"):
@@ -607,12 +628,31 @@ def run_solar_simulation(
     if use_cycled:
         inventory_note = f" ({n_warmup} warmup day(s) + 1 reporting day)"
 
-    if args.weather_mode == "real":
+    if args.weather_mode == "stanford-measured":
+        from solar_lumped.weather import stanford_measured_day_profile
+
+        profile, elevation_m = stanford_measured_day_profile(
+            args.day,
+            poa_tilt_deg=config.tilt_deg,
+            seal_offset_h=args.seal_offset_h,
+            open_offset_h=args.open_offset_h,
+        )
+        config = dataclasses.replace(config, site_elevation_m=elevation_m)
+        day_str = args.day.isoformat()
+        inventory_note = (
+            f" (cycled initial state; measured Stanford weather for {day_str}; "
+            "Aitken-converged steady state)"
+            if use_cycled
+            else f" (measured Stanford weather for {day_str})"
+        )
+    elif args.weather_mode == "real":
         profile = real_day_profile(
             args.lat,
             args.lon,
             args.day,
             cache_dir=args.cache_dir,
+            seal_offset_h=args.seal_offset_h,
+            open_offset_h=args.open_offset_h,
             # This CLI has its own tilt knob, so POA transposes onto --tilt-deg rather
             # than inheriting weather.POA_DEFAULT_TILT_DEG -- otherwise --tilt-deg 45
             # would change gap convection while the absorber kept collecting a 30 deg

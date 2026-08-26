@@ -774,6 +774,8 @@ def real_day_profile(
     *,
     cache_dir: str | None = None,
     poa_tilt_deg: float | None = POA_DEFAULT_TILT_DEG,
+    seal_offset_h: float = 0.0,
+    open_offset_h: float = 0.0,
 ) -> DailyWeatherProfile:
     """One real calendar day's weather at a site -- no averaging of any kind.
 
@@ -784,7 +786,56 @@ def real_day_profile(
     day_df = _single_day_df(df, day)
     if day_df.empty:
         raise ValueError(f"No weather data for {day.isoformat()} at ({lat:.4f}, {lon:.4f}).")
-    return profile_from_day_df(day_df, poa_tilt_deg=poa_tilt_deg)
+    return profile_from_day_df(
+        day_df, poa_tilt_deg=poa_tilt_deg,
+        seal_offset_h=seal_offset_h, open_offset_h=open_offset_h,
+    )
+
+
+def stanford_measured_day_profile(
+    day: date,
+    *,
+    poa_tilt_deg: float | None = POA_DEFAULT_TILT_DEG,
+    seal_offset_h: float = 0.0,
+    open_offset_h: float = 0.0,
+) -> tuple[DailyWeatherProfile, float]:
+    """(profile, elevation) for one calendar day of measured Stanford Met Tower weather.
+
+    Returns the elevation alongside the profile because the caller needs both and the frame
+    is the only place either comes from -- a site left at the sea-level default is silently a
+    different system (ambient pressure sets every gap air property and the h_amb derate).
+
+    A partially-recorded final day is a real hazard here: the export ends mid-morning, and a
+    day truncated before solar noon would simulate as a short, cool day rather than raising
+    anything. Callers wanting "the latest day" should use
+    :func:`stanford_last_complete_day`.
+    """
+    df = stanford_year_weather(day.year)
+    day_df = _single_day_df(df, day)
+    if day_df.empty:
+        raise ValueError(f"No measured Stanford weather for {day.isoformat()}.")
+    return (
+        profile_from_day_df(
+            day_df, poa_tilt_deg=poa_tilt_deg,
+            seal_offset_h=seal_offset_h, open_offset_h=open_offset_h,
+        ),
+        site_elevation_m(df),
+    )
+
+
+def stanford_last_complete_day(year: int) -> date:
+    """The most recent measured Stanford day that spans a full diurnal cycle.
+
+    The export's final day stops wherever the download did, so the last calendar date in the
+    frame is usually a partial day. "Complete" here means the day's samples reach at least
+    22 h of span -- enough to contain both a night and a full solar arc.
+    """
+    df = stanford_year_weather(year)
+    for day, group in reversed(list(df.groupby(df.index.date))):
+        hours = group.index.hour + group.index.minute / 60.0
+        if float(hours.max() - hours.min()) >= 22.0:
+            return day
+    raise ValueError(f"No complete measured Stanford day in {year}.")
 
 
 def real_site_elevation_m(

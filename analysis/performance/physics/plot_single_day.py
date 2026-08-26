@@ -31,7 +31,12 @@ from solar_lumped.system import (  # noqa: E402
     resolve_solar_sim_arguments,
     run_solar_simulation,
 )
-from solar_lumped.simulation import detailed_series, water_inventory_series  # noqa: E402
+from solar_lumped.simulation import (  # noqa: E402
+    detailed_series,
+    plot_detailed_diagnostics,
+    water_inventory_series,
+    write_detailed_csv,
+)
 
 _TEMP_SERIES = (
     ("t_abs_c", "Absorber", "#D55E00"),
@@ -50,6 +55,14 @@ def main() -> int:
     ap.add_argument("--output", type=Path, default=None)
     ap.add_argument("--csv", type=Path, default=None, help="Also write the plotted series")
     ap.add_argument("--title", default=None)
+    # The same run's full diagnostic set -- RH and T_amb on their own panel, solar, and the
+    # c_r / a_w / driving-force / DRH(T_gel) stack. Already built by
+    # simulation.plot_detailed_diagnostics; this just routes this run's series into it rather
+    # than crowding them onto the temperature figure.
+    ap.add_argument(
+        "--diagnostics-output", type=Path, default=None,
+        help="Also write the detailed diagnostics figure (temps+driving force, RH/T_amb, solar).",
+    )
     args = ap.parse_args()
 
     resolve_solar_sim_arguments(args, ap)
@@ -60,6 +73,16 @@ def main() -> int:
 
     series = detailed_series(result.profile, abs_res, des_res, result.config)
     water = water_inventory_series(abs_res, des_res, config=result.config)
+
+    if args.diagnostics_output is not None:
+        plot_detailed_diagnostics(
+            args.diagnostics_output, series, title=args.title,
+            show_solar=False, grid=False,
+        )
+        write_detailed_csv(args.diagnostics_output.with_suffix(".csv"), series)
+        print(f"Wrote {args.diagnostics_output}")
+        print(f"Wrote {args.diagnostics_output.with_suffix('.csv')}")
+
     t_hr = series.time_s / 3600.0
     w_hr = water.time_s / 3600.0
 
@@ -68,9 +91,10 @@ def main() -> int:
         ax.plot(t_hr, getattr(series, attr), color=color, linewidth=1.7, label=label)
     ax.set_xlabel("Time (h)")
     ax.set_ylabel("Temperature (°C)")
-    ax.grid(True, alpha=0.3)
+    ax.grid(False)
 
     ax_w = ax.twinx()
+    ax_w.grid(False)   # twin axes draw their own grid; the parent's grid(False) misses it
     ax_w.plot(w_hr, water.water_l_m2, color="#000000", linewidth=2.4, linestyle="--",
               label="Water in gel")
     ax_w.set_ylabel("Water in gel (L/m²)")

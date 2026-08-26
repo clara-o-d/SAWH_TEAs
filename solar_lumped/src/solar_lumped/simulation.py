@@ -1657,13 +1657,34 @@ def plot_detailed_diagnostics(
     series: DetailedSeries,
     *,
     title: str | None = None,
+    show_solar: bool = True,
+    grid: bool = True,
 ) -> None:
+    """Three stacked panels: temperatures with the desorption driving force, weather
+    (T_amb + RH), and forcing (solar + h_amb).
+
+    ``show_solar=False`` drops the third panel, and ``grid=False`` drops the gridlines. Both
+    default to the historical behaviour, because site_drh_diagnostics.py and
+    run_physics_checks.py also render through here and their figures should not move.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
     time_h = series.time_s / 3600.0
     phase_mark_h = series.absorption_end_s / 3600.0
 
-    fig, axes = plt.subplots(3, 1, figsize=(8, 8), sharex=True)
-    ax_t, ax_wx, ax_sol = axes
+    def _grid(ax) -> None:
+        """ax.grid(False, alpha=...) turns the grid ON -- matplotlib treats any kwarg as
+        'you want the grid', overriding visible=False. So style kwargs only when enabling."""
+        if grid:
+            ax.grid(True, alpha=0.3)
+        else:
+            ax.grid(False)
+
+    n_panels = 3 if show_solar else 2
+    fig, axes = plt.subplots(
+        n_panels, 1, figsize=(8, 8 if show_solar else 5.6), sharex=True,
+    )
+    ax_t, ax_wx = axes[0], axes[1]
+    ax_sol = axes[2] if show_solar else None
 
     ax_t.plot(time_h, series.t_abs_c, color="#8b2000", linewidth=1.8, label="Absorber")
     ax_t.plot(time_h, series.t_glass_c, color="#b06000", linewidth=1.8, label="Glass")
@@ -1679,11 +1700,12 @@ def plot_detailed_diagnostics(
     )
     ax_t.axvline(phase_mark_h, color="k", linewidth=0.8, linestyle="--", alpha=0.45)
     ax_t.set_ylabel("Temperature (°C)")
-    ax_t.grid(True, alpha=0.3)
+    _grid(ax_t)
 
     # c_r vs a_w vs DRH on an RH axis: the shaded c_r - a_w gap is the Eq. 5 driving
     # force, and desorption stalls where c_r meets DRH.
     ax_cr = ax_t.twinx()
+    _grid(ax_cr)
     ax_cr.plot(time_h, series.c_r * 100.0, color="#1b9e77", linewidth=1.6, label="c_r")
     ax_cr.plot(
         time_h,
@@ -1724,9 +1746,10 @@ def plot_detailed_diagnostics(
     ax_wx.axvline(phase_mark_h, color="k", linewidth=0.8, linestyle="--", alpha=0.45)
     ax_wx.set_ylabel("Temperature (°C)", color="#d95f02")
     ax_wx.tick_params(axis="y", labelcolor="#d95f02")
-    ax_wx.grid(True, alpha=0.3)
+    _grid(ax_wx)
 
     ax_rh = ax_wx.twinx()
+    _grid(ax_rh)
     ax_rh.plot(
         time_h,
         series.relative_humidity * 100.0,
@@ -1742,22 +1765,24 @@ def plot_detailed_diagnostics(
     lines_r, labels_r = ax_rh.get_legend_handles_labels()
     ax_wx.legend(lines_l + lines_r, labels_l + labels_r, loc="upper left", fontsize=8)
 
-    ax_sol.plot(time_h, series.solar_w_m2, color="#e6ab02", linewidth=1.8, label="Solar")
-    ax_sol.axvline(phase_mark_h, color="k", linewidth=0.8, linestyle="--", alpha=0.45)
-    ax_sol.set_ylabel("Solar (W/m²)", color="#e6ab02")
-    ax_sol.tick_params(axis="y", labelcolor="#e6ab02")
-    ax_sol.grid(True, alpha=0.3)
+    if ax_sol is not None:
+        ax_sol.plot(time_h, series.solar_w_m2, color="#e6ab02", linewidth=1.8, label="Solar")
+        ax_sol.axvline(phase_mark_h, color="k", linewidth=0.8, linestyle="--", alpha=0.45)
+        ax_sol.set_ylabel("Solar (W/m²)", color="#e6ab02")
+        ax_sol.tick_params(axis="y", labelcolor="#e6ab02")
+        _grid(ax_sol)
 
-    ax_h = ax_sol.twinx()
-    ax_h.plot(time_h, series.h_amb_w_m2_k, color="#7570b3", linewidth=1.4, label="h_amb")
-    ax_h.set_ylabel("h_amb (W/m²K)", color="#7570b3")
-    ax_h.tick_params(axis="y", labelcolor="#7570b3")
+        ax_h = ax_sol.twinx()
+        _grid(ax_h)
+        ax_h.plot(time_h, series.h_amb_w_m2_k, color="#7570b3", linewidth=1.4, label="h_amb")
+        ax_h.set_ylabel("h_amb (W/m²K)", color="#7570b3")
+        ax_h.tick_params(axis="y", labelcolor="#7570b3")
 
-    lines_l, labels_l = ax_sol.get_legend_handles_labels()
-    lines_r, labels_r = ax_h.get_legend_handles_labels()
-    ax_sol.legend(lines_l + lines_r, labels_l + labels_r, loc="upper left", fontsize=8)
+        lines_l, labels_l = ax_sol.get_legend_handles_labels()
+        lines_r, labels_r = ax_h.get_legend_handles_labels()
+        ax_sol.legend(lines_l + lines_r, labels_l + labels_r, loc="upper left", fontsize=8)
 
-    ax_sol.set_xlabel("Time (h)")
+    axes[-1].set_xlabel("Time (h)")
     if title:
         fig.suptitle(title)
     fig.tight_layout()

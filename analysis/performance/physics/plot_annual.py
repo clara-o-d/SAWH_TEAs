@@ -47,13 +47,29 @@ def load_summary(
     return df.sort_values("date").reset_index(drop=True)
 
 
+SHOW_GRID = False
+
+
+def _grid(ax) -> None:
+    """Grid on/off for one axis.
+
+    Not ``ax.grid(SHOW_GRID, alpha=0.3)``: matplotlib documents that if ANY kwargs are
+    supplied it assumes you want the grid and forces visible=True, so passing the style
+    kwargs unconditionally silently re-enables it.
+    """
+    if SHOW_GRID:
+        _grid(ax)
+    else:
+        ax.grid(False)
+
+
 def _plot_avg_peak(ax, dates, avg, peak, *, color: str, ylabel: str, avg_label: str, peak_label: str) -> None:
     """Shared avg-line (solid) + peak-line (dashed, faded) panel styling."""
     ax.plot(dates, avg, color=color, linewidth=1.6, label=avg_label)
     ax.plot(dates, peak, color=color, linewidth=1.2, linestyle="--", alpha=0.7, label=peak_label)
     ax.set_ylabel(ylabel)
     ax.legend(loc="upper right", fontsize=9)
-    ax.grid(True, alpha=0.3)
+    _grid(ax)
 
 
 def plot_annual_summary(df: pd.DataFrame, *, title: str | None = None) -> plt.Figure:
@@ -65,7 +81,7 @@ def plot_annual_summary(df: pd.DataFrame, *, title: str | None = None) -> plt.Fi
 
     ax_yield.plot(dates, df["daily_yield_l_m2"], color="#1b9e77", linewidth=1.6)
     ax_yield.set_ylabel("Daily output\n(L/m²)")
-    ax_yield.grid(True, alpha=0.3)
+    _grid(ax_yield)
 
     ax_water.plot(
         dates,
@@ -83,7 +99,7 @@ def plot_annual_summary(df: pd.DataFrame, *, title: str | None = None) -> plt.Fi
     )
     ax_water.set_ylabel("Water (L/m²)")
     ax_water.legend(loc="upper right", fontsize=9)
-    ax_water.grid(True, alpha=0.3)
+    _grid(ax_water)
 
     ax_temp.plot(dates, df["t_abs_peak_c"], linewidth=1.4, label="Absorber")
     ax_temp.plot(dates, df["t_glass_peak_c"], linewidth=1.4, label="Glass")
@@ -91,7 +107,7 @@ def plot_annual_summary(df: pd.DataFrame, *, title: str | None = None) -> plt.Fi
     ax_temp.plot(dates, df["t_gel_peak_c"], linewidth=1.4, linestyle="--", label="Gel")
     ax_temp.set_ylabel("Peak temp (°C)")
     ax_temp.legend(loc="upper right", fontsize=8, ncol=2)
-    ax_temp.grid(True, alpha=0.3)
+    _grid(ax_temp)
 
     _plot_avg_peak(
         ax_rh, dates, df["rh_avg_frac"] * 100.0, df["rh_peak_frac"] * 100.0,
