@@ -18,13 +18,18 @@
 # condenser_ambient each select a *code path* in the JAX step, so they cannot share a
 # compiled batch anyway (see site_sweep.scenario_groups). 8 scenarios -> 8 tasks.
 #
-# SIZING. At stride 10 a year walk is 37 days, not 366, so a call is ~7 min rather than
-# ~70. Each of the 3 site groups pays its own set of rounds:
-#   3 groups x (1 init + 5 infill at batch 6 + 1 verify + 1 baseline) = ~24 calls
-#   ~24 x 7 min = ~3 h GPU per scenario task
-# EXTRAPOLATED from FINDINGS.md's A100 per-day cost, not measured at stride 10 or at this
-# width -- treat the 12 h walltime as covering that uncertainty, and read the loop's own
-# "eta" from the round lines once task 0 clears its first round.
+# SIZING -- MEASURED, job 40830060 on serc (8 tasks, 87 sites, stride 10, 3 groups of 29):
+#   completed tasks ran 7:42, 7:58, 8:39, 8:32; four others passed 8:57 still running
+#   MaxRSS 10.9-12.4 GB against --mem=64G, so width 696 was never memory-bound
+# Walltime is 20 h on that evidence, not the 12 h this was first submitted with -- four
+# tasks came within ~3 h of truncation.
+#
+# Note what this rules out: at ~24 calls/task, 8.5 h means ~21 min/call, not the ~7 min a
+# 37-day walk at the A100's measured ~11 s/day predicts. The extra ~14 min/call is NOT
+# physics. Prime suspects are the sequential per-site EI proposals (see the ponytail note at
+# bayesopt.py's propose_batch call) and _profiles_for_design's per-(design, site) pandas
+# re-split, whose groupby spans the whole year no matter what day_stride is. Profile one of
+# them before assuming a bigger GPU allocation helps -- it would not have.
 #
 # The GPU is not the whole story: see --cpus-per-task below.
 #
@@ -40,7 +45,7 @@
 #     > outputs/bayesopt_global_12deg/global_summary.csv
 #
 #SBATCH --job-name=sawh-bo-global-12deg
-#SBATCH --time=12:00:00
+#SBATCH --time=20:00:00
 #SBATCH --partition=serc
 #SBATCH --gres=gpu:1
 # 16 not 4: with stride 10 the GPU year walk drops to ~7 min/call while the CPU-side
