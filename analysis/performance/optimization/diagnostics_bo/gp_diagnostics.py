@@ -210,8 +210,15 @@ def plot_slices(state: SurrogateState, X: np.ndarray, y: np.ndarray, bounds: Des
 
     x_best = X[int(np.argmin(y))]
     bounds_arr = bounds.as_array()
-    n_dims = len(VAR_ORDER)
-    n_cols = 3
+    # bounds.names(), not VAR_ORDER: VAR_ORDER is simple mode's list, so a complex-mode run
+    # (13 dims) used to draw only the first 4 slices AND label them with simple-mode names --
+    # panel 2 read "tilt_deg" while actually slicing vapor_gap_m. names() follows the bounds
+    # object's own mode, so labels and slices cannot disagree.
+    names = bounds.names()
+    n_dims = len(names)
+    # Near-square rather than a fixed 3 wide: 4 dims lays out 2x2 instead of 3+1 with two
+    # blanks, and 13 dims goes 4x4 instead of 3x5.
+    n_cols = int(np.ceil(np.sqrt(n_dims)))
     n_rows = -(-n_dims // n_cols)
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 3.2 * n_rows))
     axes = np.atleast_1d(axes).reshape(-1)
@@ -224,7 +231,7 @@ def plot_slices(state: SurrogateState, X: np.ndarray, y: np.ndarray, bounds: Des
     y_in_view = y[~outliers] if (~outliers).any() else y
     view_lo, view_hi = float(np.min(y_in_view)), float(np.max(y_in_view))
 
-    for d, name in enumerate(VAR_ORDER):
+    for d, name in enumerate(names):
         lo, hi = bounds_arr[d]
         grid = np.linspace(lo, hi, n_points)
         Xs = np.tile(x_best, (n_points, 1))
