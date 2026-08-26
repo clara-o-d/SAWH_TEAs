@@ -8,9 +8,10 @@ Log y-axis, not truncated linear: the distributions span 1.6-24.3 USD/m3 (15x), 
 shared linear axis the three instant-kinetics scenarios collapse into ~4% of the plot
 height. Quartiles are order statistics, so the box geometry is unaffected by the transform.
 
-One series, one neutral fill: the scenario names on the x axis carry identity, so there is
+One series, one fill: the scenario names on the x axis carry identity, so there is
 nothing for hue to encode and no legend to read. Distributions are shown as boxes only --
-no per-site dots, no median labels.
+no per-site strip, no median labels. Outliers beyond 1.5xIQR are drawn, so the maxima are
+on the figure rather than only in the CSV.
 """
 
 from __future__ import annotations
@@ -26,9 +27,10 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-# Single-series chart, so no categorical palette and no contrast/CVD gate to clear: hue is
-# not carrying identity here. Neutral fill, dark median, recessive everything else.
-BOX_FILL = "#c2c1ba"
+# Single-series chart, so there is no CVD gate to clear -- hue is not carrying identity here,
+# the x labels are. Slot 1 of the dataviz reference palette, which clears 3:1 against this
+# surface (the light-mode slots that do not are magenta, yellow and aqua).
+BOX_FILL = "#2a78d6"
 SURFACE = "#fcfcfb"
 INK = "#0b0b0b"
 INK_MUTED = "#52514e"
@@ -59,7 +61,9 @@ def main(argv: list[str] | None = None) -> int:
         ignore_index=True,
     )
     col = "best_combined_lcow_usd_m3"
-    order = df.groupby("scenario")[col].median().sort_values().index.tolist()
+    # Descending: most expensive on the left, so the plot reads as the story does --
+    # Wilson's baseline first, then what each relaxed limit buys.
+    order = df.groupby("scenario")[col].median().sort_values(ascending=False).index.tolist()
     groups = [df.loc[df.scenario == s, col].to_numpy() for s in order]
     n_per = {s: len(g) for s, g in zip(order, groups)}
 
@@ -68,8 +72,10 @@ def main(argv: list[str] | None = None) -> int:
     ax.set_facecolor(SURFACE)
 
     bp = ax.boxplot(
-        groups, widths=0.6, patch_artist=True, showfliers=False,
-        medianprops=dict(color=INK, linewidth=2.0),
+        groups, widths=0.6, patch_artist=True, showfliers=True,
+        flierprops=dict(marker="o", markersize=3.0, markerfacecolor=INK_MUTED,
+                        markeredgecolor="none", alpha=0.75),
+        medianprops=dict(color=SURFACE, linewidth=2.0),
         whiskerprops=dict(color=INK_MUTED, linewidth=1.0),
         capprops=dict(color=INK_MUTED, linewidth=1.0),
         boxprops=dict(linewidth=0),
@@ -82,7 +88,7 @@ def main(argv: list[str] | None = None) -> int:
     ax.set_yscale("log")
     ax.set_yticks([2, 3, 4, 6, 9, 14, 20])
     ax.get_yaxis().set_major_formatter(matplotlib.ticker.ScalarFormatter())
-    ax.set_ylim(1.4, 22)
+    ax.set_ylim(1.4, 28)
     ax.set_xticks(range(1, len(order) + 1))
     ax.set_xticklabels([LABELS[s] for s in order], fontsize=8.5, color=INK)
     ax.set_ylabel("Optimized LCOW  (USD m$^{-3}$, log scale)", fontsize=10, color=INK)
@@ -93,7 +99,7 @@ def main(argv: list[str] | None = None) -> int:
     ax.text(
         0.0, 1.012,
         f"Bayesian optimization per site, 12° land grid, day-stride 10 · "
-        f"n = {n_per[order[0]]} sites per scenario · box = IQR, whiskers = 1.5×IQR",
+        f"n = {n_per[order[0]]} sites per scenario · box = IQR, whiskers = 1.5×IQR, dots = outliers",
         transform=ax.transAxes, fontsize=8.5, color=INK_MUTED, ha="left", va="bottom",
     )
 
