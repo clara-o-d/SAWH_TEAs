@@ -335,25 +335,37 @@ def to_unit_cube(x: np.ndarray, bounds: DesignBounds) -> np.ndarray:
     return (x - lo) / (hi - lo)
 
 
-def from_unit_cube(u: np.ndarray, bounds: DesignBounds) -> np.ndarray:
-    """Unit cube -> raw design vector(s). Accepts (n_dims,) or (n, n_dims).
+def snap_to_grid(x: np.ndarray, bounds: DesignBounds) -> np.ndarray:
+    """Round every ``VAR_GRID`` dimension of a raw design vector onto its own grid.
 
-    ``VAR_GRID`` dimensions are snapped to their own grid here. This is the one chokepoint
-    every design vector passes through -- latin_hypercube_design for the initial batch,
-    acquisition.propose_next for every round after -- so snapping here is what makes the
-    quantization visible to the optimizer instead of hidden inside the weather mask. Two
-    consequences beyond a better-conditioned GP: EvalCache starts hitting on repeats (a
-    sub-grid probe was a fresh physics call for a bit-identical desorption window), and
-    history.csv no longer records a design that was never simulated.
+    Called from BOTH places a design vector can be born: from_unit_cube (the LHS init and
+    every EI proposal) and verification._perturbed_neighbors. Splitting it out is the point
+    -- the first campaign snapped proposals only, so when verification promoted a perturbed
+    neighbor (31% of sites) the reported optimum carried an off-lattice offset that
+    quantized to a different value the moment it was simulated.
+
+    Accepts (n_dims,) or (n, n_dims). Does not copy: callers here own their array.
     """
-    u = np.asarray(u, dtype=float)
+    x = np.asarray(x, dtype=float)
     lo, hi = bounds.as_array()[:, 0], bounds.as_array()[:, 1]
-    x = lo + u * (hi - lo)
     for i, name in enumerate(bounds.names()):
         step = VAR_GRID.get(name)
         if step:
             x[..., i] = np.clip(np.round(x[..., i] / step) * step, lo[i], hi[i])
     return x
+
+
+def from_unit_cube(u: np.ndarray, bounds: DesignBounds) -> np.ndarray:
+    """Unit cube -> raw design vector(s). Accepts (n_dims,) or (n, n_dims).
+
+    Snapped via :func:`snap_to_grid`, so the vector the surrogate trains on is the vector
+    that was simulated: EvalCache hits on repeats (a sub-grid probe used to buy a fresh
+    physics call for a bit-identical desorption window) and history.csv cannot record a
+    design that was never run.
+    """
+    u = np.asarray(u, dtype=float)
+    lo, hi = bounds.as_array()[:, 0], bounds.as_array()[:, 1]
+    return snap_to_grid(lo + u * (hi - lo), bounds)
 
 
 def latin_hypercube_design(

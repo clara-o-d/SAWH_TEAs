@@ -389,8 +389,10 @@ SOLAR_NIGHT_THRESHOLD_W_M2 = _pv("Solar night threshold")
 # ON BY DEFAULT at ``POA_DEFAULT_TILT_DEG``; pass ``poa_tilt_deg=None`` to get raw
 # GHI back. Wilson's Eq. 4 drives the absorber with Q_solar taken straight from
 # horizontal irradiance (GHI), with ``tilt_deg`` entering *only* through the
-# Hollands tilted-plate Nusselt correlation for the two air gaps
-# (physics.py::vapor_gap_h_conv_w_m2_k) -- tilt as a pure internal-convection knob,
+# vapor gap's tilted-cavity Nusselt correlation
+# (physics.py::vapor_gap_h_conv_w_m2_k -- ISO 15099 stratified, not Hollands; the
+# two glazing cavities are pure conduction and carry no tilt at all)
+# -- tilt as a pure internal-convection knob,
 # which is backwards for a solar collector. Transposing GHI onto the tilted
 # aperture makes one ``tilt_deg`` trade solar gain against gap convection at once.
 #

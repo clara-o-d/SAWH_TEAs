@@ -138,9 +138,10 @@ earlier version capped absorption with the measured PAM--LiCl DVS isotherm, $a_w
 measured curve ran out of data, producing a slope discontinuity in the wettest climates. It also
 applied to LiCl alone, putting a cliff at the pure-LiCl corner of the blend simplex.
 \item \textbf{Mass-transfer coefficient:} absorption uses a fixed empirical open-chamber
-convection coefficient $g_{chamber}$; desorption derives $g$ from the Hollands natural-convection
-$h_{conv,g}$ via a Lewis-number-unity heat/mass analogy (Note~S1 Eq.~S5). No forced convection is
-modeled in either phase.
+convection coefficient $g_{chamber}$; desorption derives $g$ from the vapor-gap natural-convection
+$h_{conv,g}$ (the stratified-cavity correlation below, \emph{not} Hollands) via a
+Lewis-number-unity heat/mass analogy (Note~S1 Eq.~S5). No forced convection is modeled in
+either phase.
 \item \textbf{Self-consistent desorption coupling:} $\dot{m}_{des}$ is found as the root of
 $\dot{m}_{calc}(\dot{m}_{des}) - \dot{m}_{des} = 0$ (Brent's method) so that the gel heat balance
 (Eq.~1) and the mass-transfer equations (Eqs.~5--6) agree on the same rate at every step.
@@ -201,25 +202,42 @@ Same value, same equation, different symbol.
 
 \textbf{Correlations (Note~S1):}
 \begin{itemize}
-\item $h_{conv,g}$: Hollands et al.\ natural convection between parallel plates in the vapor gap
-$L_g - H$ (tilt-dependent; Eqs.~S3--S4).
-\item \textbf{Tilt and solar gain (optional POA, off by default).} Wilson's Eq.~4 drives the
-absorber with the site's \emph{horizontal} irradiance (GHI), so by default the tilt $\theta$
-enters the model \emph{only} through the two Hollands gap correlations -- tilting the system
-changes internal natural convection but not the energy it collects, which makes $\theta$
-monotone in the wrong direction for a solar collector. Passing
-\code{profile\_from\_day\_df(..., poa\_tilt\_deg=$\theta$)} (CLI:
-\code{grid\_param\_sweep.py --poa}) instead transposes GHI onto the tilted aperture via the
-Erbs et al.\ (1982) diffuse-fraction split plus Liu \& Jordan isotropic-sky transposition,
+\item $h_{conv,g} = \mathrm{Nu}\,k_{air}/(L_g - H)$ across the vapor gap (Note~S1 Eq.~S4),
+tilt-dependent. Note~S1 cites Hollands et al.\ (1976) for $\mathrm{Nu}$, but Hollands is a
+heated-from-\emph{below} correlation and Wilson's stack puts the hydrogel \emph{above} a
+downward-facing finned condenser, so during desorption the cavity is heated from above:
+stably stratified, with no Rayleigh--B\'enard onset. This model therefore uses ISO 15099
+\S5.3.3.5 for the inclined downward-facing cavity,
+\begin{equation}
+\mathrm{Nu} = 1 + [\mathrm{Nu}_v - 1]\sin\vartheta, \quad \vartheta = 180^\circ - \theta,
+\label{eq:nugap}
+\end{equation}
+with $\mathrm{Nu}_v$ from ISO 15099 Eqs.~48--52 at aspect ratio $H_{cav}/(L_g - H)$. Hollands
+Eq.~S3 is retained \emph{only} for the inverted iterate ($T_{cond} > T_{gel}$), which a
+bottom-heated layer genuinely is; \code{solve\_steady\_thermal} probes such pairs on
+$\sim$25\% of calls, but no converged desorption state is one. Hollands over-predicts gap
+$\mathrm{Nu}$ by $\sim$1.8--2$\times$ here (4.79 vs.\ 2.65 at the baseline desorption peak).
+See \code{physics.py::vapor\_gap\_h\_conv\_w\_m2\_k}.
+\item \textbf{Tilt and solar gain (POA, on by default).} Wilson's Eq.~4 drives the
+absorber with the site's \emph{horizontal} irradiance (GHI), which leaves the tilt $\theta$
+entering the model \emph{only} through Eq.~\eqref{eq:nugap} -- the vapor gap is the one
+tilt-dependent correlation in the stack, since both glazing cavities are modelled as pure
+conduction $k_{air}\Delta T/L_{ins}$. Tilt then changes internal natural convection but not
+the energy the device collects, which makes $\theta$ monotone in the wrong direction for a
+solar collector. \code{profile\_from\_day\_df} therefore defaults to
+\code{poa\_tilt\_deg = POA\_DEFAULT\_TILT\_DEG} ($=\theta$), transposing GHI onto the tilted
+aperture via the Erbs et al.\ (1982) diffuse-fraction split plus Liu \& Jordan isotropic-sky
+transposition,
 \begin{equation}
 Q_{POA} = DNI\max(0,\cos\theta_{AOI}) + DHI\,\frac{1+\cos\beta}{2}
 + GHI\,\rho_g\,\frac{1-\cos\beta}{2},
 \label{eq:poa}
 \end{equation}
-so a single $\theta$ then trades solar gain against gap convection simultaneously. At
-$\beta = 0$ Eq.~\eqref{eq:poa} reduces exactly to $Q_{POA} = GHI$. Kept opt-in because
-enabling it changes every real-weather yield number; the day/night phase split stays keyed
-on GHI so phase boundaries are unaffected. Example (Cambridge, summer solstice, 4\,mm gel):
+so a single $\theta$ trades solar gain against gap convection simultaneously. At
+$\beta = 0$ Eq.~\eqref{eq:poa} reduces exactly to $Q_{POA} = GHI$. Pass
+\code{poa\_tilt\_deg=None} for raw GHI; the Wilson recreation does exactly that, because the
+paper's field tests were driven by measured horizontal flux with no transposition. The
+day/night phase split stays keyed on GHI either way, so phase boundaries are unaffected. Example (Cambridge, summer solstice, 4\,mm gel):
 with GHI the mean flux is 595\,W/m$^2$ at every tilt and yield rises monotonically
 $0^\circ \to 60^\circ$ (1.882 $\to$ 1.904\,kg/m$^2$) purely via gap convection; with POA the
 flux varies (595 $\to$ 449\,W/m$^2$) and yield acquires an interior optimum near
@@ -465,9 +483,17 @@ and yields less (baseline profile: 2.30 vs.\ \SI{2.61}{\kilo\gram\per\square\met
 \item $H \ge H_0$; swelling allowed in absorption ($\dot{H}\ge 0$ at $H=H_0$); no shrinkage below
 $H_0$ in desorption.
 \item Desorption: enforce $\dot{c}_w \le 0$, $\dot{H} \le 0$.
-\item Vapor gap below \SI{7}{\milli\metre} (Wilson's thermobuoyancy/transport floor,
-$L_g - H$) is treated as mass-transfer-inhibited: $g \to 0$ rather than extrapolating the
-Hollands correlation outside its validated range.
+\item \emph{No} sub-\SI{7}{\milli\metre} transport cutoff. Wilson sets $g \to 0$ below a
+\SI{7}{\milli\metre} gap $L_g - H$, reading Hollands' $\mathrm{Ra}_{crit} = 1708$ onset
+(under which $\mathrm{Nu} \equiv 1$) as inhibited transport. The stratified correlation
+Eq.~\eqref{eq:nugap} has no such onset -- a layer heated from above never goes
+Rayleigh--B\'enard -- so $\mathrm{Nu}$ decays smoothly to 1, and $\mathrm{Sh} = \mathrm{Nu} =
+1$ is \emph{diffusion}, which over a \SI{5}{\milli\metre} path is $\sim3\times$ the $g$ of
+the \SI{36}{\milli\metre} baseline rather than zero. Small gaps still lose, through the
+$k/L$ heat leak to the condenser that the thermal balance already carries; the hard wall made
+that a step discontinuity that took yield to exactly 0. The gel is kept out of the condenser
+by the swelling cap in \code{\_integrate\_absorption}, which is geometry, not a correlation
+limit.
 \item Initial $c_w$ from fabrication equilibrium RH (brine activity at $H_0$) unless overridden.
 \item Daily water yield is the condenser-collected mass over one desorption phase; thermal
 efficiency $\eta_{th} = \dot{m}_{water}\,h_{fg} / \int Q_{solar}\,dt$, integrated over the

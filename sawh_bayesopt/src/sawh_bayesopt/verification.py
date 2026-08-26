@@ -13,6 +13,7 @@ from pathlib import Path
 import numpy as np
 
 from sawh_bayesopt.bayesopt import BayesOptConfig, BayesOptResult
+from sawh_bayesopt.design_space import snap_to_grid
 from sawh_bayesopt.evaluator import DesignEvalResult, EvalCache, evaluate_for_config
 from sawh_bayesopt.surrogate import predict
 
@@ -44,7 +45,10 @@ def _perturbed_neighbors(
     out = []
     for _ in range(n):
         delta = rng.uniform(-frac, frac, size=span.shape[0]) * span
-        out.append(np.clip(x_best + delta, lo, hi))
+        # Snapped for the same reason proposals are: an off-lattice seal/open offset
+        # quantizes to a different window when simulated, so a promoted neighbor would
+        # report a schedule that was never the one evaluated.
+        out.append(snap_to_grid(np.clip(x_best + delta, lo, hi), bounds))
     return out
 
 

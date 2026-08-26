@@ -160,12 +160,34 @@ print('land points at ${STEP} deg:', len(grid_land_points(${STEP})))
 # n_hyperparameter_warnings / DE convergence fractions folded into summary.csv. Verification
 # re-evaluates each optimum and 5 perturbed neighbors against the true model, so GP
 # artifacts show up as a verified row rather than a surrogate guess.
+# LOOP PARAMS, all four changed on evidence from job 40830060's 435 finished sites:
+#
+#   --n-total 100 (was 50)      Most sites never converged: stopped_reason was "budget" for
+#                               63/87 sites in `improved` and 58/87 in `wilson`, so 50 was
+#                               binding rather than sufficient. Median improvement over
+#                               baseline was only 11.8%.
+#   --stall-rounds 5            10 sites finished WORSE than baseline, every one of them
+#   --stall-rel-tol 0.002       "stalled" at exactly n_evals=42. With the GP overconfident
+#     (was 3 / 0.005)           (standardized_residual_std 1.57-1.76 where 1.0 is
+#                               calibrated), EI collapses early and the old 3-round/0.5%
+#                               trigger quit before beating the starting design.
+#   --de-maxiter 300 (was 1000) frac_de_hit_maxiter was 0.000 at every one of 435 sites, and
+#                               a smoke run converged at nit/maxiter=0.14 (~140 iters). 1000
+#                               was never reached, so this is free -- and it is the lever
+#                               that matters, since ~70% of wall clock was sequential
+#                               per-site DE, not physics.
+#
+# Net cost: ~13 infill rounds instead of ~4 (more physics calls), against ~3x cheaper
+# acquisition per round. Expect ~10-12 h/task rather than 8.5 -- still inside the 20 h
+# walltime, but check task 0's first rounds before assuming the whole array fits.
 python3 gpu_sweep/run_bayesopt_sweep.py \
   --step "${STEP}" --site-range 0 10000 \
   --day-stride "${DAY_STRIDE}" \
   --case "${CASE}" ${EXTRA_FLAGS} \
   --sites-per-group "${SITES_PER_GROUP}" \
-  --n-init 24 --n-total 50 --batch-size 6 --seed 0 \
+  --n-init 24 --n-total 100 --batch-size 6 --seed 0 \
+  --stall-rounds 5 --stall-rel-tol 0.002 \
+  --de-maxiter 300 \
   --n-verify-neighbors 5 \
   --output-dir "${OUT_ROOT}/${SCENARIO}" \
   --resume

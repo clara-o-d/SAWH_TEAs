@@ -177,3 +177,23 @@ def test_every_scenario_is_reachable_through_the_case_flag():
             and CASE_SOLAR_OPTICS[c] == (sc.eps_abs, sc.tau_glass)
         ]
         assert len(matches) >= 1, f"{name} has no case with matching optics"
+
+
+def test_perturbed_neighbors_land_on_the_grid():
+    """The first campaign's actual defect: verification promoted a perturbed neighbor at
+    31% of sites, and those neighbors skipped the snapping that proposals got, so 131 of
+    435 reported optima carried an off-lattice schedule offset. Both birth sites for a
+    design vector must snap."""
+    from sawh_bayesopt.verification import _perturbed_neighbors
+
+    bounds = DesignBounds()
+    i, j = VAR_ORDER.index("seal_offset_h"), VAR_ORDER.index("open_offset_h")
+    x_best = from_unit_cube(np.full(len(VAR_ORDER), 0.5), bounds)
+    neighbors = _perturbed_neighbors(x_best, bounds, n=25, frac=0.10, seed=0)
+    assert len(neighbors) == 25
+    for x in neighbors:
+        for k in (i, j):
+            assert x[k] == pytest.approx(round(x[k] / 0.25) * 0.25), x[k]
+    # ...and the perturbation still moves: snapping must not collapse every neighbor onto
+    # x_best, which would make verification a no-op.
+    assert len({(round(x[i], 6), round(x[j], 6)) for x in neighbors}) > 1

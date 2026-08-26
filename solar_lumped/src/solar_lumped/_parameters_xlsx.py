@@ -16,13 +16,26 @@ _XLSX_PATH = Path(__file__).resolve().parents[2] / "docs" / "parameters.xlsx"
 
 
 def _load_sheet(sheet_name: str) -> dict[str, dict[str, Any]]:
+    """Columns are located by header, not by position: the sheets are hand-edited in
+    Excel, and a positional unpack turns "someone inserted a column" into a ValueError
+    at import time that takes every package down with it."""
     wb = openpyxl.load_workbook(_XLSX_PATH, data_only=True, read_only=True)
     ws = wb[sheet_name]
-    rows = ws.iter_rows(min_row=2, values_only=True)
+    rows = ws.iter_rows(values_only=True)
+    header = ["" if h is None else str(h).strip() for h in next(rows)]
+    col = {
+        key: header.index(key)
+        for key in ("Name", "Value", "Lower (for Sweeps)", "Upper (for Sweeps)", "Source")
+    }
     return {
-        str(name).strip(): {"value": value, "lower": lower, "upper": upper, "source": source}
-        for name, _equation, value, _units, lower, upper, source in rows
-        if name is not None
+        str(row[col["Name"]]).strip(): {
+            "value": row[col["Value"]],
+            "lower": row[col["Lower (for Sweeps)"]],
+            "upper": row[col["Upper (for Sweeps)"]],
+            "source": row[col["Source"]],
+        }
+        for row in rows
+        if row[col["Name"]] is not None
     }
 
 
