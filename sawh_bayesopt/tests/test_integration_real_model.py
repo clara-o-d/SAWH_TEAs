@@ -38,10 +38,10 @@ pytestmark = pytest.mark.skipif(
 
 def test_tiny_real_bayesopt_run_produces_finite_lcow(tmp_path):
     from sawh_bayesopt.bayesopt import BayesOptConfig, run_bayesopt
-    from sawh_bayesopt.sites import CAMBRIDGE
+    from sawh_bayesopt.sites import STANFORD
 
     cfg = BayesOptConfig(
-        sites=(CAMBRIDGE,),
+        sites=(STANFORD,),
         n_init=2,
         n_total=3,
         batch_size=1,

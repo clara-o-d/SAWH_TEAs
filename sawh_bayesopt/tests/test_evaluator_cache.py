@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from sawh_bayesopt import evaluator
 from sawh_bayesopt.design_space import DesignBounds, latin_hypercube_design
@@ -13,6 +14,7 @@ from sawh_bayesopt.evaluator import (
     evaluate_requests,
 )
 from sawh_bayesopt.sites import SiteSpec
+from solar_lumped.economics import LCOEconomicParams
 
 
 def _sites(n: int = 1) -> tuple[SiteSpec, ...]:
@@ -117,7 +119,7 @@ def test_evaluate_requests_batches_every_site_into_one_call(monkeypatch, tmp_pat
     def fake_run_year(instance_profiles, instance_configs, owner, **_kwargs):
         calls.append(list(owner))
         elevations_seen.extend(c.site_elevation_m for c in instance_configs)
-        return {i: 1.0 for i in owner}, {i: 0.5 for i in owner}, None
+        return {i: 1.0 for i in owner}, {i: 0.5 for i in owner}, {i: False for i in owner}, {}
 
     monkeypatch.setattr(evaluator, "_run_jax_year", fake_run_year)
 
@@ -184,7 +186,9 @@ def test_evaluate_requests_forwards_day_stride_to_the_profile_build(monkeypatch,
     monkeypatch.setattr(evaluator, "_profiles_for_design", stub_profiles)
     monkeypatch.setattr(
         evaluator, "_run_jax_year",
-        lambda profiles, configs, owner, **kw: ({i: 1.0 for i in owner}, {i: 0.5 for i in owner}, None),
+        lambda profiles, configs, owner, **kw: (
+            {i: 1.0 for i in owner}, {i: 0.5 for i in owner}, {i: False for i in owner}, {}
+        ),
     )
     site = SiteSpec("a", 0.0, 0.0)
     evaluate_requests(
@@ -195,3 +199,42 @@ def test_evaluate_requests_forwards_day_stride_to_the_profile_build(monkeypatch,
         day_stride=5,
     )
     assert seen == [5]
+
+
+def test_cpu_backend_scopes_a_failure_to_the_one_design_that_caused_it(monkeypatch, tmp_path):
+    """_run_cpu_year used to `return` out of the whole function from inside its
+    per-instance loop, so one unintegrable design took every design batched with it down
+    with it -- the exact opposite of the "one bad design must not kill the batch" comment
+    sitting on the handler. Batching must not change any other design's answer."""
+    from solar_lumped.simulation import PhaseResult
+
+    def fake_run_daily_cycle(prof, config, **_kw):
+        if abs(config.hydrogel_thickness_m - 0.005) < 1e-9:
+            raise RuntimeError("integration blew up")
+        arr = np.array([0.0, 1.0])
+        phase = PhaseResult(
+            time_s=arr, c_w=arr, H=arr, t_cond_c=None, t_gel_c=arr,
+            water_collected_kg_m2=2.0, m_des_kg_s_m2=arr,
+        )
+        return 2.0, 0.3, phase, phase
+
+    monkeypatch.setattr(evaluator, "_profiles_for_design",
+                        lambda df, x, complex_mode, day_stride=1: [(1, object())])
+    monkeypatch.setattr("solar_lumped.simulation.find_cyclic_state", lambda *a, **k: (1.0, 0.001))
+    monkeypatch.setattr("solar_lumped.simulation.run_daily_cycle", fake_run_daily_cycle)
+
+    site = SiteSpec("a", 0.0, 0.0)
+    good = np.array([0.003, 0.030, 30.0, 0.0, 0.0])
+    bad = np.array([0.005, 0.030, 30.0, 0.0, 0.0])
+    results = evaluate_requests(
+        [(site, good), (site, bad), (site, good * 1.0 + np.array([1e-4, 0, 0, 0, 0]))],
+        caches={"a": EvalCache(tmp_path / "a.jsonl")}, econ=LCOEconomicParams(),
+        site_frames={"a": object()}, site_elevations={"a": 0.0}, backend="cpu",
+    )
+    ok_a, failed, ok_b = (r.site("a") for r in results)
+    assert failed.failure_reason == "integration blew up"
+    assert not failed.feasible
+    # The neighbours are untouched -- this is what the old whole-batch return destroyed.
+    assert ok_a.feasible and ok_b.feasible
+    assert ok_a.yield_kg_m2 == pytest.approx(2.0)
+    assert ok_b.yield_kg_m2 == pytest.approx(2.0)

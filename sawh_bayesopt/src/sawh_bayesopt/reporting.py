@@ -72,6 +72,7 @@ def write_history_csv(
             f"{name}_feasible",
             f"{name}_yield_kg_m2",
             f"{name}_eta_thermal",
+            f"{name}_swelling_cap_bound",
             f"{name}_failure_reason",
         ]
     with path.open("w", newline="") as f:
@@ -89,6 +90,7 @@ def write_history_csv(
                 row[f"{r.site_name}_feasible"] = r.feasible
                 row[f"{r.site_name}_yield_kg_m2"] = r.yield_kg_m2
                 row[f"{r.site_name}_eta_thermal"] = r.eta_thermal
+                row[f"{r.site_name}_swelling_cap_bound"] = r.swelling_cap_bound
                 row[f"{r.site_name}_failure_reason"] = r.failure_reason
             writer.writerow(row)
 
@@ -251,6 +253,7 @@ def write_final_report(
                 "feasible": r.feasible,
                 "yield_kg_m2": r.yield_kg_m2,
                 "eta_thermal": r.eta_thermal,
+                "swelling_cap_bound": r.swelling_cap_bound,
                 "failure_reason": r.failure_reason,
             }
             for r in recommended.site_results

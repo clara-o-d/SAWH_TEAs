@@ -29,8 +29,27 @@ L_G_M: float = _pv("Vapor gap (L_g)", mm_to_m=True)  # vapor gap L_g (m)
 L_INS_M: float = _pv("Insulation gap (L_ins)", mm_to_m=True)  # insulation gap L_ins (m)
 L_C_M: float = _pv("Condenser aluminum plate thickness (L_c)", mm_to_m=True)  # condenser aluminum plate thickness L_c (m)
 
-# Wilson §2.2 / Note S1: thermobuoyancy and mass transport inhibited below ~7 mm gap
+# Wilson §2.2 / Note S1: thermobuoyancy and mass transport inhibited below ~7 mm gap.
+# No longer load-bearing -- mass_transfer_g_m_s dropped the g = 0 wall (the stratified
+# correlation has no Ra_crit onset) and the swelling cap moved to
+# GEL_CONDENSER_CLEARANCE_M below. Kept as the documented location of the old wall,
+# which test_governing_equations asserts g is continuous across.
 VAPOR_GAP_TRANSPORT_MIN_M: float = _pv("Vapor-gap transport floor", mm_to_m=True)
+
+# How close the swelling gel may come to the condenser. This is a NUMERICAL clearance,
+# not a physical setback: the gel may not occupy the condenser (h <= vapor_gap_m is the
+# real constraint, no free parameter), but the transfer correlations carry a k/L
+# conduction term that diverges at contact, so the model cannot be evaluated at exactly
+# zero gap. Small on purpose -- near-contact designs are then penalized by that k/L leak
+# to the condenser, which the thermal balance already carries, instead of by a wall:
+#   0.1 mm -> k/L ~ 260 W/m2K,  7 mm -> ~3.7 W/m2K.
+# Sizing it like a physical margin (the 7 mm above was reused here) instead lets an
+# arbitrary constant set night-time uptake -- see simulation._integrate_absorption.
+GEL_CONDENSER_CLEARANCE_M: float = 1e-4
+
+# Slack for "did absorption end on that ceiling". Four orders below the clearance and
+# comfortably above the absorption solvers' atol, so it is a detector, not a threshold.
+SWELLING_CAP_TOL_M: float = 1e-7
 
 # Baseline ambient convection coefficient, Wilson et al. (2025) Methods (Cambridge test).
 H_AMB_W_M2_K: float = _pv("Ambient convection coefficient (h_amb)")
@@ -687,7 +706,7 @@ _R_J_KMOL_K: float = GAS_CONSTANT_J_MOL_K * 1e3
 # The water-vapor fits (Eqs. 41-43) are stated for 0-120 C, the narrowest of the set.
 # Property evaluation is clamped into it. This is for solver iterates only -- the same
 # reason _CRYSTALLIZATION_T_LO_C/_HI_C exist above. solve_steady_thermal probes wildly
-# inverted (T_gel, T_cond) pairs on ~16% of calls, and nothing physical lives out there;
+# inverted (T_gel, T_cond) pairs on ~25% of calls, and nothing physical lives out there;
 # converged states are inside by a wide margin.
 _AIR_PROPS_T_LO_C: float = 0.0
 _AIR_PROPS_T_HI_C: float = 120.0
@@ -984,8 +1003,8 @@ def vapor_gap_h_conv_w_m2_k(
     that is a solver artefact, not an operating state: at converged points the gel is
     always the hotter surface during desorption, while absorption is isothermal
     (T_gel := T_amb, condenser not tracked at all — the gel stage is physically
-    detached from the device). solve_m_des_and_thermal nevertheless probes inverted
-    (T_gel, T_cond) pairs on ~16% of calls (median 69 K inverted, max ~346 K), so the
+    detached from the device). solve_steady_thermal nevertheless probes inverted
+    (T_gel, T_cond) pairs on ~25% of calls (measured on the baseline daily cycle), so the
     branch must return something; a truly bottom-heated layer IS destabilizing, and
     handing the root finder the stably-stratified form there would invert the physics.
     """
@@ -2172,16 +2191,21 @@ def mass_transfer_g_m_s(
         # Desorption is then energy-limited (m_des set by Eqs. 1-4), not
         # transport-limited, which is the point of the ideal case.
         #
-        # This deliberately bypasses the 7 mm thermobuoyancy cutoff below: that
-        # cutoff *is* a mass-transfer limit, so it has no place in the g -> inf bound.
         return _INSTANT_EQUILIBRIUM_G_SCALE * params.g_conv_m_s
     if phase == "absorption":
         return params.g_conv_m_s
     if t_cond_c is None:
         raise ValueError("t_cond_c required for desorption mass transfer")
+    # No thermobuoyancy cutoff. Wilson zeroes g below a ~7 mm gap because Hollands has a
+    # Ra_crit = 1708 onset, under which Nu == 1 and they read that as "mass transport is
+    # significantly inhibited". The stratified correlation vapor_gap_h_conv_w_m2_k actually
+    # uses has no onset -- a layer heated from above never goes Rayleigh-Benard -- so Nu
+    # decays smoothly to 1 and Sh = Nu = 1 is *diffusion*, which over a 5 mm path is
+    # ~3x the g of the 36 mm baseline, not zero. Small gaps still lose, via the k/L heat
+    # leak to the condenser that the thermal balance already carries; a hard g = 0 wall
+    # made that a step discontinuity that took yield to exactly 0. The gel is kept out of
+    # the condenser by the swelling cap in _integrate_absorption, which is geometry.
     gap_m = max(params.vapor_gap_m - h_m, 0.0)
-    if gap_m < VAPOR_GAP_TRANSPORT_MIN_M:  # Wilson's ~7 mm thermobuoyancy / transport limit
-        return 0.0
     h_conv = vapor_gap_h_conv_w_m2_k(
         gap_m, t_gel_c, t_cond_c, tilt_deg=params.tilt_deg, p_atm_pa=params.p_atm_pa
     )

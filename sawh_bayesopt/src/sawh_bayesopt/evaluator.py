@@ -73,6 +73,13 @@ class SiteResult:
     failure_reason: str
     yield_kg_m2: float
     eta_thermal: float
+    # True if absorption ran into the gel/condenser ceiling (simulation's h_max) on at
+    # least one day. Not a failure -- the result is usable -- but it means uptake was set
+    # by the clearance constant rather than by the isotherm, so the design is only as
+    # trustworthy as GEL_CONDENSER_CLEARANCE_M. Silent before this flag existed, which is
+    # how a whole BO run scored designs whose gel was pinned every single cycle.
+    # Defaulted: cache records written before the field must still load.
+    swelling_cap_bound: bool = False
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -222,10 +229,12 @@ def _run_jax_year(
     complex_mode: bool = False,
     condenser_tracks_ambient: bool = False,
     instant_equilibrium: bool = False,
-) -> tuple[dict[int, float], dict[int, float], str | None]:
+) -> tuple[dict[int, float], dict[int, float], dict[int, bool], dict[int, str]]:
     """Run a full 365-day year for every instance and reduce to mean daily yield/eta,
-    keyed by the caller's ``owner`` index. Returns (yield, eta, error); on a raised
-    jax/diffrax call, error is set and both dicts are empty.
+    keyed by the caller's ``owner`` index. Returns (yield, eta, swelling_cap_bound,
+    errors), all keyed the same way. The batched call either builds or raises as a whole,
+    so a raise marks every instance -- but the shape is per-instance to match
+    :func:`_run_cpu_year`, where one design can fail on its own.
 
     Every instance advances through the year in lockstep, one vmapped step per calendar
     day, so days stay sequential (each warm-starts from the previous day's end state)
@@ -233,7 +242,7 @@ def _run_jax_year(
     parallel one, which is why widening the batch is nearly free -- see
     :func:`evaluate_requests`."""
     if not instance_profiles:
-        return {}, {}, None
+        return {}, {}, {}, {}
 
     try:
         jdc = _load_jax_daily_cycle()
@@ -255,7 +264,7 @@ def _run_jax_year(
             jdc.build_day_weather([p[d] for p in instance_profiles], n_abs_max, n_des_max)
             for d in range(n_days)
         ]
-        water, eta = jdc.run_year_batched(
+        water, eta, capped = jdc.run_year_batched(
             step_fn, day_weathers,
             c_w_initial=np.array([initial_loading(c) for c in instance_configs]),
             h_initial=np.array([c.hydrogel_thickness_m for c in instance_configs]),
@@ -265,12 +274,14 @@ def _run_jax_year(
     except _BUG_EXCEPTIONS:
         raise
     except Exception as exc:  # noqa: BLE001 -- the batched jax/diffrax call can raise
-        return {}, {}, str(exc).split("\n", 1)[0][:240]
+        msg = str(exc).split("\n", 1)[0][:240]
+        return {}, {}, {}, {i: msg for i in owner}
 
     return (
         {i: float(y) for i, y in zip(owner, water)},
         {i: float(e) for i, e in zip(owner, eta)},
-        None,
+        {i: bool(c) for i, c in zip(owner, capped)},
+        {},
     )
 
 
@@ -368,7 +379,7 @@ def _run_cpu_year(
     complex_mode: bool = False,
     condenser_tracks_ambient: bool = False,
     instant_equilibrium: bool = False,
-) -> tuple[dict[int, float], dict[int, float], str | None]:
+) -> tuple[dict[int, float], dict[int, float], dict[int, bool], dict[int, str]]:
     """CPU equivalent of :func:`_run_jax_year`. ``condenser_tracks_ambient`` and
     ``instant_equilibrium`` are unused here (already baked into each ``instance_configs``
     entry) -- kept for signature parity with
@@ -382,8 +393,12 @@ def _run_cpu_year(
     """
     from solar_lumped.simulation import find_cyclic_state, run_daily_cycle
 
+    from solar_lumped.physics import GEL_CONDENSER_CLEARANCE_M, SWELLING_CAP_TOL_M
+
     yield_by_instance: dict[int, float] = {}
     eta_by_instance: dict[int, float] = {}
+    capped_by_instance: dict[int, bool] = {}
+    error_by_instance: dict[int, str] = {}
     for profiles, config, i in zip(instance_profiles, instance_configs, owner):
         if not profiles:
             continue
@@ -391,21 +406,36 @@ def _run_cpu_year(
             c_w, h = find_cyclic_state(
                 profiles[0], config, max_rounds=JAX_AITKEN_MAX_ROUNDS, verbose=False
             )
-            yields, etas = [], []
+            h_max = max(
+                config.vapor_gap_m - GEL_CONDENSER_CLEARANCE_M,
+                config.hydrogel_floor_thickness_m() + 1e-6,
+            )
+            yields, etas, capped = [], [], False
             for prof in profiles:
-                y, eta, _abs_res, des_res = run_daily_cycle(
+                y, eta, abs_res, des_res = run_daily_cycle(
                     prof, config, c_w_initial=c_w, h_initial=h
                 )
                 yields.append(y)
                 etas.append(eta)
+                # End-of-absorption h, not the trajectory max: the JAX path only saves
+                # the endpoint (a dense save nests a second vmap and blew up GPU memory),
+                # and the two backends have to agree on what this flag means.
+                capped |= bool(float(abs_res.H[-1]) >= h_max - SWELLING_CAP_TOL_M)
                 c_w, h = float(des_res.c_w[-1]), float(des_res.H[-1])
         except _BUG_EXCEPTIONS:
             raise
         except Exception as exc:  # noqa: BLE001 -- one bad design must not kill the batch
-            return {}, {}, str(exc).split("\n", 1)[0][:240]
+            # Per-instance, which is what the comment above always claimed: this used to
+            # `return` out of the whole function from inside the per-instance loop, so a
+            # single unintegrable design took every design batched with it down as NaN.
+            # The JAX path has always scoped its failures per instance (run_year_batched
+            # NaNs only the offending rows), and now the two agree.
+            error_by_instance[i] = str(exc).split("\n", 1)[0][:240]
+            continue
         yield_by_instance[i] = float(np.mean(yields))
         eta_by_instance[i] = float(np.mean(etas))
-    return yield_by_instance, eta_by_instance, None
+        capped_by_instance[i] = capped
+    return yield_by_instance, eta_by_instance, capped_by_instance, error_by_instance
 
 
 def evaluate_batch(
@@ -558,7 +588,7 @@ def evaluate_requests(
 
     run_year = _run_cpu_year if backend == "cpu" else _run_jax_year
     t0 = time.perf_counter()
-    yield_by_instance, eta_by_instance, batch_error = run_year(
+    yield_by_instance, eta_by_instance, capped_by_instance, error_by_instance = run_year(
         instance_profiles, instance_configs, owner,
         initial_loading=initial_loading, complex_mode=complex_mode,
         condenser_tracks_ambient=condenser_tracks_ambient,
@@ -572,13 +602,16 @@ def evaluate_requests(
         cfg = configs[i]
         if i in no_weather:
             site_result = SiteResult(spec.name, FAIL_LCO, False, "no weather profiles", float("nan"), float("nan"))
-        elif batch_error is not None:
-            site_result = SiteResult(spec.name, FAIL_LCO, False, batch_error, float("nan"), float("nan"))
+        elif i in error_by_instance:
+            site_result = SiteResult(
+                spec.name, FAIL_LCO, False, error_by_instance[i], float("nan"), float("nan")
+            )
         else:
             mean_yield = yield_by_instance[i]
             mean_eta = eta_by_instance[i]
+            capped = capped_by_instance.get(i, False)
             if not math.isfinite(mean_yield) or mean_yield <= 0.0:
-                site_result = SiteResult(spec.name, FAIL_LCO, False, "zero or invalid yield", mean_yield, mean_eta)
+                site_result = SiteResult(spec.name, FAIL_LCO, False, "zero or invalid yield", mean_yield, mean_eta, capped)
             else:
                 lcow = lcow_from_daily_yield(
                     mean_yield,
@@ -592,9 +625,9 @@ def evaluate_requests(
                     fin_area_ratio=cfg.fin_area_ratio if cfg.complex is not None else None,
                 )
                 if not math.isfinite(lcow) or lcow >= 0.99 * FAIL_LCO:
-                    site_result = SiteResult(spec.name, FAIL_LCO, False, "invalid LCOW", mean_yield, mean_eta)
+                    site_result = SiteResult(spec.name, FAIL_LCO, False, "invalid LCOW", mean_yield, mean_eta, capped)
                 else:
-                    site_result = SiteResult(spec.name, lcow, True, "", mean_yield, mean_eta)
+                    site_result = SiteResult(spec.name, lcow, True, "", mean_yield, mean_eta, capped)
 
         result = DesignEvalResult(
             design_vector=tuple(float(v) for v in np.asarray(x, dtype=float).reshape(-1)),

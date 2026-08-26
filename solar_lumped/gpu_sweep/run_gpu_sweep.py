@@ -236,7 +236,7 @@ def run_group(
         for d in range(n_days)
     ]
 
-    mean_yield, mean_eta = run_year_batched(
+    mean_yield, mean_eta, _capped = run_year_batched(
         step_fn, day_weathers,
         c_w_initial=np.array([initial_loading(cfg) for cfg in configs]),
         h_initial=np.array([cfg.hydrogel_thickness_m for cfg in configs]),
