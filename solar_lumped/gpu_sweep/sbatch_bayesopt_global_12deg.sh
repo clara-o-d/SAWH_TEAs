@@ -5,20 +5,28 @@
 # Submit from /home/groups/cdiazm/SAWH_TEAs/solar_lumped:
 #   sbatch gpu_sweep/sbatch_bayesopt_global_12deg.sh
 #
-# WHY 8 TASKS AND NOT MORE. Sites inside a task run in ONE lockstep group: every site
-# keeps its own GP/history/cache, but each round's designs across the whole group go into
-# a single batched evaluation. A call costs ~the same at any width (a year is ~366
-# *sequential* day-steps; measured 60.1 min for 1 design vs 68.2 min for 8 on an A100), so
-# a task's cost is set by how many CALLS it makes, not how many sites it holds. Splitting
-# the 87 sites across more tasks would multiply total GPU-hours while barely improving wall
-# clock. The scenario axis is the only one worth parallelizing: instant_equilibrium and
-# condenser_ambient each select a *code path* in the JAX step, so they cannot share a
-# compiled batch anyway (see site_sweep.scenario_groups). 8 scenarios -> 8 tasks is the
-# maximum useful parallelism here, and it is also the cheapest total.
+# WHY 8 TASKS AND NOT MORE. Sites inside a task run in lockstep groups: every site keeps
+# its own GP/history/cache, but each round's designs across a whole group go into a single
+# batched evaluation. A call costs ~the same at any width up to GPU saturation (a year is
+# ~366 *sequential* day-steps; measured 60.1 min for 1 design vs 68.2 min for 8 on an
+# A100), so a task's cost is set by how many CALLS it makes, not how many sites it holds --
+# which is why the site axis is the wrong one to parallelize across tasks: splitting it
+# would multiply total GPU-hours while barely improving wall clock. It is capped only by
+# batch width, not by task count (see SITES_PER_GROUP).
 #
-# SIZING. At stride 10 a year walk is 37 days, not 366:
-#   1 init + 5 infill (batch 6) + 1 verify + 1 baseline = ~8 calls x ~7 min = ~1 h GPU
-# But see --cpus-per-task below: at stride 10 the physics stops dominating.
+# The scenario axis is the one worth parallelizing: instant_equilibrium and
+# condenser_ambient each select a *code path* in the JAX step, so they cannot share a
+# compiled batch anyway (see site_sweep.scenario_groups). 8 scenarios -> 8 tasks.
+#
+# SIZING. At stride 10 a year walk is 37 days, not 366, so a call is ~7 min rather than
+# ~70. Each of the 3 site groups pays its own set of rounds:
+#   3 groups x (1 init + 5 infill at batch 6 + 1 verify + 1 baseline) = ~24 calls
+#   ~24 x 7 min = ~3 h GPU per scenario task
+# EXTRAPOLATED from FINDINGS.md's A100 per-day cost, not measured at stride 10 or at this
+# width -- treat the 12 h walltime as covering that uncertainty, and read the loop's own
+# "eta" from the round lines once task 0 clears its first round.
+#
+# The GPU is not the whole story: see --cpus-per-task below.
 #
 # STALE CACHE WARNING. case3 changed meaning when CASE_SOLAR_OPTICS landed: it now sets
 # eps_abs=1.0/tau_glass=1.0 as site_sweep._LIMITS always did, where before it kept a real
@@ -36,8 +44,9 @@
 #SBATCH --partition=serc
 #SBATCH --gres=gpu:1
 # 16 not 4: with stride 10 the GPU year walk drops to ~7 min/call while the CPU-side
-# acquisition does not shrink at all -- 87 sites x ~6 rounds of differential_evolution at
-# maxiter=1000/popsize=40, plus 87 GP fits per round. That is now comparable to the
+# acquisition does not shrink at all -- across a task that is still 87 sites x ~6 rounds of
+# differential_evolution at maxiter=1000/popsize=40 plus a GP refit each, and bayesopt.py's
+# own note flags those proposals as sequential across sites. That is now comparable to the
 # physics, so the old --cpus-per-task=4 (sized when physics was ~100% of cost) would leave
 # the GPU idle waiting on scipy. Drop back to 4 only if the queue wait becomes the problem.
 #SBATCH --cpus-per-task=16
@@ -49,7 +58,17 @@ set -euo pipefail
 
 STEP=12.0
 DAY_STRIDE=10
-SITES_PER_GROUP=96   # >= the 87 land points, so every scenario is a single lockstep group
+# 29, not 96. bayesopt._evaluate flattens every (site, design) pair into ONE batched call,
+# so the widest call is the LHS init at sites_per_group x n_init -- 96 x 24 would be a
+# 2088-instance vmap against the ~700-instance saturation measured in site_sweep.py, which
+# is what --sites-per-group exists to lower on OOM. 29 x 24 = 696 fits just under it, and
+# the infill rounds are a comfortable 29 x 6 = 174.
+#
+# Splitting 87 sites into 3 groups costs 3 sets of rounds instead of 1 (~24 calls, not 8),
+# which is the price of staying inside a width that has actually been measured. It buys
+# back two things: summary.csv is written after each group rather than only at the very end,
+# and --resume can pick up at a group boundary instead of restarting the scenario.
+SITES_PER_GROUP=29
 OUT_ROOT="outputs/bayesopt_global_12deg"
 
 mkdir -p gpu_sweep/logs "${OUT_ROOT}"
