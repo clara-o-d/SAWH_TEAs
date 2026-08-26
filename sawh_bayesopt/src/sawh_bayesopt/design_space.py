@@ -23,7 +23,6 @@ from solar_lumped.physics import FIN_AREA_RATIO, L_INS_M, SALT_LOADING_DEFAULT
 # in the profile too, via POA transposition (to_profile_kwargs).
 VAR_ORDER: tuple[str, ...] = (
     "hydrogel_thickness_m",
-    "vapor_gap_m",
     "tilt_deg",
     "seal_offset_h",
     "open_offset_h",
@@ -47,6 +46,21 @@ SIMPLE_FIXED: dict[str, float] = {
     "insulation_gap_m": L_INS_M,
     "fin_area_ratio": FIN_AREA_RATIO,
     "salt_loading": SALT_LOADING_DEFAULT,
+    # Dropped from VAR_ORDER after the 12-degree campaign: the dimension is flat and the
+    # optimizer was spending a GP dimension on noise. Two 1-D scans on measured Stanford
+    # weather put the optimum at 15 mm (case2) and 16 mm (optical limits + instant g +
+    # perfect condenser), and the whole 12-60 mm range spans ~1.1% of LCOW. The campaign's
+    # own fit agreed independently: length_scale for this dimension pinned at its upper
+    # bound, i.e. the GP saw no signal in it.
+    #
+    # 16 mm is within 0.4% of both scans' optima and clear of the transport cliff -- at
+    # 7 mm LCOW is 20.15 vs 6.18 USD/m3, a wall rather than a gradient, so this must never
+    # be lowered toward the DesignBounds floor without re-scanning.
+    #
+    # Not a claim that gap height is unimportant: it is that gap height is unpriced (system
+    # height is not in the BOM -- that was B5, out of scope), so the optimizer had nothing
+    # to trade against conduction. Price it and this belongs back in VAR_ORDER.
+    "vapor_gap_m": 0.016,
 }
 
 # --- Complex-fidelity dimensions (solar_lumped.complex_model) ---

@@ -34,10 +34,14 @@ def test_to_system_config_kwargs_maps_by_name_and_pins_the_rest():
     # always passed explicitly rather than left to SystemConfig's default, so a
     # sweep cannot silently fall back to the ODE condenser -- same for the sorption
     # kinetics limit.
+    # vapor_gap_m moved out of VAR_ORDER and into SIMPLE_FIXED after the 12-degree
+    # campaign, so it arrives via the pinned block rather than from the design vector.
     assert list(kwargs.keys()) == [
-        "hydrogel_thickness_m", "vapor_gap_m", "tilt_deg",
+        "hydrogel_thickness_m", "tilt_deg",
         *SIMPLE_FIXED, "condenser_tracks_ambient", "instant_equilibrium", "thermal",
     ]
+    assert kwargs["vapor_gap_m"] == SIMPLE_FIXED["vapor_gap_m"]
+    assert kwargs["thermal"].vapor_gap_m == SIMPLE_FIXED["vapor_gap_m"]
     assert kwargs["condenser_tracks_ambient"] is False
     assert kwargs["instant_equilibrium"] is False
     for i, name in enumerate(VAR_ORDER):

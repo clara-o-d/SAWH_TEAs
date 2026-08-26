@@ -116,14 +116,25 @@ def _try_fit(state: SurrogateState, *, seed: int) -> tuple[SurrogateState, bool]
     return state, True
 
 
-def run_bayesopt(cfg: BayesOptConfig, run_dir: str | Path) -> BayesOptResult:
+def run_bayesopt(
+    cfg: BayesOptConfig,
+    run_dir: str | Path,
+    *,
+    site_inputs: tuple[dict, dict[str, float]] | None = None,
+) -> BayesOptResult:
     """One site's EGO loop. Thin wrapper over :func:`run_bayesopt_sites`, so the
     single-site CLI and the global sweep run the identical loop rather than two
-    implementations that drift."""
+    implementations that drift.
+
+    ``site_inputs`` overrides the Open-Meteo fetch with (frames, elevations) supplied by
+    the caller -- how a measured frame (weather.stanford_year_weather) is optimized against
+    without a fetch path for it."""
     if len(cfg.sites) != 1:
         raise ValueError(f"run_bayesopt is single-site, got {len(cfg.sites)}; use run_bayesopt_sites")
     site = cfg.sites[0]
-    return run_bayesopt_sites(cfg, {site.name: Path(run_dir)})[site.name]
+    return run_bayesopt_sites(
+        cfg, {site.name: Path(run_dir)}, site_inputs=site_inputs,
+    )[site.name]
 
 
 @dataclass

@@ -224,10 +224,10 @@ def test_cpu_backend_scopes_a_failure_to_the_one_design_that_caused_it(monkeypat
     monkeypatch.setattr("solar_lumped.simulation.run_daily_cycle", fake_run_daily_cycle)
 
     site = SiteSpec("a", 0.0, 0.0)
-    good = np.array([0.003, 0.030, 30.0, 0.0, 0.0])
-    bad = np.array([0.005, 0.030, 30.0, 0.0, 0.0])
+    good = np.array([0.003, 30.0, 0.0, 0.0])
+    bad = np.array([0.005, 30.0, 0.0, 0.0])
     results = evaluate_requests(
-        [(site, good), (site, bad), (site, good * 1.0 + np.array([1e-4, 0, 0, 0, 0]))],
+        [(site, good), (site, bad), (site, good * 1.0 + np.array([1e-4, 0, 0, 0]))],
         caches={"a": EvalCache(tmp_path / "a.jsonl")}, econ=LCOEconomicParams(),
         site_frames={"a": object()}, site_elevations={"a": 0.0}, backend="cpu",
     )

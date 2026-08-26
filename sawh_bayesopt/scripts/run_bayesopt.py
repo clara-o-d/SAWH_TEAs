@@ -14,6 +14,11 @@ _SRC = _REPO / "src"
 if str(_SRC) not in sys.path:
     sys.path.insert(0, str(_SRC))
 
+_DIAG = _REPO.parent / "analysis" / "performance" / "optimization" / "diagnostics_bo"
+if str(_DIAG) not in sys.path:
+    sys.path.insert(0, str(_DIAG))
+
+import gp_diagnostics  # noqa: E402
 from sawh_bayesopt.bayesopt import BayesOptConfig, run_bayesopt  # noqa: E402
 from sawh_bayesopt.design_space import CASE_EPS_IR, DesignBounds  # noqa: E402
 from sawh_bayesopt.reporting import (  # noqa: E402
@@ -37,13 +42,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--ei-xi", type=float, default=0.01)
     p.add_argument("--stall-rel-tol", type=float, default=0.005)
     p.add_argument("--stall-rounds", type=int, default=3)
+    # BayesOptConfig has carried these since the sweep driver needed them; exposing them
+    # here too so a single-site run can reproduce the sweep's acquisition settings.
+    p.add_argument("--de-maxiter", type=int, default=1000)
+    p.add_argument("--de-popsize", type=int, default=40)
 
     # Site selection: one validated field site by name, or one arbitrary coordinate.
     # Optimization is single-site (evaluator.site_lcow_or_penalty), so there is no
     # multi-site or land-grid option here -- sweeping the grid means one optimization
     # per site, which is gpu_sweep/run_bayesopt_sweep.py's job.
     site = p.add_mutually_exclusive_group()
-    site.add_argument("--site", choices=("atacama", "stanford"), default="atacama")
+    # "stanford-measured" is the Stanford Met Tower export (weather.stanford_year_weather),
+    # not Open-Meteo reanalysis at Stanford's coordinates -- a different instrument, so it
+    # bypasses the fetch entirely and is injected as site_inputs.
+    site.add_argument(
+        "--site", choices=("atacama", "stanford", "stanford-measured"), default="atacama",
+    )
     site.add_argument(
         "--lat-lon", type=float, nargs=2, metavar=("LAT", "LON"),
         help="Optimize at these coordinates instead of a named site.",
@@ -81,7 +95,26 @@ def resolve_sites(args: argparse.Namespace) -> tuple:
     if args.lat_lon:
         lat, lon = args.lat_lon
         return (site_from_lat_lon(lat, lon, year=args.year),)
+    if args.site == "stanford-measured":
+        return (STANFORD,)
     return {"atacama": (ATACAMA,), "stanford": (STANFORD,)}[args.site]
+
+
+def resolve_site_inputs(args: argparse.Namespace, sites: tuple):
+    """(frames, elevations) when the weather does not come from the Open-Meteo fetch.
+
+    None for every other site, which lets the evaluator fetch as usual."""
+    if args.site != "stanford-measured":
+        return None
+    from solar_lumped.weather import site_elevation_m, stanford_year_weather
+
+    df = stanford_year_weather(args.year if args.year != 2024 else 2025)
+    print(
+        f"Measured Stanford Met Tower frame: {len(df)} rows, "
+        f"{df.index.min().date()} to {df.index.max().date()}",
+        flush=True,
+    )
+    return ({sites[0].name: df}, {sites[0].name: site_elevation_m(df)})
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -103,6 +136,8 @@ def main(argv: list[str] | None = None) -> int:
         weather_cache_dir=args.weather_cache_dir,
         case=args.case,
         day_stride=args.day_stride,
+        de_maxiter=args.de_maxiter,
+        de_popsize=args.de_popsize,
     )
 
     run_dir = _REPO / "outputs" / "runs" / args.run_id
@@ -114,7 +149,8 @@ def main(argv: list[str] | None = None) -> int:
         f"sites={[s.name for s in cfg.sites]}",
         flush=True,
     )
-    result = run_bayesopt(cfg, run_dir)
+    site_inputs = resolve_site_inputs(args, sites)
+    result = run_bayesopt(cfg, run_dir, site_inputs=site_inputs)
     print(f"Stopped: {result.stopped_reason} after {len(result.history)} design points.", flush=True)
     print(f"Best combined LCOW: {result.best.combined_lcow:.4f} USD/m3", flush=True)
 
@@ -140,6 +176,7 @@ def main(argv: list[str] | None = None) -> int:
         n_neighbors=args.n_verify_neighbors,
         perturbation_frac=args.verify_perturbation_frac,
         seed=args.seed,
+        site_inputs=site_inputs,
     )
     if verification.flagged_as_surrogate_artifact:
         print(
@@ -150,6 +187,13 @@ def main(argv: list[str] | None = None) -> int:
 
     report = write_final_report(result, cfg, run_dir, verification, run_dir / "report.json")
     print(f"Report written to {run_dir / 'report.json'}", flush=True)
+
+    # The sweep driver runs this per site; a single-site run had been skipping it, so the
+    # CV/calibration numbers that summary.csv carries did not exist for one-off runs.
+    try:
+        gp_diagnostics.main(["--run-dir", str(run_dir), "--seed", str(args.seed)])
+    except Exception as exc:  # noqa: BLE001
+        print(f"WARNING: gp_diagnostics failed: {exc!r}", flush=True)
     if report["improvement_vs_baseline_frac"] is not None:
         print(
             f"Improvement vs Wilson Table S3 baseline: {report['improvement_vs_baseline_frac']:.2%}",

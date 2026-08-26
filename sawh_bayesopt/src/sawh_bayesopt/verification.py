@@ -61,16 +61,21 @@ def verify_optimum(
     perturbation_frac: float = 0.10,
     seed: int = 0,
     artifact_tolerance: float = 0.02,
+    site_inputs: tuple[dict, dict[str, float]] | None = None,
 ) -> VerificationReport:
     """One site's verification. Wrapper over :func:`verify_optima` so the single-site CLI
-    and the global sweep verify identically."""
+    and the global sweep verify identically.
+
+    ``site_inputs`` must be forwarded whenever the loop used it: verification re-evaluates
+    against the true model, and without it a measured-frame run would be verified against
+    freshly fetched reanalysis weather instead."""
     if len(cfg.sites) != 1:
         raise ValueError(f"verify_optimum is single-site, got {len(cfg.sites)}; use verify_optima")
     name = cfg.sites[0].name
     return verify_optima(
         {name: result}, cfg, {name: Path(run_dir)},
         n_neighbors=n_neighbors, perturbation_frac=perturbation_frac,
-        seed=seed, artifact_tolerance=artifact_tolerance,
+        seed=seed, artifact_tolerance=artifact_tolerance, site_inputs=site_inputs,
     )[name]
 
 
