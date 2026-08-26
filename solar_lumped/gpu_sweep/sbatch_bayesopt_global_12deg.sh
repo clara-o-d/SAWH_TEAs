@@ -24,12 +24,23 @@
 # Walltime is 20 h on that evidence, not the 12 h this was first submitted with -- four
 # tasks came within ~3 h of truncation.
 #
-# Note what this rules out: at ~24 calls/task, 8.5 h means ~21 min/call, not the ~7 min a
-# 37-day walk at the A100's measured ~11 s/day predicts. The extra ~14 min/call is NOT
-# physics. Prime suspects are the sequential per-site EI proposals (see the ponytail note at
-# bayesopt.py's propose_batch call) and _profiles_for_design's per-(design, site) pandas
-# re-split, whose groupby spans the whole year no matter what day_stride is. Profile one of
-# them before assuming a bigger GPU allocation helps -- it would not have.
+# That job predates SITES_PER_GROUP=29: its progress lines read n_target 4350 = 50 x 87, so
+# all 87 sites ran as ONE group -- a 2088-instance init call, 3x past the ~700 saturation
+# figure, which completed fine at 11-12 GB. Width was not the problem, and the reason to
+# group is checkpointing, not memory.
+#
+# Where the 8.5 h actually went: ~7 calls, so ~73 min/call against the ~7 min a 37-day walk
+# at ~11 s/day predicts. Physics cannot account for that. The sequential per-site EI
+# proposals can -- batch_size 6 means Kriging-Believer runs 6 SEQUENTIAL differential_
+# evolution optimizations per site per round at maxiter=1000/popsize=40, and 87 sites x ~4
+# rounds x ~60 s is ~5.8 h on its own. See the ponytail note at bayesopt.py's propose_batch
+# call, which predicted exactly this ("parallelize over sites with joblib if a task ever
+# carries hundreds"). A bigger GPU allocation would not have helped; joblib over sites, or
+# a lower --de-maxiter, is where the hours are.
+#
+# Corollary: grouping is ~cost-neutral, not 3x. Acquisition cost is per-site and invariant
+# to how sites are grouped, and 3 groups triples the call count while cutting each call's
+# width by 3x. So 29 buys its checkpointing for free.
 #
 # The GPU is not the whole story: see --cpus-per-task below.
 #
