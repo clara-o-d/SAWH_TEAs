@@ -18,7 +18,7 @@ from solar_lumped.weather import (
 # (lat, lon, utc_offset_h). Frames are built tz-naive with an explicit offset because
 # that is the shape Open-Meteo actually returns: a fixed-offset local clock whose index
 # cannot be tz_localize'd across a DST transition (weather.py::_series_to_dataframe).
-CAMBRIDGE = (42.36, -71.09, -5.0)
+STANFORD = (37.4275, -122.1697, -8.0)
 ATACAMA = (-23.65, -70.40, -4.0)
 
 # Hours (local clock) over which the sun is unambiguously up at both sites on both
@@ -53,7 +53,7 @@ def _day_df(
     )
 
 
-@pytest.mark.parametrize("site", [CAMBRIDGE, ATACAMA], ids=["cambridge", "atacama"])
+@pytest.mark.parametrize("site", [STANFORD, ATACAMA], ids=["stanford", "atacama"])
 def test_zero_tilt_is_exactly_ghi(site: tuple[float, float, float]) -> None:
     """At tilt=0 the three POA terms collapse to DNI*cos(zen) + DHI + 0 == GHI exactly.
     This is the correctness anchor for the whole decomposition/transposition chain: it
@@ -72,7 +72,7 @@ def test_zero_tilt_is_exactly_ghi(site: tuple[float, float, float]) -> None:
 
 
 def test_night_collects_nothing() -> None:
-    lat, lon, off = CAMBRIDGE
+    lat, lon, off = STANFORD
     df = _day_df(lat, lon, off)
     poa = plane_of_array_w_m2(
         df["shortwave_radiation"].to_numpy(),
@@ -89,7 +89,7 @@ def test_utc_offset_places_the_sun_on_the_local_clock() -> None:
     """Regression: Open-Meteo frames are tz-naive, so the offset must be passed in. Reading
     it off the index gave zero -- the model put solar noon at 07:00 EST and zeroed every
     morning sample as 'sun below horizon' while GHI said the sun was clearly up."""
-    lat, lon, off = CAMBRIDGE
+    lat, lon, off = STANFORD
     df = _day_df(lat, lon, off)
     ghi = df["shortwave_radiation"].to_numpy()
     hours = df.index.hour + df.index.minute / 60.0
@@ -106,7 +106,7 @@ def test_utc_offset_places_the_sun_on_the_local_clock() -> None:
 def test_winter_tilt_beats_flat_in_both_hemispheres() -> None:
     """Equator-facing tilt near |latitude| must out-collect a flat plate in local winter --
     and the default azimuth has to flip with the hemisphere for that to hold in Atacama."""
-    for (lat, lon, off), winter_day in ((CAMBRIDGE, "2024-12-21"), (ATACAMA, "2024-06-21")):
+    for (lat, lon, off), winter_day in ((STANFORD, "2024-12-21"), (ATACAMA, "2024-06-21")):
         df = _day_df(lat, lon, off, day=winter_day)
         ghi = df["shortwave_radiation"].to_numpy()
         kw = dict(latitude_deg=lat, longitude_deg=lon, utc_offset_h=off)
@@ -117,7 +117,7 @@ def test_winter_tilt_beats_flat_in_both_hemispheres() -> None:
 
 def test_profile_defaults_to_poa_and_none_opts_out() -> None:
     """POA is the default; ``poa_tilt_deg=None`` is the Wilson-recreation GHI escape."""
-    lat, lon, off = CAMBRIDGE
+    lat, lon, off = STANFORD
     df = _day_df(lat, lon, off)
     default = profile_from_day_df(df)
     assert (
@@ -141,7 +141,7 @@ def test_profile_defaults_to_poa_and_none_opts_out() -> None:
 def test_days_from_df_reports_missing_coordinates_instead_of_dropping_days() -> None:
     """The per-day loop skips malformed days; a coordinate-less frame must not read as
     'no usable weather days' when POA is on by default."""
-    lat, lon, off = CAMBRIDGE
+    lat, lon, off = STANFORD
     df = _day_df(lat, lon, off).drop(columns=["latitude", "longitude"])
     with pytest.raises(ValueError, match="latitude"):
         real_weather_days_from_df(df)
@@ -149,7 +149,7 @@ def test_days_from_df_reports_missing_coordinates_instead_of_dropping_days() -> 
 
 
 def test_poa_requires_site_coordinates() -> None:
-    lat, lon, off = CAMBRIDGE
+    lat, lon, off = STANFORD
     df = _day_df(lat, lon, off).drop(columns=["latitude", "longitude"])
     with pytest.raises(ValueError, match="latitude"):
         profile_from_day_df(df, poa_tilt_deg=35.0)

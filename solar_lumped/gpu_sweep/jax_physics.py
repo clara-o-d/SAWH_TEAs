@@ -12,11 +12,14 @@ import jax.numpy as jnp
 
 from solar_lumped._parameters_xlsx import physics_value as _pv
 # Same m_des clamp the CPU path brackets its bisection with, so the joint Newton solve
-# below can't wander outside the range solve_m_des_and_thermal would have searched.
+# below can't wander outside the range evaluate_coupled_rates would have searched.
 from solar_lumped.simulation import _M_DES_BRACKET_MAX
 # Same g -> infinity scale as physics.mass_transfer_g_m_s, so both backends idealize
 # by the identical factor.
 from solar_lumped.physics import _INSTANT_EQUILIBRIUM_G_SCALE
+# Gel/condenser clearance and its detection tolerance. Imported, not restated, so the
+# two backends cannot drift apart on the number that caps swelling in both.
+from solar_lumped.physics import GEL_CONDENSER_CLEARANCE_M, SWELLING_CAP_TOL_M
 # Tsilingiris (2008) / Marrero & Mason (1972) coefficients and validity bounds are
 # imported, not restated: a duplicated polynomial is a silent backend divergence waiting
 # to happen, and physics.py carries the provenance comments for all of them.
@@ -493,15 +496,14 @@ def dc_dh_desorption(c_w, *, t_gel_c, t_cond_c, h_m, mass: MassParams):
     """Eqs. 5-6 desorption branch (dc_w/dt, dH/dt), before the clip-to-<=0 in sorbent.py."""
     gap_m = jnp.clip(mass.vapor_gap_m - h_m, 0.0, None)
     if mass.instant_equilibrium:
-        # g -> infinity, including past the 7 mm transport cutoff below -- that cutoff
-        # is itself a mass-transfer limit. Static branch, same as the CPU path.
+        # g -> infinity. Static branch, same as the CPU path.
         g = _INSTANT_EQUILIBRIUM_G_SCALE * mass.g_conv_m_s
     else:
         h_conv = vapor_gap_h_conv_w_m2_k(
             gap_m, t_gel_c, t_cond_c, tilt_deg=mass.tilt_deg, p_atm_pa=mass.p_atm_pa
         )
+        # No thermobuoyancy cutoff; see physics.mass_transfer_g_m_s for why.
         g = mass_transfer_g_from_h_conv_m_s(h_conv, t_gel_c, t_cond_c, mass.p_atm_pa)
-        g = jnp.where(gap_m < VAPOR_GAP_TRANSPORT_MIN_M, 0.0, g)
 
     driving = desorption_driving_force(
         c_w, t_gel_c=t_gel_c, t_cond_c=t_cond_c, h_m=h_m, mass=mass
@@ -679,7 +681,7 @@ def solve_steady_thermal(
 
 def _joint_residuals(z, *, c_w, h_m, t_cond_c, t_amb_c, q_solar_w_m2, h_amb, thermal, mass, gap_eff_m):
     """4x4 system [T_gel, T_abs, T_glass, m_des] (Eqs. 1/3/4 plus m_calc(m)-m=0) solved
-    jointly: same fixed point as solve_m_des_and_thermal at ~n_iter cost instead of
+    jointly: same fixed point as evaluate_coupled_rates at ~n_iter cost instead of
     n_bisect * n_iter. See gpu_sweep/FINDINGS.md."""
     n = thermal.n_thermal_unknowns
     x, m_des = z[:n], jnp.clip(z[n], 0.0, None)
@@ -716,7 +718,7 @@ def solve_desorption_state_joint(
     x0, n_iter=12,
 ):
     """Joint 4x4 Newton solve of (T_gel, T_abs, T_glass, m_des), replacing
-    solve_m_des_and_thermal's bisection-wraps-Newton."""
+    evaluate_coupled_rates's bisection-wraps-Newton."""
     n = thermal.n_thermal_unknowns
     z0 = jnp.concatenate([x0, jnp.array([0.0])])
 
@@ -740,7 +742,7 @@ def solve_desorption_state_joint(
     x_star, m_star = z_final[:n], jnp.clip(z_final[n], 0.0, None)
 
     # No-desorption branch: a negative equilibrium m_des means m_des=0 with the thermal
-    # state solved there (mirrors solve_m_des_and_thermal's m_at_zero<=0 short-circuit).
+    # state solved there (mirrors evaluate_coupled_rates's m_at_zero<=0 short-circuit).
     x_at_zero, _ = solve_steady_thermal(
         t_cond_c=t_cond_c, t_amb_c=t_amb_c, q_solar_w_m2=q_solar_w_m2, m_des=0.0,
         h_amb=h_amb, params=thermal, h_m=h_m, gap_eff_m=gap_eff_m, x0=x0,

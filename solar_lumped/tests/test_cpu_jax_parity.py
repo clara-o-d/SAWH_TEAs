@@ -55,7 +55,7 @@ def _jax_daily_yield(config: SystemConfig, profile, *, complex_mode: bool) -> fl
         instant_equilibrium=config.instant_equilibrium,
     )
     weather = jdc.build_day_weather([profile], n_abs, n_des)
-    water, _eta, _c_w, _h, ok = step(
+    water, _eta, _c_w, _h, ok, _capped = step(
         np.array([initial_loading(config)]),
         np.array([config.hydrogel_thickness_m]),
         weather,

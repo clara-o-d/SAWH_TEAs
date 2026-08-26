@@ -21,6 +21,7 @@ from solar_lumped.physics import (
     dH_dt,
     dc_w_dt,
     mass_transfer_g_m_s,
+    VAPOR_GAP_TRANSPORT_MIN_M,
     m_des_kg_s_m2_from_state,
 )
 from solar_lumped.physics import (
@@ -144,6 +145,31 @@ def test_desorption_g_uses_lewis_analogy(config: SystemConfig, mass):
         t_cond_c=t_cond,
     )
     assert g == pytest.approx(expected_g, rel=1e-12)
+
+
+def test_no_thermobuoyancy_cutoff_below_7mm(mass):
+    """Sub-7 mm gaps diffuse, they do not stop. Wilson's g = 0 cliff came from Hollands'
+    Ra_crit = 1708; the stratified correlation we use has no onset, so Nu -> 1 smoothly and
+    Sh = Nu = 1 is diffusion over a short path -- *faster* than the baseline gap."""
+    t_gel, t_cond = 75.0, 27.0
+
+    def g_at(gap_m: float) -> float:
+        return mass_transfer_g_m_s(
+            phase="desorption",
+            params=mass,
+            h_m=mass.vapor_gap_m - gap_m,
+            t_gel_c=t_gel,
+            t_cond_c=t_cond,
+        )
+
+    # Continuous across the old 7 mm wall, and no zero anywhere below it.
+    assert g_at(VAPOR_GAP_TRANSPORT_MIN_M - 1e-6) == pytest.approx(
+        g_at(VAPOR_GAP_TRANSPORT_MIN_M + 1e-6), rel=1e-3
+    )
+    for gap in (0.001, 0.003, 0.005, 0.007):
+        assert g_at(gap) > 0.0
+    # Short-path diffusion beats weak convection over the baseline gap.
+    assert g_at(0.005) > 2.0 * g_at(0.036)
 
 
 def test_m_des_from_gel_inventory(config: SystemConfig):

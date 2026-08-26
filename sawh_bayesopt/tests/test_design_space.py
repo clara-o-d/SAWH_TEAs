@@ -4,18 +4,20 @@ import numpy as np
 import pytest
 
 from sawh_bayesopt.design_space import (
+    CASE_EPS_IR,
+    CASE_SOLAR_OPTICS,
     DesignBounds,
     FULL_VAR_ORDER,
     SIMPLE_FIXED,
+    VAR_GRID,
     VAR_ORDER,
-    VAPOR_GAP_TRANSPORT_MIN_M,
     from_unit_cube,
-    is_gap_degenerate,
     latin_hypercube_design,
     to_profile_kwargs,
     to_system_config_kwargs,
     to_unit_cube,
 )
+from solar_lumped.simulation import SystemConfig
 
 
 def test_var_order_matches_bounds_fields():
@@ -67,14 +69,46 @@ def test_to_profile_kwargs_carries_the_schedule_and_transposes_onto_the_design_t
     assert profile_complex["seal_offset_h"] == float(FULL_VAR_ORDER.index("seal_offset_h"))
 
 
-def test_unit_cube_round_trip():
+def test_unit_cube_round_trip_is_exact_off_the_ordinal_grid():
+    """Round-tripping is the identity on continuous dims only. VAR_GRID dims snap on the
+    way out, so u -> x -> u lands on the nearest lattice point instead of coming back."""
     bounds = DesignBounds()
     rng = np.random.default_rng(0)
+    continuous = [i for i, n in enumerate(VAR_ORDER) if n not in VAR_GRID]
+    ordinal = [i for i, n in enumerate(VAR_ORDER) if n in VAR_GRID]
+    assert ordinal, "expected seal/open_offset_h to be gridded in simple mode"
     for _ in range(20):
         u = rng.uniform(0.0, 1.0, size=len(VAR_ORDER))
         x = from_unit_cube(u, bounds)
         u_back = to_unit_cube(x, bounds)
-        assert np.allclose(u, u_back, atol=1e-10)
+        assert np.allclose(u[continuous], u_back[continuous], atol=1e-10)
+        for i in ordinal:
+            step = VAR_GRID[VAR_ORDER[i]]
+            assert x[i] == pytest.approx(round(x[i] / step) * step)
+
+
+def test_gridded_dims_have_no_sub_grid_resolution():
+    """The staircase this snapping exists for: seal_offset_h only moves the desorption
+    window when it crosses a 15-minute weather sample, so two proposals inside one 0.25 h
+    block must collapse to one design vector -- and hence one cache key. The 33 levels are
+    the count measured against _shifted_desorption_mask directly on Atacama weather."""
+    bounds = DesignBounds()
+    i = VAR_ORDER.index("seal_offset_h")
+    lo, hi = bounds.seal_offset_h
+
+    def snapped(raw_h: float) -> float:
+        u = np.full(len(VAR_ORDER), 0.5)
+        u[i] = (raw_h - lo) / (hi - lo)
+        return float(from_unit_cube(u, bounds)[i])
+
+    assert snapped(0.13) == snapped(0.24) == pytest.approx(0.25)
+    assert snapped(0.12) == pytest.approx(0.0)
+
+    u = np.full((400, len(VAR_ORDER)), 0.5)
+    u[:, i] = np.linspace(0.0, 1.0, 400)
+    levels = np.unique(from_unit_cube(u, bounds)[:, i])
+    assert len(levels) == 33
+    assert np.allclose(levels, np.arange(lo, hi + 1e-9, 0.25))
 
 
 def test_unit_cube_bounds_map_to_endpoints():
@@ -85,32 +119,6 @@ def test_unit_cube_bounds_map_to_endpoints():
         expected_lo, expected_hi = getattr(bounds, name)
         assert lo_v == pytest.approx(expected_lo)
         assert hi_v == pytest.approx(expected_hi)
-
-
-def test_is_gap_degenerate_true_when_gap_too_small():
-    x = to_system_config_kwargs_to_array(
-        {
-            "hydrogel_thickness_m": 0.005,
-            "vapor_gap_m": 0.005 + VAPOR_GAP_TRANSPORT_MIN_M - 0.001,  # < margin
-            "tilt_deg": 30.0,
-            "seal_offset_h": 0.0,
-            "open_offset_h": 0.0,
-        }
-    )
-    assert is_gap_degenerate(x)
-
-
-def test_is_gap_degenerate_false_when_gap_ample():
-    x = to_system_config_kwargs_to_array(
-        {
-            "hydrogel_thickness_m": 0.004,
-            "vapor_gap_m": 0.040,
-            "tilt_deg": 30.0,
-            "seal_offset_h": 0.0,
-            "open_offset_h": 0.0,
-        }
-    )
-    assert not is_gap_degenerate(x)
 
 
 def to_system_config_kwargs_to_array(kwargs: dict[str, float]) -> np.ndarray:
@@ -129,7 +137,43 @@ def test_latin_hypercube_design_within_bounds_and_deterministic():
     assert np.all(x1 <= hi + 1e-12)
 
 
-def test_latin_hypercube_design_rejects_gap_degenerate_rows():
+def test_latin_hypercube_design_cannot_start_gel_in_condenser():
+    """Replaces the old is_gap_degenerate rejection test. No design in the bounds can
+    start in contact, which is why the a-priori predicate was removed: the dry thickness
+    is 0.6034 x hydrogel_thickness_m, so the worst corner is 6.03 mm against a 7 mm gap.
+    Swelling into the ceiling is a runtime state -- SiteResult.swelling_cap_bound."""
     bounds = DesignBounds()
-    x = latin_hypercube_design(50, bounds, seed=7, reject_gap_degenerate=True)
-    assert not any(is_gap_degenerate(row) for row in x)
+    x = latin_hypercube_design(200, bounds, seed=7)
+    for row in x:
+        cfg = SystemConfig(**to_system_config_kwargs(row, case="case2", complex_mode=False))
+        assert cfg.hydrogel_floor_thickness_m() < cfg.vapor_gap_m
+
+
+def test_case_optics_match_site_sweep_scenarios():
+    """CASE_EPS_IR/CASE_SOLAR_OPTICS duplicate site_sweep's three optics bases so this
+    module needn't import weather (and so cartopy). This is the guard on that copy: a case
+    must reproduce its scenario's optics EXACTLY, all four numbers. Before
+    CASE_SOLAR_OPTICS existed, case3 matched _LIMITS on the IR pair but silently kept a
+    real absorber behind real glass, so the BayesOpt path could not express any of the four
+    optical_limits scenarios."""
+    from solar_lumped.site_sweep import SCENARIOS
+
+    for case, scenario in (("case1", "wilson"), ("case2", "improved"), ("case3", "optical_limits")):
+        sc = SCENARIOS[scenario]
+        assert CASE_EPS_IR[case] == (sc.eps_abs_ir, sc.eps_glass_ir), case
+        assert CASE_SOLAR_OPTICS[case] == (sc.eps_abs, sc.tau_glass), case
+
+
+def test_every_scenario_is_reachable_through_the_case_flag():
+    """All 8 SCENARIOS must be expressible as (case, instant_equilibrium,
+    condenser_ambient) -- that mapping is what sbatch_bayesopt_global_12deg.sh derives its
+    per-task flags from, so an unreachable scenario there means a silently wrong campaign."""
+    from solar_lumped.site_sweep import SCENARIOS
+
+    for name, sc in SCENARIOS.items():
+        matches = [
+            c for c in CASE_EPS_IR
+            if CASE_EPS_IR[c] == (sc.eps_abs_ir, sc.eps_glass_ir)
+            and CASE_SOLAR_OPTICS[c] == (sc.eps_abs, sc.tau_glass)
+        ]
+        assert len(matches) >= 1, f"{name} has no case with matching optics"

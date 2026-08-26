@@ -62,24 +62,28 @@ from solar_lumped.simulation import (  # noqa: E402
     write_detailed_csv,
     write_water_inventory_csv,
 )
-from solar_lumped.weather import real_day_profile  # noqa: E402
+from solar_lumped.weather import (  # noqa: E402
+    profile_from_day_df,
+    real_day_profile,
+    stanford_year_weather,
+)
 
 # Named sites rather than the land grid: these are the ones with a reason to be here --
-# two temperate (one Mediterranean-dry, one the Cambridge test's own climate), the
-# hyper-arid Atacama the field test used, and two humid tropics that stress the opposite
-# end of the isotherm.
+# Stanford's own Mediterranean-dry climate, the hyper-arid Atacama the field test used,
+# and two humid tropics that stress the opposite end of the isotherm.
 SITES: tuple[tuple[str, float, float], ...] = (
-    ("palo_alto_us", 37.4419, -122.1430),
-    ("cambridge_us", 42.3736, -71.1097),
+    ("stanford_us", 37.4275, -122.1697),
     ("atacama_cl", -23.6500, -70.4000),
     ("san_jose_cr", 9.9281, -84.0907),
     ("singapore_sg", 1.3521, 103.8198),
 )
 SALTS: tuple[str, ...] = ("LiCl", "LiBr")
-# The repo's own default diagnostic day (system.py --weather-mode real). June puts the
-# three northern sites near their solar peak and Atacama in winter; that asymmetry is
-# real and is called out in the report rather than averaged away.
-DAY = date(2024, 6, 15)
+# June puts the three northern sites near their solar peak and Atacama in winter; that
+# asymmetry is real and is called out in the report rather than averaged away. 2025 is the
+# year Stanford's measured met-tower record covers, so the whole set moves with it.
+DAY = date(2025, 6, 15)
+# Stanford reads its own met tower instead of reanalysis; the rest have no measured record.
+MEASURED_SITE = "stanford_us"
 CACHE_DIR = str(_REPO / ".weather_cache")
 OUT_DIR = _SOLAR / "outputs" / "site_diagnostics"
 
@@ -88,10 +92,19 @@ def main() -> int:
     OUT_DIR.mkdir(parents=True, exist_ok=True)
     profiles = {}
     for name, lat, lon in SITES:
-        profiles[name] = real_day_profile(
-            lat, lon, DAY, cache_dir=CACHE_DIR, poa_tilt_deg=ss.TILT_DEG
-        )
-        print(f"weather loaded: {name} ({lat:+.4f}, {lon:+.4f})", flush=True)
+        if name == MEASURED_SITE:
+            year = stanford_year_weather(DAY.year)
+            day_df = year[year.index.date == DAY]
+            if day_df.empty:
+                raise SystemExit(f"met tower record has no {DAY.isoformat()}")
+            profiles[name] = profile_from_day_df(day_df, poa_tilt_deg=ss.TILT_DEG)
+            source = "met tower"
+        else:
+            profiles[name] = real_day_profile(
+                lat, lon, DAY, cache_dir=CACHE_DIR, poa_tilt_deg=ss.TILT_DEG
+            )
+            source = "reanalysis"
+        print(f"weather loaded: {name} ({lat:+.4f}, {lon:+.4f}) [{source}]", flush=True)
 
     drh_rows = []
     for name, _lat, _lon in SITES:

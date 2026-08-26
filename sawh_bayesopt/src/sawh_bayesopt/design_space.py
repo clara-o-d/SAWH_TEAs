@@ -10,9 +10,8 @@ import numpy as np
 from scipy.stats import qmc
 
 from solar_lumped._parameters_xlsx import physics_bounds as _bounds
-from solar_lumped.physics import EPS_ABS_IR_CASE2, EPS_GLASS_IR_CASE2
+from solar_lumped.physics import EPS_ABS, EPS_ABS_IR_CASE2, EPS_GLASS_IR_CASE2, TAU_GLASS
 from solar_lumped.physics import FIN_AREA_RATIO, L_INS_M, SALT_LOADING_DEFAULT
-from solar_lumped.physics import VAPOR_GAP_TRANSPORT_MIN_M as _VAPOR_GAP_TRANSPORT_MIN_M
 
 # Simple mode's optimized dimensions: the two gap lengths, tilt, and A1's two schedule
 # offsets borrowed from complex mode. insulation_gap_m / fin_area_ratio / salt_loading
@@ -102,10 +101,6 @@ GLAZING_CONFIGS: tuple[tuple[int, bool], ...] = (
 def var_order(complex_mode: bool) -> tuple[str, ...]:
     return FULL_VAR_ORDER if complex_mode else VAR_ORDER
 
-# Wilson's ~7mm transport floor on the effective vapor gap; used only to avoid spending
-# initial samples on designs the physics already returns near-zero yield for.
-VAPOR_GAP_TRANSPORT_MIN_M: float = _VAPOR_GAP_TRANSPORT_MIN_M
-
 # Absorber/glass IR emissivity pairs for the modified Eqs. 3/4 radiative term, matching
 # the optics of site_sweep.SCENARIOS' wilson/improved/optical_limits entries: case2 (selective surface) is the base
 # case, case1 (1.0, 1.0) is Wilson's blackbody/cavity approximation, case3 the idealized
@@ -115,6 +110,22 @@ CASE_EPS_IR: dict[str, tuple[float | None, float | None]] = {
     "case1": (1.0, 1.0),
     "case2": (EPS_ABS_IR_CASE2, EPS_GLASS_IR_CASE2),
     "case3": (0.0, 0.0),
+}
+
+# Solar-side optics per case: (eps_abs, tau_glass). A case is a whole scenario's optics, not
+# just its IR half -- case3 IS site_sweep._LIMITS, whose "optical material limits" mean a
+# perfect absorber behind perfect glass as well as no IR loss. These were previously
+# hardcoded to (EPS_ABS, TAU_GLASS) in to_system_config_kwargs, which silently made case3
+# the IR-only limit and left the BayesOpt path unable to reproduce run_gpu_sweep.py's four
+# optical_limits scenarios at all.
+#
+# Duplicated from site_sweep rather than imported: site_sweep pulls in weather (and so
+# cartopy/shapely), which this module has no other reason to load.
+# test_case_optics_match_site_sweep_scenarios fails if the two ever drift.
+CASE_SOLAR_OPTICS: dict[str, tuple[float, float]] = {
+    "case1": (EPS_ABS, TAU_GLASS),
+    "case2": (EPS_ABS, TAU_GLASS),
+    "case3": (1.0, 1.0),
 }
 
 
@@ -130,6 +141,27 @@ _SALT_LOADING_BOUNDS = _bounds("Salt loading (SL)")
 _EPS_ABS_IR_BOUNDS = _bounds("Absorber IR emissivity (eps_abs_ir)")
 _CONDENSER_AIR_SPEED_BOUNDS_M_S = _bounds("Condenser forced-air speed")
 _SEAL_OPEN_OFFSET_BOUNDS_H = _bounds("Seal / open offset from sunrise-sunset")
+
+# Ordinal dimensions, and the grid they actually live on. Declared with continuous bounds
+# above because the GP wants a distance, but snapped in from_unit_cube so the vector the
+# surrogate trains on is the vector that was simulated.
+#
+#   seal/open_offset_h  _shifted_desorption_mask selects whole weather rows, and
+#                       Open-Meteo frames are 15-minute, so an offset only moves the
+#                       objective when it crosses a sample: 33 reachable levels over
+#                       [-4, 4] h, verified against the mask. Left continuous, the GP was
+#                       fitting a stationary kernel to a staircase and oscillating.
+#   glazing_config      GLAZING_CONFIGS index, already rounded at consumption in
+#                       to_complex_options -- but only there, so the stored vector kept a
+#                       fractional value the physics never saw. Same pathology.
+#
+# ponytail: 0.25 h assumes 15-minute weather. Hourly frames would re-plateau 4:1 -- milder
+# than today and still correct, so not worth threading the frame's dt back up to here.
+VAR_GRID: dict[str, float] = {
+    "seal_offset_h": 0.25,
+    "open_offset_h": 0.25,
+    "glazing_config": 1.0,
+}
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,15 +279,15 @@ def to_system_config_kwargs(
 
     if case not in CASE_EPS_IR:
         raise ValueError(f"Unknown case {case!r}, expected one of {sorted(CASE_EPS_IR)}")
-    from solar_lumped.physics import EPS_ABS, TAU_GLASS
     from solar_lumped.physics import SystemThermalParams
 
     eps_abs_ir, eps_glass_ir = CASE_EPS_IR[case]
+    eps_abs, tau_glass = CASE_SOLAR_OPTICS[case]
     kwargs["thermal"] = SystemThermalParams(
         insulation_gap_m=kwargs["insulation_gap_m"],
         vapor_gap_m=kwargs["vapor_gap_m"],
-        eps_abs=EPS_ABS,
-        tau_glass=TAU_GLASS,
+        eps_abs=eps_abs,
+        tau_glass=tau_glass,
         tilt_deg=kwargs["tilt_deg"],
         eps_abs_ir=eps_abs_ir,
         eps_glass_ir=eps_glass_ir,
@@ -304,22 +336,24 @@ def to_unit_cube(x: np.ndarray, bounds: DesignBounds) -> np.ndarray:
 
 
 def from_unit_cube(u: np.ndarray, bounds: DesignBounds) -> np.ndarray:
-    """Unit cube -> raw design vector(s). Accepts (n_dims,) or (n, n_dims)."""
+    """Unit cube -> raw design vector(s). Accepts (n_dims,) or (n, n_dims).
+
+    ``VAR_GRID`` dimensions are snapped to their own grid here. This is the one chokepoint
+    every design vector passes through -- latin_hypercube_design for the initial batch,
+    acquisition.propose_next for every round after -- so snapping here is what makes the
+    quantization visible to the optimizer instead of hidden inside the weather mask. Two
+    consequences beyond a better-conditioned GP: EvalCache starts hitting on repeats (a
+    sub-grid probe was a fresh physics call for a bit-identical desorption window), and
+    history.csv no longer records a design that was never simulated.
+    """
     u = np.asarray(u, dtype=float)
     lo, hi = bounds.as_array()[:, 0], bounds.as_array()[:, 1]
-    return lo + u * (hi - lo)
-
-
-def is_gap_degenerate(x: np.ndarray, *, margin_m: float = VAPOR_GAP_TRANSPORT_MIN_M) -> bool:
-    """True if the effective gap (vapor_gap_m - hydrogel_thickness_m) leaves under
-    ``margin_m`` of headroom over Wilson's transport floor before the gel even swells.
-    Not a hard infeasibility -- just a signal not to spend a sample there.
-
-    Reads slots 0 and 1 directly, which VAR_ORDER and FULL_VAR_ORDER agree on, so it
-    works on simple and complex vectors alike."""
-    assert VAR_ORDER[:2] == FULL_VAR_ORDER[:2] == ("hydrogel_thickness_m", "vapor_gap_m")
-    x = np.asarray(x, dtype=float).reshape(-1)
-    return float(x[1]) - float(x[0]) < margin_m
+    x = lo + u * (hi - lo)
+    for i, name in enumerate(bounds.names()):
+        step = VAR_GRID.get(name)
+        if step:
+            x[..., i] = np.clip(np.round(x[..., i] / step) * step, lo[i], hi[i])
+    return x
 
 
 def latin_hypercube_design(
@@ -327,24 +361,13 @@ def latin_hypercube_design(
     bounds: DesignBounds,
     *,
     seed: int,
-    reject_gap_degenerate: bool = True,
-    max_resample_rounds: int = 20,
 ) -> np.ndarray:
-    """n Latin-hypercube design vectors within ``bounds``, shape (n, n_dims). With
-    ``reject_gap_degenerate``, degenerate rows are resampled (never dropped) up to
-    ``max_resample_rounds`` times, so the result always has exactly n rows."""
-    sampler = qmc.LatinHypercube(d=bounds.as_array().shape[0], seed=seed)
-    u = sampler.random(n)
-    x = from_unit_cube(u, bounds)
-    if not reject_gap_degenerate:
-        return x
+    """n Latin-hypercube design vectors within ``bounds``, shape (n, n_dims).
 
-    bad = np.array([is_gap_degenerate(row) for row in x])
-    rounds = 0
-    while bad.any() and rounds < max_resample_rounds:
-        n_bad = int(bad.sum())
-        u_replacement = sampler.random(n_bad)
-        x[bad] = from_unit_cube(u_replacement, bounds)
-        bad = np.array([is_gap_degenerate(row) for row in x])
-        rounds += 1
-    return x
+    No degeneracy rejection: nothing in the bounds can start with the gel in the
+    condenser. The dry thickness is always 0.6034 x hydrogel_thickness_m, so the worst
+    corner is 6.03 mm of gel against the 7 mm minimum vapor gap. Swelling into the
+    ceiling is still reachable there, but that is a runtime state, not a property of the
+    design vector -- SiteResult.swelling_cap_bound reports it."""
+    sampler = qmc.LatinHypercube(d=bounds.as_array().shape[0], seed=seed)
+    return from_unit_cube(sampler.random(n), bounds)

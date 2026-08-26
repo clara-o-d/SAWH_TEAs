@@ -144,6 +144,9 @@ modeled in either phase.
 \item \textbf{Self-consistent desorption coupling:} $\dot{m}_{des}$ is found as the root of
 $\dot{m}_{calc}(\dot{m}_{des}) - \dot{m}_{des} = 0$ (Brent's method) so that the gel heat balance
 (Eq.~1) and the mass-transfer equations (Eqs.~5--6) agree on the same rate at every step.
+Under the instant-kinetics ideal case this inverts -- $\dot{m}_{des}$ is set by the energy
+balance and the rate law is replaced by an equilibrium constraint; see
+Section~\ref{sec:ideal}.
 \item \textbf{Scope:} default salt is LiCl with a hydrogel sorbent. A MOF-sorbent path and three
 additional deliquescent salts (blendable via ZSR mixing) exist in code with their own property
 tables but are not documented further here, except to note that a blend's deliquescence RH (the
@@ -310,6 +313,138 @@ During desorption, $\dot{m}_{des}$ in Eq.~\eqref{eq:gel} must equal the flux imp
 Eqs.~\eqref{eq:dcw}--\eqref{eq:mdes}. The implementation finds $\dot{m}_{des}$ as the root of
 $f(\dot{m}_{des}) = \dot{m}_{calc}(\dot{m}_{des}) - \dot{m}_{des} = 0$ (Brent's method), ensuring
 Eqs.~1 and 5--6 are self-consistent at each ODE evaluation.
+
+\section{Ideal-case variants: instant kinetics and a perfect condenser}\label{sec:ideal}
+
+Two idealizations sit on top of the physics above, each removing one loss mechanism to
+bound what the device could do if that mechanism were perfect. Both are switches on
+\code{SystemConfig}, off by default, and both are upper bounds rather than designs.
+
+\subsection{Perfect condenser}
+
+\code{SystemConfig(condenser\_tracks\_ambient=True)}. The limit of infinite condenser cooling capacity: $T_{cond} = T_{amb}$ at every instant,
+so the condenser never warms under its own latent load. Eq.~\eqref{eq:condenser} is
+dropped and $T_{cond}$ ceases to be a state; everything downstream that reads $T_{cond}$
+(notably $C_R$) reads $T_{amb}$ instead. This raises the desorption driving force
+throughout the day.
+
+\subsection{Instant kinetics: the \texorpdfstring{$g \to \infty$}{g to infinity} limit as a constraint}
+
+\code{SystemConfig(instant\_equilibrium=True)}. The ideal-kinetics limit is \emph{not} "a very large $g$" -- it is the statement that the
+gel surface sits at local equilibrium with whatever it is exchanging vapour with, so
+Eq.~\eqref{eq:dcw}'s driving force is identically zero:
+\begin{equation}
+a_w(c_w, T_g) = C_R
+\label{eq:localeq}
+\end{equation}
+Imposing Eq.~\eqref{eq:localeq} directly, rather than approaching it by inflating $g$, is
+what makes this case tractable; the numerical argument is in Section~\ref{sec:penalty}.
+Because it is a statement about kinetics, it also bypasses the \SI{7}{\milli\metre}
+vapour-gap transport cutoff -- that cutoff is itself a mass-transfer limit and has no
+place in a $g \to \infty$ bound.
+
+\textbf{Desorption: which variable is unknown changes.} With $C_R$ fixed at the desorption
+form, Eq.~\eqref{eq:localeq} determines the gel temperature outright,
+\begin{equation}
+T_g = T_{eq}(c_w, T_{cond}) : \quad
+a_w(c_w, T_{eq}) = \frac{P_{sat}(T_{cond})}{P_{sat}(T_{eq})}\,\frac{T_{eq}+273.15}{T_{cond}+273.15}
+\label{eq:teq}
+\end{equation}
+which has a unique root above $T_{cond}$: $a_w$ varies weakly with temperature while $C_R$
+falls as $P_{sat}(T_g)$ grows, and at $T_g=T_{cond}$ exactly, $C_R = 1 \ge a_w$
+(\code{physics.equilibrium\_t\_gel\_desorption\_c}). $\dot{m}_{des}$ is then no longer given
+by a rate law -- it is promoted to an unknown and set by whatever the quasi-steady thermal
+balances can pay $h_{des}$ for at that $T_g$. Desorption becomes energy-limited by
+construction, which is what the ideal case is meant to represent. The loading rate follows
+by inverting the flux instead of from Eq.~\eqref{eq:dcw}, whose driving force is now zero:
+\begin{equation}
+\frac{dc_w}{dt} = -\frac{\dot{m}_{des}}{MW_w\,H_0}, \qquad
+\frac{dH}{dt} = \frac{dc_w}{dt}\,\frac{MW_w H_0}{\rho_{sol}}
+\label{eq:dcw-ideal}
+\end{equation}
+
+\textbf{Complementarity: the constraint is not always active.} Eq.~\eqref{eq:localeq} holds
+only where desorption is actually possible; otherwise $\dot{m}_{des} = 0$ and the gel sits
+off the isotherm. Three switches, checked before the solve:
+\begin{itemize}
+\item $c_w \le c_{w,\min}$ -- at the hydrate floor there is no removable water left,
+whatever the energy available.
+\item $T_{eq}$ has no root (no bracket in $[T_{cond}, T_{cond}+200\,\si{\celsius}]$), e.g.\ a
+gel with no water to have an activity.
+\item Carrying \emph{no} latent load the gel still cannot reach $T_{eq}$, i.e.\ the driving
+force is already non-positive at $\dot{m}_{des}=0$. The energy is not there. This is the
+same physical branch as the finite-$g$ path's $\dot{m}_{calc}(0)\le 0$ short-circuit,
+reached without consulting a rate law.
+\end{itemize}
+On any of the three, the thermal state is the one solved at $\dot{m}_{des}=0$.
+
+\textbf{Absorption: no ODE at all.} Here $T_g = T_{amb}$ (Note~S1 Eq.~S1), so nothing on
+this half-cycle is heat-limited, and $C_R = RH_{amb}$. The forcing weather is
+piecewise-constant on the profile step $dt$, so instant kinetics means the gel sits at the
+equilibrium loading of the \emph{current} interval, always: the exact trajectory is a
+staircase and the solution is one isotherm inversion per interval
+(\code{equilibrium\_c\_w\_absorption}), with $H$ following by
+Eq.~\eqref{eq:dcw-ideal}'s identity accumulated interval by interval so the swelling clamps
+bite where they would have during integration.
+
+\textbf{Two algebraic realizations of the same constraint.} The CPU path pins $T_g = T_{eq}$
+and solves the scalar root $T_g(\dot{m}_{des}) - T_{eq} = 0$ in $\dot{m}_{des}$ (Brent);
+the JAX path instead solves one joint $4\times4$ Newton system in
+$(T_g, T_{abs}, T_{gl}, \dot{m}_{des})$ with Eq.~\eqref{eq:localeq} as its fourth residual,
+which avoids nesting a bracket around a Newton solve on GPU. Both impose the same
+constraint and are pinned against each other to \num{5e-4} relative on annual yield
+(\code{tests/test\_cpu\_jax\_parity.py}).
+
+\subsection{Why not simply inflate \texorpdfstring{$g$}{g}}\label{sec:penalty}
+
+The earlier implementation approximated the limit by scaling $g$ by $10^5$ until
+Eq.~\eqref{eq:dcw}'s residual was negligible -- a penalty method for an algebraic
+constraint. It converges to the same answer and is retained solely as the independent
+reference the constraint route is pinned against (\code{tests/test\_local\_equilibrium.py},
+at $g\times10^6$), but it is unusable in production for two reasons:
+\begin{itemize}
+\item \textbf{Stiffness.} $\dot{c}_w$ acquires a slope of order $g$ whenever $c_w$ sits even
+slightly off the isotherm, forcing tiny explicit steps: the absorption half-cycle alone
+needed $>16{,}384$ steps per day in the JAX backend and silently truncated when it ran out.
+The desorption root $\dot{m}_{calc}(\dot{m}_{des}) - \dot{m}_{des}$ was near-vertical for the
+same reason, ill-conditioned enough to need a "Brent returned the jump, not the root"
+fallback. Under the constraint, $T_g(\dot{m}_{des}) - T_{eq}$ is a well-scaled monotone root
+in kelvin and the remaining ODE moves at the rate energy permits.
+\item \textbf{It is a tuned parameter, not a limit.} The answer depends on the scale chosen
+(a residual bias of order \SI{0.1}{\percent} at $10^5$); under the constraint the scale
+does not exist.
+\end{itemize}
+Cost: the ideal scenarios went from $\sim$\num{50}$\times$ the per-instance-day cost of
+finite $g$ to slightly \emph{less} than it, since their absorption half needs no integrator.
+
+\subsection{Scenario matrix}
+
+\code{site\_sweep.SCENARIOS} crosses the three optical cases of
+Section~\ref{sec:radiative} with these two switches. Instant kinetics and the perfect
+condenser are only applied on top of the improved-optics cases -- pairing an idealized
+limit with Wilson's original optics answers no question anyone asked.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lccc@{}}
+\toprule
+\textbf{Scenario} & \textbf{Optics} & \textbf{$g\to\infty$} & \textbf{$T_{cond}=T_{amb}$} \\
+\midrule
+\code{wilson} & Wilson & & \\
+\code{improved} & Case~2 & & \\
+\code{optical\_limits} & Case~3 & & \\
+\code{improved\_instant\_g} & Case~2 & \checkmark & \\
+\code{optical\_limits\_instant\_g} & Case~3 & \checkmark & \\
+\code{improved\_perfect\_cond} & Case~2 & & \checkmark \\
+\code{optical\_limits\_perfect\_cond} & Case~3 & & \checkmark \\
+\code{optical\_limits\_instant\_g\_perfect\_cond} & Case~3 & \checkmark & \checkmark \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Each distinct $(g\to\infty, T_{cond}=T_{amb})$ pair is a separate compiled code path in the
+JAX backend, so the sweep runs them as four groups rather than eight scenarios.
 
 \section{Constraints and cycle-level outputs}
 

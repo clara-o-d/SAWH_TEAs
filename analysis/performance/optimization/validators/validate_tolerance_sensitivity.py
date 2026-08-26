@@ -131,7 +131,7 @@ def run_at_tolerance(rtol, atol, configs, days, *, complex_mode, max_rounds):
     day_weathers = [jdc.build_day_weather([d] * len(configs), n_abs, n_des) for d in days]
 
     t0 = time.perf_counter()
-    mean_yield, mean_eta = jdc.run_year_batched(
+    mean_yield, mean_eta, _capped = jdc.run_year_batched(
         step_fn, day_weathers,
         c_w_initial=np.array([initial_loading(c) for c in configs]),
         h_initial=np.array([c.hydrogel_thickness_m for c in configs]),

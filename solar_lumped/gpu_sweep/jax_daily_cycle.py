@@ -107,7 +107,11 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
             h_des_isosteric=h_des_isosteric,
             p_atm_pa=p_atm_pa,
         )
-        h_max_m = jnp.maximum(vapor_gap_m - jp.VAPOR_GAP_TRANSPORT_MIN_M, h0_ref_m + 1e-6)
+        # Mirrors simulation._integrate_absorption's h_max. The floor is h_floor_m (the
+        # dry thickness), matching the CPU path -- it was h0_ref_m, the *reference*
+        # thickness, which is 1/0.6034 larger and silently gave the two backends
+        # different ceilings on any design where the max() floor was active.
+        h_max_m = jnp.maximum(vapor_gap_m - jp.GEL_CONDENSER_CLEARANCE_M, h_floor_m + 1e-6)
 
         def idx_abs(t):
             return jnp.clip((t / dt).astype(jnp.int32), 0, n_abs_max - 1)
@@ -195,6 +199,11 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
             h_mid = jnp.clip(sol_abs.ys[0, 1], h_floor_m, h_max_m)
             abs_ok = sol_abs.result == diffrax.RESULTS.successful
 
+        # Absorption ended sitting on the gel/condenser ceiling: uptake was set by
+        # GEL_CONDENSER_CLEARANCE_M, not by the isotherm. Endpoint only -- SaveAt(t1=True)
+        # is all we have, and simulation.py's CPU flag matches it deliberately.
+        capped = h_mid >= h_max_m - jp.SWELLING_CAP_TOL_M
+
         t_cond0 = jp.clamp_temperature_c(t_amb_des[0])
         y0_des = jnp.array([c_w_mid, h_mid, t_cond0, 0.0])
         sol_des = diffrax.diffeqsolve(
@@ -215,7 +224,7 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
         # no error, i.e. a plausible-looking wrong yield. Report it instead: this flag is
         # what run_year_batched turns into NaN rather than a silently short year.
         ok = abs_ok & (sol_des.result == diffrax.RESULTS.successful)
-        return water, eta, c_w_end, h_end, ok
+        return water, eta, c_w_end, h_end, ok, capped
 
     return single
 
@@ -368,7 +377,8 @@ def make_year_step_fn(system, dt, n_abs_max, n_des_max, *, complex_mode=False, c
 
 def run_year_batched(step_fn, day_weathers, *, c_w_initial, h_initial, aitken_max_rounds=8,
                      progress_every=0):
-    """Simulate a full year per instance and return (mean daily yield, mean eta).
+    """Simulate a full year per instance, returning (mean daily yield, mean eta,
+    hit-the-swelling-ceiling flag).
 
     Day 1 is Aitken-extrapolated to its steady periodic state so the year does not start
     from an arbitrary loading; every later day warm-starts from the previous day's end
@@ -392,10 +402,12 @@ def run_year_batched(step_fn, day_weathers, *, c_w_initial, h_initial, aitken_ma
     water_sum = np.zeros_like(c_w)
     eta_sum = np.zeros_like(c_w)
     failed_days = np.zeros_like(c_w, dtype=int)
+    capped_any = np.zeros_like(c_w, dtype=bool)
     t_days = time.perf_counter()
     for day, weather in enumerate(day_weathers, start=1):
-        water, eta, c_w, h, ok = step_fn(jnp.asarray(c_w), jnp.asarray(h), weather)
+        water, eta, c_w, h, ok, capped = step_fn(jnp.asarray(c_w), jnp.asarray(h), weather)
         failed_days += ~np.asarray(ok, dtype=bool)
+        capped_any |= np.asarray(capped, dtype=bool)
         if progress_every and (day % progress_every == 0 or day == len(day_weathers)):
             per_day = (time.perf_counter() - t_days) / day
             print(f"    day {day}/{len(day_weathers)}  {per_day:.2f}s/day  "
@@ -416,7 +428,7 @@ def run_year_batched(step_fn, day_weathers, *, c_w_initial, h_initial, aitken_ma
         print(f"    WARNING: {int(bad.sum())}/{len(bad)} instance(s) hit the ODE step cap "
               f"on at least one day (worst: {int(failed_days.max())}/{n_days} days). "
               f"Their yields are NaN, not truncated years.", flush=True)
-    return mean_water, mean_eta
+    return mean_water, mean_eta, capped_any
 
 
 def find_cyclic_state_batched(

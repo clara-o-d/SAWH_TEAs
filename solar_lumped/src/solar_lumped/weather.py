@@ -7,7 +7,7 @@ import math
 import time
 import warnings
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta, timezone
 from pathlib import Path
 from typing import Literal
 
@@ -215,6 +215,69 @@ def fetch_year_weather(
     except Exception:
         return client.get_historical(lat, lon, start, end)
 
+
+# --- Stanford campus met-station weather (measured, not Open-Meteo) ---
+
+STANFORD_CSV = (
+    Path(__file__).resolve().parent / "data" / "weather" / "stanford_weather_2025-082526.csv"
+)
+# The file carries three campus stations; only the Met Tower logs solar radiation.
+STANFORD_STATION = "Stanford Met Tower"
+STANFORD_LAT, STANFORD_LON = 37.4275, -122.1697
+STANFORD_ELEVATION_M = 26.0
+# Wall-clock timestamps in the export follow DST (summer solar peak sits an hour later
+# than winter's), so they are localized then pinned to standing PST -- Open-Meteo frames
+# are likewise a fixed-offset local clock, which is what ``utc_offset_s`` promises.
+STANFORD_TZ = "America/Los_Angeles"
+STANFORD_UTC_OFFSET_S = -8 * 3600
+
+
+def stanford_year_weather(year: int = 2025) -> pd.DataFrame:
+    """One calendar year of measured Stanford Met Tower weather, shaped like a
+    ``fetch_year_weather`` frame so every downstream profile builder accepts it.
+
+    Only 2025 is fully covered by the export (it starts 2024-12-08 and ends mid-2026).
+    """
+    raw = pd.read_csv(STANFORD_CSV, encoding="utf-8-sig")
+    raw = raw[raw["Station"] == STANFORD_STATION]
+    stamps = pd.to_datetime(
+        raw["Date"] + " " + raw["Time"].astype(int).astype(str).str.zfill(4),
+        format="%m/%d/%y %H%M",
+    ).dt.tz_localize(STANFORD_TZ, ambiguous="NaT", nonexistent="NaT")
+    # ``.to_numpy()`` throughout: the columns still carry ``raw``'s row labels, and letting
+    # pandas align them against the timestamp index silently yields an all-NaN frame.
+    df = pd.DataFrame(
+        {
+            "temperature_2m": (raw["Temp (°F)"].astype(float).to_numpy() - 32.0) * 5.0 / 9.0,
+            "relative_humidity_2m": raw["RH (%)"].astype(float).to_numpy(),
+            "shortwave_radiation": raw["Solar Rad (W/m2)"].astype(float).to_numpy().clip(min=0.0),
+            "wind_speed_10m": raw["Wind Spd (mph)"].astype(float).to_numpy() * 0.44704 * 3.6,
+        },
+        index=pd.DatetimeIndex(stamps),
+    )
+    df = df[stamps.notna().to_numpy()].sort_index()
+    fixed_offset = timezone(timedelta(seconds=STANFORD_UTC_OFFSET_S))
+    df.index = df.index.tz_convert(fixed_offset).tz_localize(None)
+    df.index.name = "time"
+    df = df[df.index.year == year]
+    if df.empty:
+        raise ValueError(f"{STANFORD_CSV.name} has no {year} data for {STANFORD_STATION}.")
+    # Sensor dropouts show up two ways: blank cells, and a -38.6 °F stuck-thermistor
+    # sentinel that reads as a real number. Both have to go before profile_from_day_df
+    # propagates them into the ODE state, so gate to physically possible values and
+    # bridge the holes from the neighbouring samples.
+    df = df.mask(
+        (df["temperature_2m"] < -30.0) | (df["temperature_2m"] > 60.0)
+        | (df["relative_humidity_2m"] < 0.0) | (df["relative_humidity_2m"] > 100.0)
+        | (df["shortwave_radiation"] > 1500.0),
+        other=float("nan"),
+    ).interpolate(limit_direction="both")
+    df["latitude"] = STANFORD_LAT
+    df["longitude"] = STANFORD_LON
+    df["utc_offset_s"] = float(STANFORD_UTC_OFFSET_S)
+    df["elevation_m"] = STANFORD_ELEVATION_M
+    return df
+
 # --- Real-weather day statistics (solar/temperature/RH day summaries) ---
 
 
@@ -371,7 +434,7 @@ def plane_of_array_w_m2(
 
     ``surface_azimuth_deg`` is measured clockwise from north (180 = due south);
     ``None`` picks the equator-facing orientation from the latitude's sign, which
-    is what both study sites want (Cambridge +42 -> south, Atacama -23 -> north).
+    is what both study sites want (Stanford +37 -> south, Atacama -23 -> north).
 
     Returns POA in W/m^2, same shape as ``ghi_w_m2``. At ``tilt_deg == 0`` this is
     an exact identity (POA == GHI): the beam term collapses to DNI*cos(zenith) =

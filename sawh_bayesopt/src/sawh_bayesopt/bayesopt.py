@@ -166,10 +166,12 @@ def run_bayesopt_sites(
     only the evaluation is shared. A site that stalls or exhausts its budget drops out of
     later rounds while the others continue.
 
-    The cost of sharing a call is a shared blast radius: the vmapped physics call is fused,
-    so a raise inside it marks every request in that round failed (evaluate_requests'
-    ``batch_error``), across sites rather than just across one site's designs. Real bugs
-    still propagate -- see evaluator._BUG_EXCEPTIONS.
+    The cost of sharing a call is a shared blast radius, but only on the JAX path: the
+    vmapped physics call is fused, so a raise inside it marks every request in that round
+    failed (evaluate_requests' ``error_by_instance``), across sites rather than just
+    across one site's designs. The CPU path runs instances sequentially and scopes a
+    failure to the one design that caused it. Real bugs still propagate -- see
+    evaluator._BUG_EXCEPTIONS.
     """
     from solar_lumped.economics import LCOEconomicParams
 
@@ -244,7 +246,7 @@ def run_bayesopt_sites(
 
     # Same seed at every site on purpose: an identical initial design set makes per-site
     # optima comparable, and the cache keys already differ by site name.
-    X0 = latin_hypercube_design(cfg.n_init, cfg.bounds, seed=cfg.seed, reject_gap_degenerate=True)
+    X0 = latin_hypercube_design(cfg.n_init, cfg.bounds, seed=cfg.seed)
     _evaluate([(loop, list(X0)) for loop in loops])
     for loop in loops:
         X_all, y_all, feasible_all = _to_xyf(loop.history)
@@ -284,7 +286,6 @@ def run_bayesopt_sites(
                 batch = list(
                     latin_hypercube_design(
                         batch_n, cfg.bounds, seed=cfg.seed + len(loop.history),
-                        reject_gap_degenerate=True,
                     )
                 )
             work.append((loop, batch))

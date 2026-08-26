@@ -41,7 +41,8 @@ class _FakeJaxDailyCycle:
 
     def run_year_batched(self, step_fn, day_weathers, *, c_w_initial, h_initial,
                          aitken_max_rounds, progress_every=0):
-        return np.asarray(self._water), np.asarray(self._eta)
+        return (np.asarray(self._water), np.asarray(self._eta),
+                np.zeros_like(np.asarray(self._water), dtype=bool))
 
 
 @pytest.fixture(autouse=True)

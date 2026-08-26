@@ -26,7 +26,7 @@ import numpy as np  # noqa: E402
 
 from sawh_bayesopt.design_space import DesignBounds, VAR_ORDER  # noqa: E402
 from sawh_bayesopt.evaluator import EvalCache, evaluate_batch  # noqa: E402
-from sawh_bayesopt.sites import ATACAMA, CAMBRIDGE, fetch_site_frame  # noqa: E402
+from sawh_bayesopt.sites import ATACAMA, STANFORD, fetch_site_frame  # noqa: E402
 from solar_lumped.weather import site_elevation_m  # noqa: E402
 
 
@@ -57,7 +57,12 @@ def main(argv: list[str] | None = None) -> int:
     bo_config = json.loads(bo_config_path.read_text())
 
     bounds = DesignBounds(**{name: tuple(v) for name, v in bo_config["bounds"].items()})
-    site_by_name = {s.name: s for s in (CAMBRIDGE, ATACAMA)}
+    # Cambridge is retired, so a config.json from an older Cambridge run is not a site
+    # this can reproduce -- say so instead of raising a bare KeyError.
+    site_by_name = {s.name: s for s in (ATACAMA, STANFORD)}
+    unknown = [n for n in bo_config["sites"] if n not in site_by_name]
+    if unknown:
+        raise SystemExit(f"{bo_config_path} was run at retired site(s) {unknown}.")
     sites = tuple(site_by_name[name] for name in bo_config["sites"])
 
     run_dir = _REPO / "outputs" / "runs" / args.run_id

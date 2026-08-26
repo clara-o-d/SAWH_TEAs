@@ -23,7 +23,7 @@ from sawh_bayesopt.reporting import (  # noqa: E402
     write_history_csv,
     write_run_config,
 )
-from sawh_bayesopt.sites import ATACAMA, CAMBRIDGE, site_from_lat_lon  # noqa: E402
+from sawh_bayesopt.sites import ATACAMA, STANFORD, site_from_lat_lon  # noqa: E402
 from sawh_bayesopt.surrogate import save_state  # noqa: E402
 from sawh_bayesopt.verification import verify_optimum  # noqa: E402
 
@@ -43,7 +43,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # multi-site or land-grid option here -- sweeping the grid means one optimization
     # per site, which is gpu_sweep/run_bayesopt_sweep.py's job.
     site = p.add_mutually_exclusive_group()
-    site.add_argument("--site", choices=("atacama", "cambridge"), default="atacama")
+    site.add_argument("--site", choices=("atacama", "stanford"), default="atacama")
     site.add_argument(
         "--lat-lon", type=float, nargs=2, metavar=("LAT", "LON"),
         help="Optimize at these coordinates instead of a named site.",
@@ -81,7 +81,7 @@ def resolve_sites(args: argparse.Namespace) -> tuple:
     if args.lat_lon:
         lat, lon = args.lat_lon
         return (site_from_lat_lon(lat, lon, year=args.year),)
-    return {"cambridge": (CAMBRIDGE,), "atacama": (ATACAMA,)}[args.site]
+    return {"atacama": (ATACAMA,), "stanford": (STANFORD,)}[args.site]
 
 
 def main(argv: list[str] | None = None) -> int:

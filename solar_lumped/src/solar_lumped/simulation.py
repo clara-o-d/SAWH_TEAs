@@ -46,7 +46,7 @@ from solar_lumped.physics import (
     SaltProperties,
     TAU_GLASS,
     TILT_DEG,
-    VAPOR_GAP_TRANSPORT_MIN_M,
+    GEL_CONDENSER_CLEARANCE_M,
     WATER_MOLAR_MASS_KG_MOL,
     SystemThermalParams,
     MassTransferParams,
@@ -894,9 +894,14 @@ def _integrate_absorption(
     t_span = (0.0, dt * n)
     t_eval = np.linspace(0.0, t_span[1], n + 1)
     h_min = config.hydrogel_floor_thickness_m()
-    # Gel cannot swell into the condenser; keep ≥7 mm effective gap (Wilson §2.2).
+    # Geometry, not transport: the gel cannot swell into the condenser. The clearance is
+    # a numerical one (the correlations' k/L diverges at contact), NOT a physical setback
+    # -- near-contact is meant to be punished by the k/L heat leak the thermal balance
+    # already carries, not by this ceiling. It previously reused Wilson's 7 mm transport
+    # floor, which is ~70% of a narrow vapor gap and left this constant setting
+    # night-time uptake directly. Mirrored in gpu_sweep/jax_daily_cycle.py.
     h_max = max(
-        config.vapor_gap_m - VAPOR_GAP_TRANSPORT_MIN_M,
+        config.vapor_gap_m - GEL_CONDENSER_CLEARANCE_M,
         h_min + 1e-6,
     )
     t_guess: tuple[float, float, float] | None = None
