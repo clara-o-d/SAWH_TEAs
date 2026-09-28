@@ -48,6 +48,7 @@ from jax_daily_cycle import (  # noqa: E402
     build_day_weather,
     build_system_arrays,
     make_year_step_fn,
+    annual_means,
     run_year_batched,
     year_padding,
 )
@@ -236,13 +237,13 @@ def run_group(
         for d in range(n_days)
     ]
 
-    mean_yield, mean_eta, _capped = run_year_batched(
+    mean_yield, mean_eta, _capped = annual_means(run_year_batched(
         step_fn, day_weathers,
         c_w_initial=np.array([initial_loading(cfg) for cfg in configs]),
         h_initial=np.array([cfg.hydrogel_thickness_m for cfg in configs]),
         aitken_max_rounds=args.max_rounds,
         progress_every=args.progress_every,
-    )
+    ))
     elapsed = time.perf_counter() - t0
 
     for i, (w, name) in enumerate(instances):

@@ -358,27 +358,60 @@ def make_year_step_fn(system, dt, n_abs_max, n_des_max, *, complex_mode=False, c
     """One compiled step reused for every day of the year: (c_w, h, weather) -> (water,
     eta, c_w_end, h_end). Weather is an argument, not a closure constant, so all 365 days
     share a single compilation as long as they are padded to the same shape."""
+    day_step = make_day_step_fn(
+        len(system), dt, n_abs_max, n_des_max, complex_mode=complex_mode,
+        condenser_tracks_ambient=condenser_tracks_ambient,
+        h_des_isosteric=h_des_isosteric, instant_equilibrium=instant_equilibrium,
+    )
+    system_vals = tuple(system.values())
+    return lambda c_w, h, weather: day_step(c_w, h, weather, system_vals)
+
+
+def make_day_step_fn(n_system, dt, n_abs_max, n_des_max, *, complex_mode=False,
+                     condenser_tracks_ambient=False, h_des_isosteric=False,
+                     instant_equilibrium=False):
+    """The compiled step with the system arrays as an argument too, so a caller can vary a
+    system parameter day to day (sawh_bayesopt.daily_surrogate re-tilts every day) without
+    recompiling. ``system_vals`` is ``tuple(build_system_arrays(...).values())``."""
     single = _make_single(
         dt, n_abs_max, n_des_max, complex_mode=complex_mode,
         condenser_tracks_ambient=condenser_tracks_ambient,
         h_des_isosteric=h_des_isosteric,
         instant_equilibrium=instant_equilibrium,
     )
-    n_weather = len(WEATHER_KEYS)
-    batched = jax.vmap(single, in_axes=(0, 0) + (0,) * (n_weather + len(system)))
-    system_vals = tuple(system.values())
+    batched = jax.vmap(single, in_axes=(0, 0) + (0,) * (len(WEATHER_KEYS) + n_system))
 
     @jax.jit
-    def step(c_w, h, weather):
+    def step(c_w, h, weather, system_vals):
         return batched(c_w, h, *weather, *system_vals)
 
     return step
 
 
+def annual_means(days):
+    """Reduce :func:`run_year_batched`'s per-day arrays to (mean daily yield, mean eta,
+    hit-the-swelling-ceiling-on-any-day flag), one entry per instance."""
+    ok = days["ok"].all(axis=0)
+    mean_water = days["water"].mean(axis=0)
+    mean_eta = days["eta"].mean(axis=0)
+    if not ok.all():
+        # NaN, not a raise: the instances that did converge are still good data, and a
+        # raise here would throw away a whole chunk over one pathological site. NaN
+        # reaches the CSV as an empty/NaN yield, which cannot be mistaken for a result.
+        mean_water[~ok] = np.nan
+        mean_eta[~ok] = np.nan
+        failed_days = (~days["ok"]).sum(axis=0)
+        print(f"    WARNING: {int((~ok).sum())}/{len(ok)} instance(s) hit the ODE step cap "
+              f"on at least one day (worst: {int(failed_days.max())}/{len(days['ok'])} days). "
+              f"Their yields are NaN, not truncated years.", flush=True)
+    return mean_water, mean_eta, days["capped"].any(axis=0)
+
+
 def run_year_batched(step_fn, day_weathers, *, c_w_initial, h_initial, aitken_max_rounds=8,
                      progress_every=0):
-    """Simulate a full year per instance, returning (mean daily yield, mean eta,
-    hit-the-swelling-ceiling flag).
+    """Simulate a full year per instance, returning a dict of per-day ``(n_days, n_inst)``
+    arrays: water, eta, c_w_start, h_start, c_w_end, h_end, capped, ok. Most callers want
+    :func:`annual_means` of it; sawh_bayesopt's daily surrogate trains on the days.
 
     Day 1 is Aitken-extrapolated to its steady periodic state so the year does not start
     from an arbitrary loading; every later day warm-starts from the previous day's end
@@ -399,36 +432,26 @@ def run_year_batched(step_fn, day_weathers, *, c_w_initial, h_initial, aitken_ma
         print(f"    warm-up done ({time.perf_counter() - _T0:.0f}s in), "
               f"{len(day_weathers)} day(s) to walk", flush=True)
 
-    water_sum = np.zeros_like(c_w)
-    eta_sum = np.zeros_like(c_w)
-    failed_days = np.zeros_like(c_w, dtype=int)
-    capped_any = np.zeros_like(c_w, dtype=bool)
+    keys = ("water", "eta", "c_w_start", "h_start", "c_w_end", "h_end", "capped", "ok")
+    days = {k: [] for k in keys}
     t_days = time.perf_counter()
     for day, weather in enumerate(day_weathers, start=1):
+        days["c_w_start"].append(c_w)
+        days["h_start"].append(h)
         water, eta, c_w, h, ok, capped = step_fn(jnp.asarray(c_w), jnp.asarray(h), weather)
-        failed_days += ~np.asarray(ok, dtype=bool)
-        capped_any |= np.asarray(capped, dtype=bool)
+        c_w = np.asarray(c_w, dtype=float)
+        h = np.asarray(h, dtype=float)
+        days["water"].append(np.asarray(water, dtype=float))
+        days["eta"].append(np.asarray(eta, dtype=float))
+        days["c_w_end"].append(c_w)
+        days["h_end"].append(h)
+        days["capped"].append(np.asarray(capped, dtype=bool))
+        days["ok"].append(np.asarray(ok, dtype=bool))
         if progress_every and (day % progress_every == 0 or day == len(day_weathers)):
             per_day = (time.perf_counter() - t_days) / day
             print(f"    day {day}/{len(day_weathers)}  {per_day:.2f}s/day  "
                   f"~{per_day * (len(day_weathers) - day) / 60:.0f} min left", flush=True)
-        water_sum += np.asarray(water, dtype=float)
-        eta_sum += np.asarray(eta, dtype=float)
-        c_w = np.asarray(c_w, dtype=float)
-        h = np.asarray(h, dtype=float)
-    n_days = len(day_weathers)
-    mean_water, mean_eta = water_sum / n_days, eta_sum / n_days
-    if failed_days.any():
-        bad = failed_days > 0
-        # NaN, not a raise: the instances that did converge are still good data, and a
-        # raise here would throw away a whole chunk over one pathological site. NaN
-        # reaches the CSV as an empty/NaN yield, which cannot be mistaken for a result.
-        mean_water[bad] = np.nan
-        mean_eta[bad] = np.nan
-        print(f"    WARNING: {int(bad.sum())}/{len(bad)} instance(s) hit the ODE step cap "
-              f"on at least one day (worst: {int(failed_days.max())}/{n_days} days). "
-              f"Their yields are NaN, not truncated years.", flush=True)
-    return mean_water, mean_eta, capped_any
+    return {k: np.stack(v) for k, v in days.items()}
 
 
 def find_cyclic_state_batched(
@@ -456,11 +479,15 @@ def find_cyclic_state_batched(
         dd = d1 - d0
         denom = np.sum(dd * dd, axis=1)
         safe = denom > 1e-30
-        x_star_new = np.where(
-            safe[:, None],
-            x - d0 * (np.sum(d0 * dd, axis=1) / np.where(safe, denom, 1.0))[:, None],
-            x2,
-        )
+        x_aitken = x - d0 * (np.sum(d0 * dd, axis=1) / np.where(safe, denom, 1.0))[:, None]
+        # Accept the extrapolation only if it lands within 10x the iteration's own motion
+        # of the last iterate -- for a contracting iteration Aitken's jump is d1*r/(1-r),
+        # i.e. <10x |d1| up to r = 0.9. A near-singular dd otherwise launched states the
+        # physics cannot reach (h = -2.6e13 mm, c_w = -4.8e17 seen in a 64-instance
+        # pilot), which day 1 then started from before the step's clamps pulled it back.
+        motion = np.linalg.norm(x2 - x, axis=1)
+        sane = safe & (np.linalg.norm(x_aitken - x2, axis=1) <= 10.0 * motion) & np.isfinite(x_aitken).all(axis=1)
+        x_star_new = np.where(sane[:, None], x_aitken, x2)
         x_prev, x_star, x = x, x_star_new, x_star_new
 
     rel_step = np.linalg.norm(x_star - x_prev, axis=1) / np.maximum(np.linalg.norm(x_star, axis=1), 1e-12)

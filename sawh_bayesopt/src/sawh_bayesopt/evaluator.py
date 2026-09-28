@@ -264,13 +264,13 @@ def _run_jax_year(
             jdc.build_day_weather([p[d] for p in instance_profiles], n_abs_max, n_des_max)
             for d in range(n_days)
         ]
-        water, eta, capped = jdc.run_year_batched(
+        water, eta, capped = jdc.annual_means(jdc.run_year_batched(
             step_fn, day_weathers,
             c_w_initial=np.array([initial_loading(c) for c in instance_configs]),
             h_initial=np.array([c.hydrogel_thickness_m for c in instance_configs]),
             aitken_max_rounds=JAX_AITKEN_MAX_ROUNDS,
             progress_every=JAX_YEAR_PROGRESS_EVERY,
-        )
+        ))
     except _BUG_EXCEPTIONS:
         raise
     except Exception as exc:  # noqa: BLE001 -- the batched jax/diffrax call can raise
