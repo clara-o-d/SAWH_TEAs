@@ -25,7 +25,7 @@ if str(_SRC) not in sys.path:
 
 import numpy as np  # noqa: E402
 
-from sawh_bayesopt.design_space import DesignBounds, VAR_ORDER  # noqa: E402
+from sawh_bayesopt.design_space import DesignBounds  # noqa: E402
 from sawh_bayesopt.evaluator import PENALTY_LCOW_USD_PER_M3, EvalCache  # noqa: E402
 from sawh_bayesopt.surrogate import (  # noqa: E402
     SurrogateState,
@@ -51,7 +51,10 @@ def _load_bounds(run_dir: Path) -> DesignBounds:
         print(f"WARNING: {config_path} not found (older run?) -- using DesignBounds() defaults.", file=sys.stderr)
         return DesignBounds()
     payload = json.loads(config_path.read_text())
-    return DesignBounds(**{name: tuple(v) for name, v in payload["bounds"].items()})
+    return DesignBounds(
+        **{name: tuple(v) for name, v in payload["bounds"].items()},
+        complex_mode=bool(payload.get("complex_mode", False)),
+    )
 
 
 def _load_xy(run_dir: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
@@ -90,7 +93,7 @@ def cross_validate(
         if train_feasible.sum() < 2:
             continue
         state = SurrogateState(
-            gp=build_gp(seed=seed), bounds=bounds, X_raw=X[train_idx], y=y[train_idx], feasible=train_feasible
+            gp=build_gp(n_dims=len(bounds.names()), seed=seed), bounds=bounds, X_raw=X[train_idx], y=y[train_idx], feasible=train_feasible
         )
         state = fit(state)
         mu, sigma = predict_batch(state, X[test_idx])
@@ -188,7 +191,7 @@ def detect_outliers(y: np.ndarray, *, iqr_multiplier: float = 3.0) -> np.ndarray
 def final_fit_hyperparameters(
     X: np.ndarray, y: np.ndarray, feasible: np.ndarray, bounds: DesignBounds, *, seed: int
 ) -> tuple[dict, SurrogateState]:
-    state = SurrogateState(gp=build_gp(seed=seed), bounds=bounds, X_raw=X, y=y, feasible=feasible)
+    state = SurrogateState(gp=build_gp(n_dims=len(bounds.names()), seed=seed), bounds=bounds, X_raw=X, y=y, feasible=feasible)
     state = fit(state)
     kernel = state.gp.kernel_
     # ConstantKernel * Matern(length_scale=[...]) + WhiteKernel -- see surrogate.py::build_gp.
@@ -196,7 +199,7 @@ def final_fit_hyperparameters(
     white = kernel.k2
     return {
         "signal_variance": float(k1.k1.constant_value),
-        "length_scales": {name: float(ls) for name, ls in zip(VAR_ORDER, np.atleast_1d(k1.k2.length_scale))},
+        "length_scales": {name: float(ls) for name, ls in zip(bounds.names(), np.atleast_1d(k1.k2.length_scale))},
         "noise_level": float(white.noise_level),
         "kernel_repr": str(kernel),
     }, state

@@ -1,6 +1,6 @@
 #!/bin/bash
-# hp_sweep.py smoke test -- 2 tiny combinations (single site, single-day
-# resolution, ~12 evaluations each) run across 2 workers sharing 1 GPU, to
+# hp_sweep.py smoke test -- 2 tiny combinations (Atacama, full-year
+# walk, ~12 evaluations each) run across 2 workers sharing 1 GPU, to
 # validate the whole sweep+diagnostics+plotting pipeline on real Sherlock
 # hardware before committing to the full 27-combination sweep.
 # Submit from the repo root (/home/groups/cdiazm/SAWH_TEAs/sawh_bayesopt):
@@ -29,7 +29,7 @@ nvidia-smi
 python3 scripts/hp_sweep.py \
   --sweep-id hp_sweep_smoke --resume \
   --ei-xi-values 0.02,0.1 --stall-rel-tol-values 0.005 --n-init-values 8 \
-  --bo-budget 4 --batch-size 2 --sites cambridge --resolution single \
+  --bo-budget 4 --batch-size 2 --sites atacama \
   --n-workers 2 --gpu-ids 0 \
   --weather-cache-dir ../solar_lumped/.weather_cache
 

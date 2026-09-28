@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sawh-bayesopt"
 version = "0.1.0"
-description = "Surrogate-assisted (GP + Expected Improvement) global optimization of solar_lumped SAWH device design"
+description = "Two-stage (design x daily control) surrogate optimization of solar_lumped SAWH systems, with per-site GP+EI BO as the reference"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -27,6 +27,8 @@ dependencies = [
     # package, or reinstall it afterward.
     "jax",
     "diffrax",
+    # The two-stage pipeline's daily surrogate (daily_surrogate.py).
+    "equinox",
 ]
 
 [project.optional-dependencies]
