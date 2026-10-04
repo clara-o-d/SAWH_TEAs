@@ -10,6 +10,7 @@ Stages, in order, all under --run-dir (default outputs/two_stage/<run-id>):
   select             cluster + stratify cells -> selection.csv, config.json          (CPU)
   simulate           one chunk of the physics campaign -> runs/chunk_NNNN.npz        (GPU, array)
   fit                surrogate ensemble -> model/, holdout_report.json               (GPU)
+  holdout            recompute holdout_report.json from the saved model              (GPU)
   optimize           design BO per cell for one tilt x schedule mode -> opt/<mode>/  (GPU, array)
   active             physics at/around the optima -> active/roundR_chunk_NNNN.npz    (GPU, array)
   maps               merge optimize parts -> maps_<mode>.csv                        (CPU)
@@ -83,6 +84,8 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--width", type=int, default=128)
     p.add_argument("--steps", type=int, default=20_000)
 
+    sub.add_parser("holdout", help="Recompute holdout_report.json from the saved model.")
+
     p = sub.add_parser("optimize")
     _mode_args(p)
     p.add_argument("--cells", choices=("anchors", "all"), default="all",
@@ -104,7 +107,8 @@ def main(argv: list[str] | None = None) -> int:
     args.run_dir.mkdir(parents=True, exist_ok=True)
     return {
         "features": stage_features, "validate-features": stage_validate_features, "select": stage_select,
-        "simulate": stage_simulate, "fit": stage_fit, "optimize": stage_optimize, "active": stage_active,
+        "simulate": stage_simulate, "fit": stage_fit, "holdout": stage_holdout,
+        "optimize": stage_optimize, "active": stage_active,
         "maps": stage_maps, "validate-bo": stage_validate_bo,
     }[args.stage](args)
 
@@ -276,16 +280,30 @@ def stage_fit(args) -> int:
                             rows["cell"][train], n_members=args.members, width=args.width, steps=args.steps,
                             seed=args.seed)
     ds.save_surrogate(model, args.run_dir / "model")
+    _write_holdout_report(args, model, f, rows, is_test)
+    return 0
+
+
+def stage_holdout(args) -> int:
+    """Recompute holdout_report.json from the saved model, without refitting."""
+    from sawh_bayesopt.daily_surrogate import load_surrogate
+
+    _cfg, f, sel = _context(args)
+    rows = _load_rows(args.run_dir)
+    split = dict(zip(sel["cell"], sel["split"]))
+    is_test = np.array([split.get(int(c), "train") == "test" for c in rows["cell"]])
+    _write_holdout_report(args, load_surrogate(args.run_dir / "model"), f, rows, is_test)
+    return 0
+
+
+def _write_holdout_report(args, model, f, rows, is_test) -> None:
+    from sawh_bayesopt import daily_surrogate as ds
+
     test_rows = {k: v[is_test] for k, v in rows.items()}
-    report = {
-        "n_train_rows": int(train.sum()), "n_test_rows": int(is_test.sum()),
-        "holdout": ds.grouped_holdout_report(model, test_rows, f["day_features"], f["regime"]),
-        "monotonicity_heldout": ds.monotonicity_check(model, test_rows, f["day_features"], f["regime"]),
-        "expected_signs": ds.EXPECTED_SIGNS,
-    }
+    report = {"n_train_rows": int((~is_test).sum()), "n_test_rows": int(is_test.sum()),
+              **ds.grouped_holdout_report(model, test_rows, f["day_features"], f["regime"])}
     (args.run_dir / "holdout_report.json").write_text(json.dumps(report, indent=2))
     print(json.dumps(report, indent=2))
-    return 0
 
 
 def stage_optimize(args) -> int:

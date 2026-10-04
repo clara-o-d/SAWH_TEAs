@@ -49,5 +49,5 @@ run simulate --chunk-index 0
 echo "== done"
 python3 -c "
 import json; r = json.load(open('${RUN_DIR}/holdout_report.json'))
-print('annual held-out error by regime:', {k: round(v['median_rel_err'], 3) for k, v in r['holdout']['annual'].items() if v['median_rel_err'] is not None})
-print('thickness sign agreement:', r['monotonicity_heldout']['hydrogel_thickness']['all'])"
+print('annual held-out error by regime:', {k: round(v['median_rel_err'], 3) for k, v in r['annual'].items() if v['median_rel_err'] is not None})
+print('design ranking (median within-cell spearman):', {k: round(v['median_spearman'], 2) for k, v in r['design_ranking'].items() if v['n_cells']})"

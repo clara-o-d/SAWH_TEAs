@@ -44,7 +44,7 @@ def _cell(n_days=24, seed=1):
     return feats, month
 
 
-def test_ensemble_learns_the_function_and_its_thickness_sign(model):
+def test_ensemble_learns_the_function_and_ranks_designs_like_the_physics(model):
     rng = np.random.default_rng(5)
     design = np.tile([0.004, 0.02, 4.0], (200, 1))
     control = ds.random_controls(rng, 200, 1)[:, 0]
@@ -53,10 +53,28 @@ def test_ensemble_learns_the_function_and_its_thickness_sign(model):
     pred = np.asarray(ds.predict(model, ds.assemble_inputs(design, control, state, feats).astype(np.float32))["water_mean"])
     assert np.sqrt(np.mean((pred - _true_water(design, control, feats)) ** 2)) < 0.15
 
-    rows = {"design": design, "control": control, "state": state, "cell": np.zeros(200, int), "day": np.arange(200),
-            "water": pred}
-    mono = ds.monotonicity_check(model, rows, feats[None], np.array(["other"]), n_sample=200)
-    assert mono["hydrogel_thickness"]["all"] > 0.9
+    # Held-out report on known truth: 3 cells x 6 designs x 8 days, physics = _true_water.
+    n_cells, n_designs, n_days = 3, 6, 8
+    bounds = ds.design_bounds()
+    designs = bounds[:, 0] + rng.random((n_designs, 3)) * (bounds[:, 1] - bounds[:, 0])
+    day_feats = np.stack([np.column_stack([rng.uniform(-2, 2, n_days), rng.normal(size=n_days)])
+                          for _ in range(n_cells)])
+    cell, inst, day, dsg, ctrl = [], [], [], [], []
+    for c in range(n_cells):
+        for d in range(n_designs):
+            u = ds.random_controls(rng, 1, n_days)[0]
+            for t in range(n_days):
+                cell.append(c); inst.append(c * n_designs + d); day.append(t); dsg.append(designs[d]); ctrl.append(u[t])
+    cell, day, dsg, ctrl = map(np.array, (cell, day, dsg, ctrl))
+    st = np.tile([4.5e4, 4.5], (len(cell), 1))
+    rows = {"cell": cell, "instance": np.array(inst), "day": day, "design": dsg, "control": ctrl, "state": st,
+            "water": _true_water(dsg, ctrl, day_feats[cell, day]), "state_end": st, "capped": np.zeros(len(cell), bool)}
+    rep = ds.grouped_holdout_report(model, rows, day_feats, np.array(["other"] * n_cells))
+    assert rep["annual"]["all"]["median_rel_err"] < 0.05
+    assert rep["design_ranking"]["all"]["median_spearman"] > 0.8
+    assert rep["design_ranking"]["all"]["thickness_sign_agreement"] == 1.0
+    assert rep["direction"]["all"]["physics_thickness_positive"] == 1.0  # _true_water rises with thickness
+
 
 
 def test_enumeration_recovers_the_known_optimum(model):

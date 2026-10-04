@@ -41,12 +41,6 @@ SEAL_GRID = np.arange(-4.0, 4.0 + 1e-9, 0.25)
 OPEN_GRID = np.arange(-4.0, 4.0 + 1e-9, 0.25)
 TILT_GRID = np.arange(0.0, 60.0 + 1e-9, 5.0)
 
-# Direction the transport model predicts for d(water)/dx, checked by monotonicity_check.
-# EDIT if the physics says otherwise -- these are the hypothesis being tested, not a law:
-# thicker gel holds more water per cycle; a longer sealed (desorption) window releases more.
-EXPECTED_SIGNS: dict[str, int] = {"hydrogel_thickness": +1, "desorption_duration": +1}
-
-
 def design_bounds() -> np.ndarray:
     """(3, 2) low/high of DESIGN_VARS, from design_space.DesignBounds."""
     from sawh_bayesopt.design_space import DesignBounds
@@ -341,19 +335,28 @@ def grouped_holdout_report(model: DailySurrogate, rows: dict, day_features: np.n
                            regime_by_cell: np.ndarray, *, chunk: int = 200_000) -> dict:
     """Error on climates never seen in training, broken out by regime.
 
-    ``rows`` must already be restricted to held-out cells. Two numbers per regime:
+    ``rows`` must already be restricted to held-out cells. Per regime:
       * daily: RMSE and median relative error of one-day water given the *true* start state;
       * annual: the surrogate chained through the whole year under the physics' own control
         sequence from the physics' day-1 state -- the number that says whether state error
-        compounds, and the one that matters for LCOW.
+        compounds, and the one that matters for LCOW;
+      * design_ranking: within each cell, the rank correlation between surrogate and physics
+        annual yield across that cell's designs, and whether the two agree on the sign of
+        thickness's effect with vapor gap and salt loading held fixed (multiple regression).
+        This is what the outer design search relies on;
+      * direction: within each cell, the slope of daily water against thickness and against
+        the sealed (desorption) window, fitted to physics and to the surrogate on the very
+        same rows, and whether they agree -- plus which way the physics goes. Physics is
+        the reference; no direction is assumed. Any confounding in a one-variable slope
+        hits both sides identically, so agreement is a fair test of the response.
 
     ``rows["instance"]`` must be unique across the whole campaign (the driver offsets it).
     """
     X = assemble_inputs(rows["design"], rows["control"], rows["state"],
                         day_features[rows["cell"], rows["day"]])
     water_of = eqx.filter_jit(lambda mdl, x: predict(mdl, x)["water_mean"])
-    pred = np.concatenate([np.asarray(water_of(model, jnp.asarray(X[i:i + chunk], dtype=jnp.float32)))
-                           for i in range(0, len(X), chunk)])
+    pred_daily = np.concatenate([np.asarray(water_of(model, jnp.asarray(X[i:i + chunk], dtype=jnp.float32)))
+                                 for i in range(0, len(X), chunk)])
     regime = regime_by_cell[rows["cell"]]
     report: dict = {"daily": {}, "annual": {}}
     for name in [*np.unique(regime), "all"]:
@@ -361,8 +364,8 @@ def grouped_holdout_report(model: DailySurrogate, rows: dict, day_features: np.n
         wet = sel & (rows["water"] > 0.05)
         report["daily"][name] = {
             "n_rows": int(sel.sum()),
-            "rmse_kg_m2": float(np.sqrt(np.mean((pred[sel] - rows["water"][sel]) ** 2))),
-            "median_rel_err": float(np.median(np.abs(pred[wet] / rows["water"][wet] - 1))) if wet.any() else None,
+            "rmse_kg_m2": float(np.sqrt(np.mean((pred_daily[sel] - rows["water"][sel]) ** 2))),
+            "median_rel_err": float(np.median(np.abs(pred_daily[wet] / rows["water"][wet] - 1))) if wet.any() else None,
         }
 
     # Annual chained error, one instance at a time grouped by year length.
@@ -380,35 +383,53 @@ def grouped_holdout_report(model: DailySurrogate, rows: dict, day_features: np.n
         water = np.asarray(chained(model, jnp.asarray(rows["design"][idx[:, 0]]), jnp.asarray(rows["control"][idx]),
                                    jnp.asarray(feats), jnp.asarray(rows["state"][idx[:, 0]])))
         for k, g in enumerate(idx):
-            annual.append((regime_by_cell[rows["cell"][g[0]]], water[k].mean(), rows["water"][g].mean()))
+            c = int(rows["cell"][g[0]])
+            annual.append((regime_by_cell[c], water[k].mean(), rows["water"][g].mean(), c, rows["design"][g[0]]))
     for name in sorted({a[0] for a in annual}) + ["all"]:
-        errs = np.array([abs(p / t - 1) for r, p, t in annual if (name == "all" or r == name) and t > 0])
+        errs = np.array([abs(p / t - 1) for r, p, t, _c, _x in annual if (name == "all" or r == name) and t > 0])
         report["annual"][name] = {"n_instances": int(len(errs)),
                                   "median_rel_err": float(np.median(errs)) if len(errs) else None,
                                   "p90_rel_err": float(np.quantile(errs, 0.9)) if len(errs) else None}
+
+    from scipy.stats import spearmanr
+
+    per_cell: dict[int, list] = {}
+    for r, p, t, c, x in annual:
+        per_cell.setdefault(c, []).append((p, t, x))
+    ranking = []  # (regime, spearman, thickness-coefficient signs agree, physics coefficient > 0)
+    for c, items in per_cell.items():
+        if len(items) < 5:  # 4 regressors need at least 5 designs
+            continue
+        pred, true = np.array([i[0] for i in items]), np.array([i[1] for i in items])
+        A = np.column_stack([np.ones(len(items)), np.array([i[2] for i in items])])
+        b_true, b_pred = np.linalg.lstsq(A, true, rcond=None)[0][1], np.linalg.lstsq(A, pred, rcond=None)[0][1]
+        ranking.append((regime_by_cell[c], spearmanr(pred, true)[0], np.sign(b_true) == np.sign(b_pred), b_true > 0))
+    report["design_ranking"] = _by_regime(ranking, {"median_spearman": lambda v: float(np.median([x[1] for x in v])),
+                                                    "thickness_sign_agreement": lambda v: float(np.mean([x[2] for x in v])),
+                                                    "physics_thickness_positive": lambda v: float(np.mean([x[3] for x in v]))})
+
+    duration = rows["control"][:, 1] - rows["control"][:, 0]
+    direction = []  # (regime, (agree, physics>0) for thickness, same for duration)
+    for c in np.unique(rows["cell"]):
+        m = rows["cell"] == c
+        out = []
+        for x in (rows["design"][m, 0], duration[m]):
+            s_true, s_pred = np.polyfit(x, rows["water"][m], 1)[0], np.polyfit(x, pred_daily[m], 1)[0]
+            out.append((np.sign(s_true) == np.sign(s_pred), s_true > 0))
+        direction.append((regime_by_cell[c], *out))
+    report["direction"] = _by_regime(direction, {
+        "thickness_agreement": lambda v: float(np.mean([x[1][0] for x in v])),
+        "physics_thickness_positive": lambda v: float(np.mean([x[1][1] for x in v])),
+        "sealed_window_agreement": lambda v: float(np.mean([x[2][0] for x in v])),
+        "physics_sealed_window_positive": lambda v: float(np.mean([x[2][1] for x in v])),
+    })
     return report
 
 
-def monotonicity_check(model: DailySurrogate, rows: dict, day_features: np.ndarray,
-                       regime_by_cell: np.ndarray, *, n_sample: int = 20_000, seed: int = 0) -> dict:
-    """Fraction of sampled rows whose d(water)/dx agrees with EXPECTED_SIGNS, per regime.
-
-    Low agreement means underfitting or thin sampling there, not new physics -- which is
-    why it is reported rather than penalized: forcing the sign would hide exactly the
-    places the campaign needs more runs."""
-    rng = np.random.default_rng(seed)
-    pick = rng.choice(len(rows["water"]), size=min(n_sample, len(rows["water"])), replace=False)
-    X = assemble_inputs(rows["design"][pick], rows["control"][pick], rows["state"][pick],
-                        day_features[rows["cell"][pick], rows["day"][pick]])
-    one = lambda mdl, x: predict(mdl, x[None])["water_mean"][0]  # noqa: E731
-    grad = np.asarray(eqx.filter_jit(jax.vmap(jax.grad(one, argnums=1), in_axes=(None, 0)))(
-        model, jnp.asarray(X, dtype=jnp.float32)))
-    # Input columns: 0 thickness, 3 seal, 4 open. Duration = open - seal.
-    derivs = {"hydrogel_thickness": grad[:, 0], "desorption_duration": 0.5 * (grad[:, 4] - grad[:, 3])}
-    regime = regime_by_cell[rows["cell"][pick]]
+def _by_regime(items: list, stats: dict) -> dict:
+    """Apply each named statistic to the items of each regime (item[0]) and to all of them."""
     out = {}
-    for name, dv in derivs.items():
-        agree = np.sign(dv) == EXPECTED_SIGNS[name]
-        out[name] = {r: float(agree[regime == r].mean()) for r in np.unique(regime)}
-        out[name]["all"] = float(agree.mean())
+    for name in sorted({i[0] for i in items}) + ["all"]:
+        v = [i for i in items if name == "all" or i[0] == name]
+        out[name] = {"n_cells": len(v), **{k: f(v) for k, f in stats.items()}} if v else {"n_cells": 0}
     return out

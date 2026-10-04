@@ -81,7 +81,8 @@ sbatch scripts/sbatch_two_stage_validate_bo.sh                     # $/m3 gap vs
 
 Outputs, all in the run directory:
 - `holdout_report.json`: error on never-seen climates, broken out by regime,
-  plus the monotonicity checks.
+  plus whether the surrogate ranks each cell's designs, and responds to thickness
+  and the sealed window, the way the physics does.
 - `featval_summary.csv`: real vs reconstructed-year yields.
 - `maps_<tilt>_<schedule>.csv`: one row per cell with the design, yield,
   LCOW, ensemble spread and an `ood` flag.
