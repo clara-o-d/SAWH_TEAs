@@ -22,6 +22,7 @@ gap). A schedule is always *chosen* on the decision features and *scored* on the
 
 from __future__ import annotations
 
+import time
 from dataclasses import dataclass
 
 import equinox as eqx
@@ -92,7 +93,16 @@ def evaluate_designs(model: DailySurrogate, requests: list[tuple[int, np.ndarray
         in_axes=(None, 0, 0, 0, 0)))
 
     out: list[dict] = []
-    for i in range(0, len(requests), chunk):
+    # A round of a few thousand design-years is one silent loop otherwise, and an hour of
+    # silence reads exactly like a hung job. ~10 lines per call.
+    n_calls = -(-len(requests) // chunk)
+    every = max(1, n_calls // 10)
+    t0 = time.perf_counter()
+    for n, i in enumerate(range(0, len(requests), chunk), start=1):
+        if n % every == 0 or n == n_calls:
+            per = (time.perf_counter() - t0) / max(n - 1, 1)
+            print(f"    designs {i}/{len(requests)} ({tilt_mode}/{schedule_mode})  "
+                  f"~{per * (n_calls - n + 1) / 60:.0f} min left in this round", flush=True)
         part = requests[i:i + chunk]
         cells = np.array([c for c, _x in part])
         designs = np.array([x for _c, x in part], dtype=float)
