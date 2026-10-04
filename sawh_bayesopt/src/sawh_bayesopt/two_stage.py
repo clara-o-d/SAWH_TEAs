@@ -268,11 +268,17 @@ def optimize_cells(model: DailySurrogate, cells: np.ndarray, day_features: np.nd
     lo, hi = box.lo_hi[:, 0], box.lo_hi[:, 1]
     sobol = lo + qmc.Sobol(d=3, scramble=True, seed=seed).random(n_init) * (hi - lo)
     warm_starts = warm_starts or {}
-    states = {int(c): SurrogateState(gp=build_gp(n_dims=3, seed=seed), bounds=box, X_raw=np.zeros((0, 3)))
+    # 2 hyperparameter restarts, not the reference BO's 10: a 3-D box with a few dozen
+    # points does not need them, and each Kriging-Believer proposal refits the GP again,
+    # so restarts multiply through a round. On the first anchor run the CPU proposal step
+    # held the GPU idle for over an hour per round.
+    states = {int(c): SurrogateState(gp=build_gp(n_dims=3, n_restarts_optimizer=2, seed=seed), bounds=box,
+                                     X_raw=np.zeros((0, 3)))
               for c in cells}
     records: dict[int, list] = {int(c): [] for c in cells}
     pending = {int(c): [*[np.asarray(x, float) for x in warm_starts.get(int(c), [])], *sobol] for c in cells}
 
+    t_start = time.perf_counter()
     while pending:
         requests = [(c, x) for c, xs in pending.items() for x in xs]
         results = evaluate_designs(model, requests, day_features, month, tilt_mode=tilt_mode,
@@ -290,7 +296,8 @@ def optimize_cells(model: DailySurrogate, cells: np.ndarray, day_features: np.nd
                               de_maxiter, de_popsize, lo, hi)
             for c in todo)
         pending = dict(zip(todo, proposals))
-        print(f"  outer round: {len(todo)} cell(s) still searching", flush=True)
+        print(f"  outer round: {len(todo)} cell(s) still searching "
+              f"({time.perf_counter() - t_start:.0f}s in)", flush=True)
 
     best = {}
     for c, recs in records.items():
@@ -300,14 +307,28 @@ def optimize_cells(model: DailySurrogate, cells: np.ndarray, day_features: np.nd
 
 
 def _propose(state, n: int, seed: int, de_maxiter: int, de_popsize: int, lo, hi) -> list[np.ndarray]:
-    """EI batch from a fitted GP, or random designs while too few are feasible to fit one."""
+    """EI batch from a fitted GP, or random designs while too few are feasible to fit one.
+
+    Runs in a joblib worker, one per core: BLAS is held to one thread so the workers do
+    not oversubscribe the cores between them, and the GP's hyperparameter-at-bound
+    warnings are dropped -- thousands per round, they buried the progress lines. The
+    reference BO still reports them; at a few dozen points in 3-D they are expected."""
+    import logging
+    import warnings
+
+    from sklearn.exceptions import ConvergenceWarning
+    from threadpoolctl import threadpool_limits
+
     from sawh_bayesopt.acquisition import propose_batch
     from sawh_bayesopt.bayesopt import _try_fit
 
-    state, fitted = _try_fit(state, seed=seed)
-    if not fitted:
-        return list(lo + np.random.default_rng(seed).random((n, 3)) * (hi - lo))
-    return propose_batch(state, batch_size=n, seed=seed, maxiter=de_maxiter, popsize=de_popsize)
+    logging.getLogger("sawh_bayesopt.bayesopt").setLevel(logging.ERROR)
+    with threadpool_limits(1), warnings.catch_warnings():
+        warnings.simplefilter("ignore", ConvergenceWarning)
+        state, fitted = _try_fit(state, seed=seed)
+        if not fitted:
+            return list(lo + np.random.default_rng(seed).random((n, 3)) * (hi - lo))
+        return propose_batch(state, batch_size=n, seed=seed, maxiter=de_maxiter, popsize=de_popsize)
 
 
 def neighbor_warm_starts(descriptors: np.ndarray, solved: dict[int, dict], targets: np.ndarray, *,
