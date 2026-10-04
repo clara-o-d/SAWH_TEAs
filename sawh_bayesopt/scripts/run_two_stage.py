@@ -151,22 +151,39 @@ def stage_validate_features(args) -> int:
     # the error the hourly round-trip alone costs -- so truncation error at k reads
     # against it rather than against zero.
     variants = [0, *sorted(set(args.components) | {3 * climate.HOURS})]
-    instances = []
-    for c in cells:
-        df = climate.frame_from_cache(args.cache_dir, str(feats["cache_key"][c]))
-        for k in variants:
-            instances.append((int(c), k, df if k == 0 else climate.reconstruct_day_frame(df, pca, k)))
 
+    # Chunks hold whole cells, so a cell's real and rebuilt years always share a chunk and
+    # walk the same days, and each finished chunk is saved at once: resubmitting the same
+    # command (a timed-out job) skips them. The directory is keyed by the arguments, so a
+    # different sample can never be mixed into these results.
+    tag = f"n{args.n_cells}_k{'-'.join(map(str, variants[1:]))}_s{args.seed}"
+    chunk_dir = args.run_dir / "featval_chunks" / tag
+    chunk_dir.mkdir(parents=True, exist_ok=True)
+    per_chunk = max(1, args.chunk_size // len(variants))
+    cell_chunks = [cells[i:i + per_chunk] for i in range(0, len(cells), per_chunk)]
     out = []
-    for i in range(0, len(instances), args.chunk_size):
-        part = instances[i:i + args.chunk_size]
+    for n, chunk_cells in enumerate(cell_chunks):
+        path = chunk_dir / f"chunk_{n:03d}.pkl"
+        if path.exists():
+            with open(path, "rb") as fh:
+                out += pickle.load(fh)
+            print(f"chunk {n + 1}/{len(cell_chunks)}: loaded {path}", flush=True)
+            continue
+        print(f"chunk {n + 1}/{len(cell_chunks)}: {len(chunk_cells)} cells x {len(variants)} variants", flush=True)
+        part = []
+        for c in chunk_cells:
+            df = climate.frame_from_cache(args.cache_dir, str(feats["cache_key"][c]))
+            part += [(int(c), k, df if k == 0 else climate.reconstruct_day_frame(df, pca, k)) for k in variants]
         rows = _simulate([f for _c, _k, f in part], [c for c, _k, _f in part], feats["valid"],
                          np.tile(BASELINE_DESIGN, (len(part), 1)),
                          np.tile(BASELINE_CONTROL, (len(part), climate.N_DAYS, 1)))
+        done = []
         for j, (c, k, _f) in enumerate(part):
             water = rows["water"][rows["instance"] == j]
-            out.append({"cell": c, "regime": regime[c], "k": k, "annual_water": water.mean(),
-                        "daily": water})
+            done.append({"cell": c, "regime": regime[c], "k": k, "annual_water": water.mean(), "daily": water})
+        with open(path, "wb") as fh:
+            pickle.dump(done, fh)
+        out += done
     real = {r["cell"]: r for r in out if r["k"] == 0}
     table = pd.DataFrame([
         {"cell": r["cell"], "regime": r["regime"], "k": r["k"],
