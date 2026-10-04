@@ -1,0 +1,358 @@
+\documentclass[11pt]{article}
+\usepackage{amsmath, amssymb}
+\usepackage[margin=1in]{geometry}
+\usepackage{booktabs}
+\usepackage{siunitx}
+
+\newcommand{\code}[1]{\texttt{#1}}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\DeclareMathOperator*{\argmin}{arg\,min}
+
+\title{Problem Formulation: Global Design and Daily Operation of the Solar SAWH Device}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+
+\section*{Scope}
+
+This document states the optimization problem that \code{sawh\_bayesopt} solves and the
+approximations each solver makes. The physics behind the day map $F$ below is in
+\code{solar\_lumped/docs/governing\_eq.tex}. Code references are to
+\code{sawh\_bayesopt/src/sawh\_bayesopt/}, unless noted otherwise.
+
+The device is the PAM--LiCl hydrogel solar SAWH panel. It runs one cycle per day: it
+absorbs at night with the panel open, then it is sealed and desorbs while the sun is up. The
+problem is posed once per map cell (one Open-Meteo site), over one weather year (2024,
+$D = 366$ days).
+
+\section{Sets, variables and data}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}llp{0.52\textwidth}@{}}
+\toprule
+\textbf{Symbol} & \textbf{Domain} & \textbf{Meaning} \\
+\midrule
+$c \in \mathcal{C}$ & $\approx$ 14.7k cells & Map cell (site), with its own weather year and elevation \\
+$d \in \{1,\dots,D\}$ & $D = 366$ & Calendar day \\
+$w_{c,d}$ & --- & That day's \SI{15}{\minute} $T$, RH, GHI series (the only channels the physics reads) \\
+$x = (H_0, L_g, SL)$ & $\mathcal{X}$ & \textbf{Design}: hydrogel thickness, vapor gap, salt loading \\
+$u_d = (\delta_s, \delta_o, \theta)$ & $\mathcal{U}$ & \textbf{Control}: seal offset, open offset, tilt \\
+$s_d = (c_w, H)$ & $\mathbb{R}_{>0}^2$ & \textbf{State}: gel water concentration and thickness at the start of day $d$ \\
+$\phi_{c,d}$ & $\mathbb{R}^{k+7}$ & Day features (Section~\ref{sec:surrogate}) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Design box} (\code{design\_space.DesignBounds}, read from the \code{parameters.xlsx} sweep columns):
+\begin{equation}
+\mathcal{X} = [\SI{1}{\milli\metre}, \SI{10}{\milli\metre}] \times
+[\SI{7}{\milli\metre}, \SI{60}{\milli\metre}] \times [1, 8].
+\end{equation}
+The \SI{7}{\milli\metre} gap floor is a transport wall, not a soft preference. The box's
+worst corner is \SI{6.03}{\milli\metre} of dry gel against that \SI{7}{\milli\metre} minimum
+gap, so no design starts with the gel touching the condenser.
+
+\paragraph{Control grid} (\code{daily\_surrogate}):
+\begin{equation}
+\mathcal{U} = \mathcal{S} \times \mathcal{O} \times \Theta, \qquad
+\mathcal{S} = \mathcal{O} = \{-4, -3.75, \dots, 4\}\,\si{\hour}, \qquad
+\Theta = \{0, 5, \dots, 60\}\si{\degree},
+\end{equation}
+which gives $|\mathcal{S}\times\mathcal{O}| = 33^2 = 1089$ schedules per tilt level and
+$|\mathcal{U}| = 14{,}157$. The offsets move the seal and open times relative to GHI sunrise
+and sunset, where GHI crosses the night threshold. Negative $\delta_s$ seals before dawn;
+positive $\delta_o$ stays shut past dusk. Both edges are clamped so that each phase keeps
+at least one sample (\code{solar\_lumped.weather.\_shifted\_desorption\_mask}). The
+\SI{0.25}{\hour} step equals the weather time step, so a finer offset would not change the
+physics. Tilt enters twice: through plane-of-array transposition of GHI, and through
+Hollands $\cos\theta$ in the vapor gap.
+
+\paragraph{Held fixed} (not decision variables): LiCl salt; Case 2 optics and IR
+emissivities; insulation gap \SI{5}{\milli\metre}; condenser fin area ratio $A_r = 7.1$
+(\code{design\_space.SIMPLE\_FIXED}); $h_{amb}$; all financial parameters
+(\code{LCOEconomicParams}). Each cell's real ambient pressure comes from its elevation.
+
+\section{The day map and the year}
+
+One simulated day is a map, from the JAX physics (\code{solar\_lumped/gpu\_sweep/jax\_daily\_cycle}):
+\begin{equation}
+\bigl(m_d,\; s_{d+1},\; \kappa_d\bigr) = F\bigl(x, u_d, s_d;\, w_{c,d}\bigr),
+\label{eq:daymap}
+\end{equation}
+where $m_d$ is the water collected that day (\si{\kilogram\per\metre\squared}) and
+$\kappa_d \in \{0,1\}$ flags a gel that reached the swelling ceiling (the gel--condenser
+clearance) during the day. The gel carries its state from one day to the next, so the year
+is a chained trajectory. Its start is the cyclic steady state of day 1:
+\begin{equation}
+s_1 = s^\ast \quad\text{with}\quad s^\ast = F_s\bigl(x, u_1, s^\ast;\, w_{c,1}\bigr),
+\label{eq:cyclic}
+\end{equation}
+which the physics finds by Aitken $\Delta^2$ extrapolation. The annual figures of merit are
+\begin{equation}
+\bar m(x, u_{1:D}) = \frac{1}{D}\sum_{d=1}^{D} m_d,
+\qquad
+\bar\kappa(x, u_{1:D}) = \frac{1}{D}\sum_{d=1}^{D} \kappa_d .
+\end{equation}
+
+\section{Objective: levelized cost of water}
+
+The cost per m$^2$ of panel is (\code{solar\_lumped.economics.lcow\_from\_daily\_yield}):
+\begin{equation}
+\mathrm{LCOW}(x, \bar m) =
+\frac{\bigl(\mathrm{CRF}\cdot f_{TI} + f_{OM}\bigr)\,C_{sys} + C_{sorb}(x)}
+{f_{util}\cdot 365\,\bar m/\rho_w}
+\quad [\text{USD/m}^3],
+\label{eq:lcow}
+\end{equation}
+\begin{equation}
+\mathrm{CRF} = \frac{i(1+i)^L}{(1+i)^L - 1},
+\qquad
+C_{sorb}(x) = \left[\frac{p_{salt}\,SL + p_{poly}}{1 + SL} + r_w\,p_{w}\right]
+\frac{\rho_{dry}\,H_0}{L_{gel}} .
+\label{eq:csorb}
+\end{equation}
+The symbols are: $C_{sys}$, the flat system bill of materials; $f_{TI}$, the
+total-investment factor; $f_{OM}$, the maintenance fraction; $f_{util}$, utilization; $i$
+and $L$, the discount rate and system life; and $L_{gel}$, the gel replacement interval.
+$C_{sorb}$ is the annualized cost of re-casting the gel. It is the dry composite mass
+$\rho_{dry}H_0$, priced at the salt/polymer blend plus the DI water in the recipe.
+
+The design enters LCOW in two places, which is what creates the trade-offs:
+\begin{itemize}
+\item \textbf{Through the yield} $\bar m$: thicker and saltier gels hold more water, but
+they desorb more slowly and swell further.
+\item \textbf{Through $C_{sorb}$}: cost is linear in $H_0$, and grows with $SL$ when
+$p_{salt} > p_{poly}$.
+\end{itemize}
+The vapor gap and the controls act only through $\bar m$, since neither is priced.
+
+\textbf{For fixed $x$, LCOW is strictly decreasing in $\bar m$.} This property is what
+justifies the decomposition in Section~\ref{sec:decomp}.
+
+\section{The full problem}
+
+For each cell $c$, choose a design and a control policy:
+\begin{equation}
+\begin{aligned}
+\min_{x \in \mathcal{X},\; \pi \in \Pi} \quad & \mathrm{LCOW}\bigl(x, \bar m(x, u_{1:D})\bigr) \\
+\text{s.t.} \quad & (m_d, s_{d+1}, \kappa_d) = F(x, u_d, s_d; w_{c,d}), \quad d = 1,\dots,D, \\
+& s_1 \text{ cyclic (Eq.~\eqref{eq:cyclic})}, \\
+& u_d = \pi_d(\mathcal{I}_d) \in \mathcal{U}, \\
+& \bar\kappa(x, u_{1:D}) \le \kappa_{\max} = 0.05 .
+\end{aligned}
+\label{eq:full}
+\end{equation}
+
+\paragraph{Swelling constraint.} A design is infeasible if its gel sits on the swelling
+ceiling on more than 5\% of days (\code{two\_stage.CAPPED\_DAY\_FRACTION\_MAX}). On those
+days, uptake is set by the clearance rather than by the isotherm; in the real device, this
+is brine reaching the condenser. The constraint depends on the climate, and it binds mainly
+at high RH combined with high $SL$. A share-of-days threshold is a blunt stand-in for a
+leakage model, which the repo does not have. Designs with no finite positive yield are also
+infeasible. Infeasible designs are scored at
+$\mathrm{LCOW}_{pen} = 10^4$~USD/m$^3$.
+
+\paragraph{Policy class $\Pi$.} The policy class has two independent axes. The \emph{tilt
+mode} says how often $\theta$ may change:
+\begin{align}
+\text{fixed:}    &\quad \theta_d = \theta \quad \forall d \quad (\theta \text{ is effectively a design variable}), \\
+\text{seasonal:} &\quad \theta_d = \theta_{q(d)}, \quad q(d) \in \{1,2,3,4\} \text{ the calendar quarter}, \\
+\text{daily:}    &\quad \theta_d \text{ free}.
+\end{align}
+These modes nest, so the LCOW gain at each step up is the value of moving the panel more
+often.
+
+The \emph{information regime} sets what the controller knows, $\mathcal{I}_d$, when it picks
+$u_d$. It sees decision features $\tilde\phi_{c,d}$ in place of the true $\phi_{c,d}$:
+\begin{align}
+\text{hindsight:}      &\quad \tilde\phi_{c,d} = \phi_{c,d} \quad \text{(perfect foresight; an upper bound)}, \\
+\text{persistence:}    &\quad \tilde\phi_{c,d} = \phi_{c,d-1} \quad \text{(day-ahead forecast stand-in; day 1 uses day } D), \\
+\text{climatological:} &\quad \tilde\phi_{c,d} = \tfrac{1}{|M(d)|}\textstyle\sum_{d' \in M(d)} \phi_{c,d'} \quad \text{(mean day of its month)}, \\
+\text{constant:}       &\quad u_d = u \quad \forall d \quad \text{(one annual schedule; fixed tilt only)}.
+\end{align}
+A control is always \emph{chosen} on $\tilde\phi$ and \emph{scored} on the real day
+$\phi_{c,d}$. The constant regime is the control space of the per-site reference BO
+(Section~\ref{sec:reference}).
+
+\section{Decomposition: design per cell, control per day}
+\label{sec:decomp}
+
+Since LCOW decreases in $\bar m$ for fixed $x$, the inner problem can be posed in water
+rather than dollars:
+\begin{equation}
+\min_{x \in \mathcal{X}} \; \mathrm{LCOW}\bigl(x, \bar m^\ast(x)\bigr)
+\;\;\text{s.t.}\;\; \bar\kappa\bigl(x, u^\ast_{1:D}(x)\bigr) \le \kappa_{\max},
+\qquad
+u^\ast_{1:D}(x) \in \argmax_{\pi \in \Pi} \bar m(x, u_{1:D}),
+\label{eq:bilevel}
+\end{equation}
+with $\bar m^\ast(x) = \bar m(x, u^\ast_{1:D}(x))$. The swelling constraint couples the two
+levels, but the inner level ignores it. Controls maximize water, and feasibility is checked
+only at the design level. So Eq.~\eqref{eq:bilevel} is a restriction of
+Eq.~\eqref{eq:full}: a design that would become feasible under a slightly lower-yield,
+less-swelling schedule is rejected rather than rescued.
+
+Keeping the inner level in physical units has a practical benefit. Every map can be
+regenerated under new cost assumptions by re-applying Eq.~\eqref{eq:lcow}, with no
+retraining.
+
+\section{Surrogate day map}
+\label{sec:surrogate}
+
+The inner level evaluates thousands of controls per day, per design, per cell, which rules
+out calling $F$ directly. It uses a learned day map instead (\code{daily\_surrogate}):
+\begin{equation}
+g_\psi(x, u, s, \phi) \;\to\; \bigl(\hat m,\; \hat s',\; \hat p_\kappa\bigr) \approx
+\bigl(m_d,\; s_{d+1},\; \Pr[\kappa_d = 1]\bigr).
+\end{equation}
+$g_\psi$ is an ensemble of $M = 5$ multilayer perceptrons. They share a trunk and have three
+heads: $\log(1+m)$, the end-of-day state, and a swelling-cap logit. Each member is trained
+on a Poisson(1) bootstrap over \emph{cells}, so the ensemble spread $\hat\sigma_m$ reads as
+``unsure about climates like this one''. The mean across members is used everywhere. The
+predicted state is clipped to the range seen in training, and
+$\hat\kappa_d = \mathbb{1}[\hat p_\kappa > 0.5]$.
+
+\paragraph{Day features.} $\phi_{c,d}$ joins two blocks:
+\begin{itemize}
+\item the leading $k$ principal components of the day's standardized hourly
+$[T, \mathrm{RH}, \mathrm{GHI}]$ vector ($3\times24 = 72$ numbers; the PCA is fitted over
+cached days worldwide);
+\item seven scalars: RH at the diurnal $T$ minimum, the daytime GHI integral, the
+dewpoint depression at peak sun, the diurnal $T$ amplitude, elevation, $|\text{latitude}|$,
+and noon zenith.
+\end{itemize}
+The last two scalars carry the sun path, which tilt acts through. The \code{validate-features}
+stage sets $k$: it runs the physics on real years and on years rebuilt from $k$ components,
+and compares the yields.
+
+\paragraph{Training data.} Representative cells are chosen by KMeans in climate-descriptor
+space (800 clusters), with quotas topping up the high-altitude, hyper-arid, monsoonal and
+coastal-humid regimes. Each cell gets 16 scrambled-Sobol designs. Each (cell, design) is
+simulated as one chained physics year, with $u_d$ drawn uniformly from $\mathcal{U}$
+\emph{independently every day}. One year therefore yields $\sim$365 rows that cover the
+control space, and the states in those rows are the ones real operation produces. Each
+year's first day is dropped, because its start state comes from the Aitken extrapolation
+rather than from a simulated previous day. About 15\% of cells per regime are held out
+\emph{whole}: a split by row would leak each climate across train and test.
+
+\section{Solution method}
+
+\subsection{Inner level: enumeration on the surrogate}
+
+There is no gradient step and no local-minimum risk, and the result is a discrete schedule,
+which is what a real controller runs (\code{two\_stage}). Let $\mathcal{U}_\theta$ denote
+the 1089 schedules at tilt $\theta$. The \textbf{greedy daily walk} is
+\begin{align}
+u_d &= \argmax_{u \in \mathcal{U}_d} \hat m\bigl(x, u, \hat s_d, \tilde\phi_{c,d}\bigr), \\
+(\hat m_d, \hat s_{d+1}) &= g_\psi\bigl(x, u_d, \hat s_d, \phi_{c,d}\bigr),
+\end{align}
+where the candidate set $\mathcal{U}_d$ depends on the mode:
+\begin{itemize}
+\item \textbf{daily tilt:} $\mathcal{U}_d = \mathcal{U}$;
+\item \textbf{fixed tilt:} one greedy walk per $\theta \in \Theta$ over $\mathcal{U}_\theta$,
+keeping the $\theta$ with the largest $\sum_d \hat m_d$;
+\item \textbf{seasonal tilt:} the fixed-tilt procedure applied quarter by quarter, with
+each quarter's end state chained into the next.
+\end{itemize}
+The \textbf{constant} regime is solved exactly. Every $u \in \mathcal{U}$ is chained through
+the whole year on $g_\psi$, and the one with the largest $\sum_d \hat m_d$ is kept. The
+cyclic start (Eq.~\eqref{eq:cyclic}) is approximated by 8 rounds of the day-1 greedy step
+from the physics' initial loading.
+
+The greedy walk is \textbf{myopic}: it ignores what today's choice does to tomorrow's
+starting state. Dynamic programming over a discretized state would be the exact version of
+Eq.~\eqref{eq:bilevel}. The \code{validate-bo} gap measures what the myopia costs.
+
+\subsection{Outer level: constrained Bayesian optimization over $\mathcal{X}$}
+
+For each cell, the outer level minimizes $J_c(x) = \mathrm{LCOW}(x, \hat{\bar m}^\ast(x))$,
+or $\mathrm{LCOW}_{pen}$ if $x$ is infeasible. The setup:
+\begin{itemize}
+\item \textbf{Models:} a GP regressor with a Mat\'ern-5/2 plus white-noise kernel, fitted on
+the unit cube to feasible points only, and a GP classifier for $P(\text{feasible}\mid x)$.
+\item \textbf{Acquisition:} constrained expected improvement, maximized by differential
+evolution:
+\begin{equation}
+\alpha(x) = \mathrm{EI}(x)\cdot P(\text{feasible}\mid x),
+\qquad
+\mathrm{EI}(x) = (y^\ast - \mu - \xi)\,\Phi(z) + \sigma\,\varphi(z),
+\quad z = \frac{y^\ast - \mu - \xi}{\sigma}.
+\end{equation}
+\item \textbf{Batches:} 4 proposals per round, via Kriging-Believer.
+\item \textbf{Budget:} 8 Sobol initial points and 24 evaluations in total for the training
+(``anchor'') cells. Every other cell is warm-started from the optima of its 3 nearest
+solved anchors in standardized climate-descriptor space, with a budget of 12.
+\end{itemize}
+Cells advance in lockstep, so each round costs one vmapped surrogate sweep across all cells.
+
+\subsection{Active refinement}
+
+The surrogate needs to be accurate near each cell's optimum, not uniformly over the box. So
+after a first solve, the pipeline runs further physics on selected cells:
+\begin{itemize}
+\item cells are drawn with probability $\propto \hat\sigma_m/\hat m$ at their optimum;
+\item each drawn cell's optimum and 4 perturbations (within $\pm10\%$ of each span) are run
+under the surrogate's own schedule, with jitter;
+\item $g_\psi$ is then refit. This takes one or two rounds.
+\end{itemize}
+
+\section{Reference problem: per-site BO on true physics}
+\label{sec:reference}
+
+The validation reference (\code{bayesopt}, \code{evaluator}) solves Eq.~\eqref{eq:full}
+directly, with no surrogate, under the constant regime with fixed tilt. Tilt and the
+schedule move into the design vector:
+\begin{equation}
+\min_{x' \in \mathcal{X}'} \mathrm{LCOW}\bigl(x', \bar m_F(x')\bigr),
+\qquad
+x' = (H_0, L_g, SL, \theta, \delta_s, \delta_o),
+\end{equation}
+with $\theta \in [0, 60]\si{\degree}$ continuous, offsets snapped to the \SI{0.25}{\hour}
+grid, and $\bar m_F$ the true-physics annual mean. It uses the same GP, constrained EI and
+Kriging-Believer code: 24 Latin-hypercube initial points, a budget of 50, batches of 3, and
+it stops after 3 rounds with less than 0.5\% improvement.
+
+The \code{validate-bo} stage scores the two-stage design and schedule with true physics on
+held-out cells. The headline number is the gap
+\begin{equation}
+\Delta_c = \mathrm{LCOW}_F\bigl(x_c^{2s}, u^{2s}_{c,1:D}\bigr) - \mathrm{LCOW}_F\bigl(x_c'^{\,BO}\bigr)
+\quad [\text{USD/m}^3].
+\end{equation}
+Under (fixed, constant), $\Delta_c$ is a like-for-like optimality gap. Under the daily
+modes, it also includes the value of daily control.
+
+\paragraph{Differences between the two problems that $\Delta_c$ also absorbs:}
+\begin{itemize}
+\item \textbf{Tilt:} continuous in the reference, but on a \SI{5}{\degree} grid in the
+pipeline.
+\item \textbf{Swelling constraint:} the reference only \emph{records} the swelling-cap
+flag, and its feasibility is a finite positive yield and LCOW. The
+$\bar\kappa \le 0.05$ constraint is enforced only by the pipeline. So the reference
+optimizes over a feasible set that is at least as large, which biases $\Delta_c$ upward
+for cells where the constraint binds.
+\end{itemize}
+
+\section*{Summary of approximations}
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}p{0.30\textwidth}p{0.62\textwidth}@{}}
+\toprule
+\textbf{Approximation} & \textbf{Where it is measured or bounded} \\
+\midrule
+$F \approx g_\psi$ & \code{holdout\_report.json}: daily and chained-annual error on held-out cells, by regime; design ranking and response signs \\
+Weather $\approx$ $k$ PCs + 7 scalars & \code{featval\_summary.csv}: physics on real vs.\ reconstructed years \\
+Inner level greedy, not DP & \code{validate-bo} gap under daily modes \\
+Inner level ignores the swelling constraint & Not measured; restriction of Eq.~\eqref{eq:full} \\
+Cyclic start by 8 surrogate rounds & Not separately measured \\
+Climates outside training & Flagged: Mahalanobis distance above the training cells' 99th percentile (\code{ood} column in the maps) \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\end{document}

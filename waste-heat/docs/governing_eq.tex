@@ -93,6 +93,18 @@ Unchanged from \texttt{waste\_heat\_cycle\_lumped}: only the thermal coupling to
 
 \subsection{Hydrogel (PAM--LiCl, Wilson Eqs.~5--6)}
 
+The water activity $a_w(c_w, H)$ is the salt-in-water (brine) activity of the gel's water at
+$T$ alone. There is no measured-uptake (DVS) cap: water in the gel has the chemical potential
+of pure water plus $RT\ln(x_w\gamma_w)$, so the brine activity \emph{is} the isotherm, as in
+\texttt{solar\_lumped}. The salt concentration on the $H_0$ basis is
+\begin{equation}
+c_s = \frac{\rho_{gel}}{MW_s}\,\frac{SL}{1+SL},
+\label{eq:cs}
+\end{equation}
+with $SL$ the salt loading (salt-to-polymer mass ratio). Both beds start at brine
+equilibrium: the adsorbing bed at $0.65\,RH_{amb}$ and the desorbing bed at the fabrication
+RH (20\%).
+
 \textbf{Adsorption (open bed):}
 \begin{equation}
 \frac{dc_{w,a}}{dt} = \frac{g_{chamber}}{H_0}\,\frac{P_{sat}(T_a)}{RT_a}\,\bigl(RH_{amb} - a_w(c_{w,a}, H_a)\bigr)
@@ -117,7 +129,26 @@ Vacuum conductance sets the primary desorption capacity:
 \end{equation}
 where $\tau_{dep,\max}$ caps depletion when gel inventory is low.
 
-Wilson heat--mass-analogy rates (same Eq.~5--6 structure as absorption, with vapor-gap $g$ from Hollands natural convection between gel and condenser):
+Wilson heat--mass-analogy rates (same Eq.~5--6 structure as absorption, with vapor-gap $g$ from Hollands natural convection between gel and condenser). For the gap $L = L_g - H_d$ (floored at \SI{0.1}{\milli\metre}) at tilt $\theta$, Hollands et al.\ (1976) gives
+\begin{equation}
+Nu = 1 + 1.44\left[1 - \frac{1708\,\sin^{1.6}(1.8\theta)}{Ra\cos\theta}\right]^{+}
+\left[1 - \frac{1708}{Ra\cos\theta}\right]^{+}
++ \left[\left(\frac{Ra\cos\theta}{5830}\right)^{1/3} - 1\right]^{+},
+\label{eq:hollands}
+\end{equation}
+\begin{equation}
+Ra = \frac{g\,(\Delta\rho/\rho)\,L^3}{\nu\,\alpha}\left(\frac{P_{cond}}{P_{ref}}\right)^{2},
+\qquad
+\frac{\Delta\rho}{\rho} = \frac{T_{film}\,|T_d - T_{cond}|}{T_d\,T_{cond}},
+\qquad
+\alpha = \frac{k_{air}}{\rho_{air}c_{p,air}},
+\end{equation}
+where $[\,\cdot\,]^{+} = \max(\cdot, 0)$, $T$ is in kelvin, and $\nu$, $\alpha$ are quoted at $P_{ref} = \SI{1}{atm}$. Both scale as $1/p$ for an ideal gas, so $Ra \propto p^2$: at $P_{cond} \approx \SI{30}{\milli\bar}$ this pins $Nu$ to 1 (the conduction/diffusion limit). The mass-transfer coefficient follows from the $Le \approx 1$ analogy $Sh = Nu$:
+\begin{equation}
+g_{gap}(H_d) = \frac{Nu\,k_{air}}{L}\,\frac{D_{air}}{k_{air}} = \frac{Nu\,D_{air}}{L}.
+\label{eq:ggap}
+\end{equation}
+$D_{air}$ is the \SI{1}{atm} binary H$_2$O--air value. At \SI{30}{\milli\bar} in a mostly-vapour gap, binary diffusion would be $\sim 34\times$ faster and the $Sh = Nu$ picture gives way to Stefan/effusive flow. This is a known open simplification, so read absolute yields with that in mind.
 \begin{equation}
 c_r(T_d, T_{cond}) = \frac{P_{sat}(T_{cond})}{P_{sat}(T_d)}\,\frac{T_d}{T_{cond}}
 \label{eq:crdes}
@@ -152,7 +183,12 @@ The gel inventory rates applied in the ODE are scaled to the vacuum limit:
 \end{equation}
 If $\dot{m}_{Wilson} \approx 0$ but $\dot{m}_{vac} > 0$, thickness is held fixed and concentration depletes directly:
 $dc_{w,d}/dt = -\dot{m}_{vac}/(MW_w H_d)$, $dH_d/dt = 0$.
-Desorption rates are enforced non-positive ($dc_{w,d}/dt \le 0$, $dH_d/dt \le 0$), and the natural vacuum flux returned to the energy balance is
+Desorption rates are enforced non-positive ($dc_{w,d}/dt \le 0$, $dH_d/dt \le 0$) and stop at the hydrate floor
+\begin{equation}
+c_{w,\min} = n_{hyd}\,c_s,
+\label{eq:hydrate_floor}
+\end{equation}
+where $n_{hyd}$ is the salt's crystal-hydrate water per formula unit (LiCl, LiBr: 1; CaCl$_2$, MgCl$_2$: 2; NaCl: 0). Because $a_w$ floors at the deliquescence RH, Eq.~\eqref{eq:massdes_cw} never self-terminates. Below the floor every remaining water molecule is crystal-bound, and removing it is a dehydration reaction that the model does not represent. The floor applies on both the Wilson branch and the vacuum-only branch, which limits removal to $c_{w,d} - c_{w,\min}$. The natural vacuum flux returned to the energy balance is
 \begin{equation}
 \dot{m}_{des,nat} = \dot{m}_{Wilson}\,\lambda = \min(\dot{m}_{Wilson}, \dot{m}_{vac}).
 \label{eq:mdesnat}
@@ -226,7 +262,7 @@ $T_a$ and $T_d$ are otherwise free-running outcomes of Eqs.~\eqref{eq:desorbing}
 \section{Constraints}
 
 \begin{itemize}
-\item Hydrogel: $H \ge H_0$; $c_w \ge c_{w,\min}$; desorption rates non-positive ($\dot{c}_w \le 0$, $\dot{H} \le 0$); $\dot{m}_{ads} = \dot{m}_{des}$ each step (Eq.~\eqref{eq:equal_mass}).
+\item Hydrogel: $H \ge H_0$; $c_w \ge n_{hyd}\,c_s$ (hydrate floor, Eq.~\eqref{eq:hydrate_floor}); desorption rates non-positive ($\dot{c}_w \le 0$, $\dot{H} \le 0$); $\dot{m}_{ads} = \dot{m}_{des}$ each step (Eq.~\eqref{eq:equal_mass}).
 \item MOF: $q \in [q_{\min}, q_{\max}]$.
 \item Vacuum conductance clipped to physical pump limits.
 \item Roles swap after each half-cycle: loading, thickness, and temperature states exchange between beds.
@@ -234,6 +270,8 @@ $T_a$ and $T_d$ are otherwise free-running outcomes of Eqs.~\eqref{eq:desorbing}
 \end{itemize}
 
 \section{Default parameters (data-center baseline)}
+
+All values are read from \texttt{solar\_lumped/docs/parameters.xlsx}, the repo-wide source of truth, so the table below is a snapshot of it.
 
 \begin{table}[h]
 \centering
@@ -258,7 +296,10 @@ External convection & $h_{amb}$ & \SI{10}{\watt\per\metre\squared\kelvin} \\
 Adsorbing-bed fin area ratio & $\phi_{fin}$ & 7.1 \\
 Vacuum conductance base & $C_{vac,0}$ & \SI{8e-9}{\kilogram\per\second\per\pascal\per\metre\squared} \\
 Hydrogel $H_0$ & --- & \SI{4}{\milli\metre} \\
-Chamber $g$ (abs.) & $g_{chamber}$ & \SI{0.0085}{\metre\per\second} \\
+Chamber $g$ (abs.) & $g_{chamber}$ & \SI{0.015}{\metre\per\second} \\
+Salt / salt loading & $SL$ & LiCl, 4.0 \\
+Vapor gap (desorption mass transfer) & $L_g$ & \SI{40}{\milli\metre}, $\theta = \SI{30}{\degree}$ \\
+Vacuum conductance bounds & $C_{vac,\min}$, $C_{vac,\max}$ & \SI{1e-10}{}, \SI{5e-6}{\kilogram\per\second\per\pascal\per\metre\squared} \\
 Condensation enthalpy & $h_{fg}$ & \SI{2.256e6}{\joule\per\kilogram} \\
 Fin area ratio (condenser) & $A_r$ & 7.1 \\
 \bottomrule
