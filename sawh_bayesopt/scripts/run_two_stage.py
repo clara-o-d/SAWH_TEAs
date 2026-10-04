@@ -472,8 +472,18 @@ def _load_rows(run_dir: Path) -> dict:
     if not files:
         raise SystemExit(f"no physics chunks under {run_dir}/runs")
     parts = [dict(np.load(p)) for p in files]
-    print(f"loaded {len(files)} physics chunk(s)", flush=True)
-    return {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
+    rows = {k: np.concatenate([p[k] for p in parts]) for k in parts[0]}
+    # Each instance's first walked day starts from the warm-up's Aitken extrapolation, not
+    # from a simulated previous day, so its start state is not one the physics produces --
+    # chunks run before the per-component guard (jax_daily_cycle) carry h up to 310 m
+    # there. Drop it: 1 row in 366, and the chained holdout then starts every year from
+    # a real day-2 state.
+    order = np.lexsort((rows["day"], rows["instance"]))
+    first = order[np.r_[True, np.diff(rows["instance"][order]) != 0]]
+    keep = np.ones(len(rows["day"]), bool)
+    keep[first] = False
+    print(f"loaded {len(files)} physics chunk(s); dropped {len(first)} first-day rows", flush=True)
+    return {k: v[keep] for k, v in rows.items()}
 
 
 if __name__ == "__main__":

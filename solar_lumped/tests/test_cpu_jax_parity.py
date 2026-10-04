@@ -219,3 +219,19 @@ def test_batched_aitken_rejects_wild_extrapolations():
 
     c_w, h = jdc.find_cyclic_state_batched(drift, c_w_initial=np.zeros(4), h_initial=np.zeros(4), max_rounds=3)
     assert np.all(np.isfinite(c_w)) and np.all(np.abs(c_w) < 100) and np.all(np.abs(h) < 100)
+
+
+def test_batched_aitken_checks_each_component_on_its_own_scale():
+    """c_w (~1e5) contracts normally while h (~5e-3 m) flips between two values. The
+    extrapolation coefficient comes from c_w, so h gets thrown ~10 flips off; a
+    vector-norm check never notices because c_w dominates it. That is how a campaign chunk
+    reached h = 310 m on its first day."""
+    import jax_daily_cycle as jdc
+
+    def two_scale(c_w, h):
+        c_w, h = np.asarray(c_w, float), np.asarray(h, float)
+        return None, None, 1e5 + 0.9 * (c_w - 1e5), 0.011 - h  # h: 5e-3 <-> 6e-3
+
+    _c_w, h = jdc.find_cyclic_state_batched(two_scale, c_w_initial=np.full(3, 2e5),
+                                            h_initial=np.full(3, 5e-3), max_rounds=1)
+    assert np.all(np.abs(h - 5.5e-3) <= 1e-3), h  # inside the two values h flips between

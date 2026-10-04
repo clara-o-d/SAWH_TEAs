@@ -485,8 +485,15 @@ def find_cyclic_state_batched(
         # i.e. <10x |d1| up to r = 0.9. A near-singular dd otherwise launched states the
         # physics cannot reach (h = -2.6e13 mm, c_w = -4.8e17 seen in a 64-instance
         # pilot), which day 1 then started from before the step's clamps pulled it back.
-        motion = np.linalg.norm(x2 - x, axis=1)
-        sane = safe & (np.linalg.norm(x_aitken - x2, axis=1) <= 10.0 * motion) & np.isfinite(x_aitken).all(axis=1)
+        #
+        # Per component, not by vector norm: c_w (~1e5 mol/m3) outweighs h (~5e-3 m) by
+        # seven orders, and the extrapolation coefficient above is c_w's too, so a norm
+        # check passed whenever c_w's step was ordinary -- however far h was thrown (a
+        # full campaign chunk still reached h = 310 m). Each component must stay within
+        # 10x its own motion; the tiny absolute floor is for components already at rest.
+        motion = np.abs(x2 - x)
+        within = np.abs(x_aitken - x2) <= 10.0 * motion + 1e-12 * (1.0 + np.abs(x2))
+        sane = safe & within.all(axis=1) & np.isfinite(x_aitken).all(axis=1)
         x_star_new = np.where(sane[:, None], x_aitken, x2)
         x_prev, x_star, x = x, x_star_new, x_star_new
 
