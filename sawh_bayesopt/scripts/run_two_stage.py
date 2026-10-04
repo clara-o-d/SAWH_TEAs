@@ -13,6 +13,7 @@ Stages, in order, all under --run-dir (default outputs/two_stage/<run-id>):
   holdout            recompute holdout_report.json from the saved model              (GPU)
   optimize           design BO per cell for one tilt x schedule mode -> opt/<mode>/  (GPU, array)
   active             physics at/around the optima -> active/roundR_chunk_NNNN.npz    (GPU, array)
+  active-check       physics vs surrogate at those optima -> active_check_roundR.csv  (CPU)
   maps               merge optimize parts -> maps_<mode>.csv                        (CPU)
   validate-bo        two-stage vs per-site BO on held-out cells -> validate_bo.*     (GPU)
 
@@ -79,6 +80,12 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--n-cells", type=int, default=300)
             p.add_argument("--n-perturb", type=int, default=4)
 
+    p = sub.add_parser("active-check", help="Physics vs surrogate at the optima an active round re-ran.")
+    _mode_args(p)
+    p.add_argument("--round", type=int, required=True)
+    p.add_argument("--n-cells", type=int, default=300)
+    p.add_argument("--n-perturb", type=int, default=4)
+
     p = sub.add_parser("fit")
     p.add_argument("--members", type=int, default=5)
     p.add_argument("--width", type=int, default=128)
@@ -108,7 +115,7 @@ def main(argv: list[str] | None = None) -> int:
     return {
         "features": stage_features, "validate-features": stage_validate_features, "select": stage_select,
         "simulate": stage_simulate, "fit": stage_fit, "holdout": stage_holdout,
-        "optimize": stage_optimize, "active": stage_active,
+        "optimize": stage_optimize, "active": stage_active, "active-check": stage_active_check,
         "maps": stage_maps, "validate-bo": stage_validate_bo,
     }[args.stage](args)
 
@@ -262,6 +269,43 @@ def stage_active(args) -> int:
         print(f"{len(reqs)} active requests; " + ("nothing to do" if not part else f"{out} exists"))
         return 0
     _run_and_save(part, args, out, instance_offset=(args.round + 1) * 10_000_000 + lo)
+    return 0
+
+
+def stage_active_check(args) -> int:
+    """The first true-physics check of the design search: each re-run optimum, on its exact
+    chosen schedule, against what the surrogate predicted for it. A positive bias is the
+    optimizer's winner's curse -- it picks what the surrogate overrates."""
+    from sawh_bayesopt.two_stage import active_requests, lcow_or_penalty
+    from solar_lumped.economics import LCOEconomicParams
+
+    _cfg, f, _sel = _context(args)
+    anchors = _load_anchors(args)
+    reqs = active_requests(anchors, n_cells=args.n_cells, n_perturb=args.n_perturb,
+                           rng=np.random.default_rng([args.seed, 1000 + args.round]))
+    files = sorted((args.run_dir / "active").glob(f"round{args.round}_chunk_*.npz"))
+    if not files:
+        raise SystemExit(f"no active round {args.round} chunks under {args.run_dir}/active")
+    parts = [dict(np.load(p)) for p in files]
+    rows = {k: np.concatenate([p[k] for p in parts]) for k in ("instance", "water", "capped")}
+    k = rows["instance"] - (args.round + 1) * 10_000_000
+    econ, table = LCOEconomicParams(), []
+    for req in np.unique(k[k % (args.n_perturb + 1) == 0]):
+        c, x, _u = reqs[int(req)]
+        m = k == req
+        water, capped = float(rows["water"][m].mean()), float(rows["capped"][m].mean())
+        lcow_true, feasible_true = lcow_or_penalty(water, capped, x, econ)
+        table.append({"cell": c, "regime": f["regime"][c], "water_surrogate": anchors[c]["water"], "water_physics": water,
+                      "lcow_surrogate": anchors[c]["lcow"], "lcow_physics": lcow_true, "feasible_physics": feasible_true})
+    t = pd.DataFrame(table)
+    t["water_bias"] = t.water_surrogate / t.water_physics - 1
+    t["lcow_err_usd_m3"] = t.lcow_surrogate - t.lcow_physics
+    t.to_csv(args.run_dir / f"active_check_round{args.round}.csv", index=False)
+    print(f"{len(t)} optima re-run in physics ({len(files)} chunk(s) found)")
+    print(t.groupby("regime").agg(n=("cell", "size"), median_water_bias=("water_bias", "median"),
+                                  p90_abs_water_bias=("water_bias", lambda v: v.abs().quantile(0.9)),
+                                  median_lcow_err_usd_m3=("lcow_err_usd_m3", "median"),
+                                  infeasible_in_physics=("feasible_physics", lambda v: int((~v).sum()))).round(3).to_string())
     return 0
 
 

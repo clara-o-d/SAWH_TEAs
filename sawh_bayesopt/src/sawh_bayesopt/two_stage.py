@@ -366,9 +366,14 @@ def active_requests(best: dict[int, dict], *, n_cells: int, n_perturb: int, rng:
     Cells are drawn with probability proportional to the relative ensemble spread of
     their optimal yield -- accuracy is needed near the optimum and about its value, where
     the ensemble is least sure. Each gets its optimum plus ``n_perturb`` designs within
-    +-``perturb_frac`` of each span, all run under the surrogate's own chosen schedule with
-    jitter (one grid step per control, or a fully random control on ``random_day_frac`` of
-    days) so the new rows cover the neighbourhood of the operating point, not just the point.
+    +-``perturb_frac`` of each span. The optimum runs on its exact chosen schedule, so its
+    physics yield checks the surrogate's prediction there (``active-check``); the
+    perturbed designs run that schedule with jitter (one grid step per control, or a fully
+    random control on ``random_day_frac`` of days) so the new rows cover the neighbourhood
+    of the operating point, not just the point.
+
+    Request k is cell ``chosen[k // (n_perturb + 1)]``'s optimum when
+    ``k % (n_perturb + 1) == 0``.
     """
     from sawh_bayesopt.daily_surrogate import random_controls
 
@@ -384,7 +389,8 @@ def active_requests(best: dict[int, dict], *, n_cells: int, n_perturb: int, rng:
         x0 = np.asarray(best[c]["design"], float)
         designs = [x0, *[np.clip(x0 + rng.uniform(-perturb_frac, perturb_frac, 3) * span, bounds[:, 0], bounds[:, 1])
                          for _ in range(n_perturb)]]
-        for x in designs:
+        out.append((int(c), x0, np.array(best[c]["controls"], float)))
+        for x in designs[1:]:
             ctrl = np.array(best[c]["controls"], float)
             for j, g in enumerate(grids):
                 step = g[1] - g[0]
