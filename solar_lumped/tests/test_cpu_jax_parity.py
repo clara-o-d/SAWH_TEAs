@@ -173,3 +173,65 @@ def test_forced_cooling_coefficient_has_one_definition() -> None:
     assert jdc._h_amb_cond_for(forced) == pytest.approx(forced.condenser_h_amb_w_m2_k())
     # Fans are a floor on ambient convection, never a downgrade from it.
     assert forced.condenser_h_amb_w_m2_k() >= H_AMB_W_M2_K
+
+
+def test_run_year_batched_keeps_chained_per_day_outputs():
+    """Per-day arrays must chain (day d+1 starts where day d ended), reduce to the
+    annual means callers used to get directly, and the system-as-argument day step
+    must agree with the closure step it backs."""
+    import jax_daily_cycle as jdc
+
+    configs = [SystemConfig(), SystemConfig(hydrogel_thickness_m=0.006)]
+    profiles = [baseline_profile(), baseline_profile(relative_humidity=0.3), baseline_profile()]
+    dt, n_abs, n_des = jdc.year_padding([profiles])
+    system = jdc.build_system_arrays(configs)
+    step = jdc.make_year_step_fn(system, dt, n_abs, n_des)
+    weathers = [jdc.build_day_weather([p, p], n_abs, n_des) for p in profiles]
+    days = jdc.run_year_batched(
+        step, weathers,
+        c_w_initial=np.array([initial_loading(c) for c in configs]),
+        h_initial=np.array([c.hydrogel_thickness_m for c in configs]),
+        aitken_max_rounds=2,
+    )
+    assert days["water"].shape == (3, 2)
+    np.testing.assert_array_equal(days["c_w_start"][1:], days["c_w_end"][:-1])
+    np.testing.assert_array_equal(days["h_start"][1:], days["h_end"][:-1])
+    mean_water, _eta, _capped = jdc.annual_means(days)
+    np.testing.assert_allclose(mean_water, days["water"].mean(axis=0))
+
+    day_step = jdc.make_day_step_fn(len(system), dt, n_abs, n_des)
+    direct = day_step(days["c_w_start"][0], days["h_start"][0], weathers[0], tuple(system.values()))
+    np.testing.assert_allclose(np.asarray(direct[0]), days["water"][0], rtol=1e-10)
+
+
+def test_batched_aitken_rejects_wild_extrapolations():
+    """A step that barely curves makes Aitken's denominator nearly vanish and fling the
+    state to ~1e13 -- what a pilot saw on real designs. The safeguard must keep the result
+    within the iteration's own reach."""
+    import jax_daily_cycle as jdc
+
+    rng = np.random.default_rng(0)
+
+    def drift(c_w, h):  # translation + noise: no fixed point, dd ~ noise
+        c_w, h = np.asarray(c_w), np.asarray(h)
+        return (None, None, c_w + 1.0 + 1e-7 * rng.normal(size=c_w.shape),
+                h + 1.0 + 1e-7 * rng.normal(size=h.shape))
+
+    c_w, h = jdc.find_cyclic_state_batched(drift, c_w_initial=np.zeros(4), h_initial=np.zeros(4), max_rounds=3)
+    assert np.all(np.isfinite(c_w)) and np.all(np.abs(c_w) < 100) and np.all(np.abs(h) < 100)
+
+
+def test_batched_aitken_checks_each_component_on_its_own_scale():
+    """c_w (~1e5) contracts normally while h (~5e-3 m) flips between two values. The
+    extrapolation coefficient comes from c_w, so h gets thrown ~10 flips off; a
+    vector-norm check never notices because c_w dominates it. That is how a campaign chunk
+    reached h = 310 m on its first day."""
+    import jax_daily_cycle as jdc
+
+    def two_scale(c_w, h):
+        c_w, h = np.asarray(c_w, float), np.asarray(h, float)
+        return None, None, 1e5 + 0.9 * (c_w - 1e5), 0.011 - h  # h: 5e-3 <-> 6e-3
+
+    _c_w, h = jdc.find_cyclic_state_batched(two_scale, c_w_initial=np.full(3, 2e5),
+                                            h_initial=np.full(3, 5e-3), max_rounds=1)
+    assert np.all(np.abs(h - 5.5e-3) <= 1e-3), h  # inside the two values h flips between

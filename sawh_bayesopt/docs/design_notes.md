@@ -1,5 +1,88 @@
 # Design notes
 
+## The two-stage pipeline (`climate.py`, `daily_surrogate.py`, `two_stage.py`)
+
+The per-site BO below costs a full physics campaign per map cell and folds daily
+operation into annual-constant design dimensions. The two-stage pipeline splits the two:
+
+- **Design** -- hydrogel thickness, vapor gap, salt loading (and, under fixed tilt, the
+  tilt) -- is chosen once per cell and must serve the whole year.
+- **Control** -- seal/open offsets on the 15-minute grid, and tilt when it varies -- is
+  re-chosen every day against that day's weather.
+
+Between them sits a *daily* surrogate `g(design, control, start-of-day state, day
+features) -> (water that day, end-of-day state, P(swelling cap))`, fitted on physics
+outputs rather than dollars: LCOW is applied afterwards, so the economics stay auditable
+and every map regenerates when cost assumptions change without retraining.
+
+**Why start-of-day state is an input.** The physics chains the gel's loading from one day
+to the next. Whether that memory matters depends on whether absorption saturates
+overnight, which depends on the climate, so the surrogate is told the state rather than
+asked to average over it. Training years are chained under a random control every day
+(`daily_surrogate.simulate_years`), so every simulated year yields ~366 training rows that
+span the control space, with the state distribution that real operation produces. The
+inner loop then walks the year greedily, feeding each day's predicted end state into the
+next day.
+
+**Features.** Each day is its hourly [T, RH, GHI] cycle (72 numbers) projected onto a PCA
+fitted over every cached day on Earth, plus scalars the decomposition can under-weight:
+RH at the diurnal T minimum, daytime GHI integral, dewpoint depression at peak sun, diurnal
+T amplitude, elevation, |latitude| and noon zenith. The last two are there because tilt
+acts through the sun's path, which the GHI shape alone does not reveal. Only T, RH and GHI
+are used because they are the only channels the physics consumes: `h_amb` is fixed at
+10 W/m2K and nothing radiates to a sky temperature, so wind or T_sky features would be
+variance the surrogate could only overfit. `validate-features` checks the retained PC
+count by running the physics on real years and on years rebuilt from the retained
+features.
+
+**Sampling.** Realized climates occupy a thin curved manifold, so cells are stratified
+over real cells (KMeans in descriptor space, with the member nearest each centroid kept)
+rather than over a uniform climate box. Hyper-arid, high-altitude, monsoonal and
+coastal-humid cells are rare by area but decisive for the headline result, so each is
+topped up to a quota. Each selected cell is crossed with a per-cell scrambled-Sobol set of
+designs. The budget is fixed by `select` and is independent of map resolution.
+
+**Hold-out by cell.** Held-out rows are whole cells (split in `select`), never random
+rows: a random split leaks each climate across the split and flatters the error by about
+an order of magnitude. `holdout_report.json` gives daily error and, more importantly,
+annual error with the surrogate chained through the year under the physics' own
+controls. Both are broken out by regime.
+
+**Inner loop: enumeration, not gradients.** There are 1089 seal/open schedules per tilt
+level (x13 for daily tilt), so a day is one batched forward pass plus an argmax. That gives
+the exact discrete optimum with no local-minimum risk, and a discrete schedule is what a
+real controller runs. The tilt modes (fixed, seasonal = per quarter, daily) nest, so the
+yield gain of each step up is itself a result. Schedule modes are chosen on the decision
+features and scored on the real day:
+- hindsight: the day's own weather;
+- persistence: yesterday's weather, standing in for a day-ahead forecast;
+- climatological: the month's mean day;
+- constant: one annual schedule, the reference BO's own control space.
+
+**Outer loop.** This is the same GP + constrained EI + Kriging-Believer code the reference
+BO uses (`surrogate.py`, `acquisition.py`), over 3 dimensions. Cells run in lockstep so
+each round is one vmapped surrogate sweep, and they are warm-started from the optima of
+their nearest solved climate neighbours. A design is infeasible if the gel sits on the
+swelling ceiling on more than 5% of days
+(`two_stage.CAPPED_DAY_FRACTION_MAX`). That is the climate-dependent over-swelling
+constraint, driven by high RH at high salt loading. Salt loading enters LCOW through the
+yield and through the sorbent cost.
+
+**Active round.** Cells are drawn in proportion to the relative ensemble spread at their
+optimum. Physics is then run at and around each optimum under the surrogate's own schedule
+with jitter, and the surrogate is refit. Accuracy is needed near the optimum and about its
+value, not uniformly.
+
+**Validation.** Cells whose descriptors fall outside the training distribution
+(Mahalanobis, 99th percentile of training cells) are flagged in the maps (`ood` column),
+not silently extrapolated. `validate-bo` runs the per-site true-physics BO on the
+held-out cells and scores the two-stage design and schedule with true physics. It reports
+the gap in $/m3: (fixed, constant) is the like-for-like optimality gap, and the daily
+modes add the value of daily control.
+
+What follows documents the per-site true-physics BO, which is now the reference the
+pipeline is validated against.
+
 ## Why Bayesian optimization, not a grid or an evolutionary search
 
 `solar_lumped` has no optimizer -- only brute-force grid/OAT sweeps
@@ -28,8 +111,8 @@ There are two models involved, and it's easy to conflate them:
    pipeline (`jax_daily_cycle.py`), wrapped by `evaluator.py`. Feed it 6
    numbers describing a system design (hydrogel thickness, vapor gap, tilt,
    ...) and it simulates a year of operation and returns one number,
-   `combined_lcow` (USD/m^3 of water, averaged across the two weather
-   sites). This is the function we're minimizing. It agrees with
+   `combined_lcow` (USD/m^3 of water at the one site being optimized).
+   This is the function we're minimizing. It agrees with
    `solar_lumped`'s CPU `ode_system.py` to <0.03% (`gpu_sweep/FINDINGS.md`)
    and is ~8x faster even single-threaded on a CPU with no GPU.
 2. **The surrogate** -- a Gaussian Process (GP), built in `surrogate.py`
@@ -96,7 +179,7 @@ GP has seen very few points).
 
 ### Getting several candidates at once: Kriging-Believer
 
-`evaluate_batch` stacks every uncached design's (site, month) instances into
+`evaluate_requests` stacks every uncached (site, design) instance into
 one `jax.vmap`-compiled call, so proposing only one design per round would
 waste that batching. `propose_batch` gets `batch_size` diverse candidates via a
 trick called Kriging-Believer: propose the best point by EI, *pretend*
@@ -109,12 +192,13 @@ the same peak, without needing a true batch-EI (qEI) implementation.
 ### The full loop (`bayesopt.py::run_bayesopt`)
 
 1. **Warm start**: draw `n_init=24` designs via Latin-hypercube sampling
-   (space-filling -- spreads samples evenly across all 5 dimensions at once,
-   unlike uniform random, which tends to clump), with a rejection rule that
-   resamples any design whose vapor gap leaves too little clearance over the
-   hydrogel thickness (physics-degenerate, not worth an expensive evaluation).
+   (space-filling -- spreads samples evenly across all 6 dimensions at once,
+   unlike uniform random, which tends to clump). No rejection step: the
+   worst corner of the box is 6.03 mm of dry gel against the 7 mm minimum
+   gap, so no sampled design starts with the gel in the condenser
+   (`design_space.latin_hypercube_design`).
 2. Evaluate all 24 on the true model (one batched `jax.vmap` call across
-   every design x site x month instance, cached to disk so a crash doesn't
+   every design, walking all 365 days, cached to disk so a crash doesn't
    lose already-paid-for evaluations).
 3. Fit the GP on those 24 (design, LCOW) pairs.
 4. Loop: propose a batch of `batch_size=3` next designs by EI, evaluate them
@@ -181,7 +265,7 @@ the diffrax solve inside a day, which nobody has measured yet.
 | insulation_gap_m *(complex only)* | [0.001, 0.020] | `parameters.xlsx` Physics, `Insulation gap (L_ins)` sweep columns |
 | fin_area_ratio *(complex only)* | [3.0, 12.0] | `parameters.xlsx` Physics, `Condenser fin area ratio (A_r)` sweep columns |
 | tilt_deg | [0.0, 60.0] | `parameters.xlsx` Physics, `Tilt angle (theta)` sweep columns |
-| salt_loading *(complex only)* | [1.0, 8.0] | `parameters.xlsx` Physics, `Salt loading (SL)` sweep columns |
+| salt_loading | [1.0, 8.0] | `parameters.xlsx` Physics, `Salt loading (SL)` sweep columns |
 | eps_abs_ir | [0.05, 0.95] | `parameters.xlsx` Physics, `Absorber IR emissivity (eps_abs_ir)` sweep columns |
 | condenser_air_speed_m_s | [0.0, 1.5] | `parameters.xlsx` Physics, `Condenser forced-air speed` sweep columns |
 | seal_offset_h / open_offset_h | [-4.0, 4.0] | `parameters.xlsx` Physics, `Seal / open offset from sunrise-sunset` sweep columns |
@@ -191,10 +275,11 @@ the diffrax solve inside a day, which nobody has measured yet.
 `DesignBounds` reads every one of the workbook rows above directly, so the table
 is a description of the sheet, not a second copy of it.
 
-The three rows marked *complex only* are bounds without a dimension in simple
+The two rows marked *complex only* are bounds without a dimension in simple
 mode: `design_space.SIMPLE_FIXED` pins them at solar_lumped's defaults (5 mm,
-A_r = 7.1, SL = 4.0) so the 5-dim simple space spends its samples on the gaps,
-tilt, and the cycle schedule. `seal_offset_h` / `open_offset_h` are optimized in
+A_r = 7.1). The 6-dim simple space is the two-stage pipeline's design block
+(thickness, vapor gap, salt loading) plus tilt and the cycle schedule, so the
+per-site reference BO and the surrogate pipeline search the same box. `seal_offset_h` / `open_offset_h` are optimized in
 both modes; because they move the day/night split, which lives inside the
 weather profile, both modes now rebuild per-day profiles per design point rather
 than fetching one profile set per site.
@@ -230,7 +315,7 @@ No `condenser_thickness_m` row: it isn't a design variable in this package
   directly. It already matched this package's LiCl+hydrogel+quasi_steady
   scope and is ~8x faster even single-threaded on a CPU with no GPU, agreeing
   with the CPU path to <0.03% (`gpu_sweep/FINDINGS.md` Results 6/7).
-  `evaluator.py::evaluate_batch` stacks every (design, site, month) instance
+  `evaluator.py::evaluate_requests` stacks every (site, design) instance
   in a round -- across every uncached design, not just one -- into one
   `jax.vmap`-compiled call instead of dispatching one CPU process per design.
 - **Two independent local checkouts of the SAWH_TEAs GitHub repo exist**

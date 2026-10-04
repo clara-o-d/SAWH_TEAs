@@ -11,18 +11,25 @@ from scipy.stats import qmc
 
 from solar_lumped._parameters_xlsx import physics_bounds as _bounds
 from solar_lumped.physics import EPS_ABS, EPS_ABS_IR_CASE2, EPS_GLASS_IR_CASE2, TAU_GLASS
-from solar_lumped.physics import FIN_AREA_RATIO, L_INS_M, SALT_LOADING_DEFAULT
+from solar_lumped.physics import FIN_AREA_RATIO, L_INS_M
 
-# Simple mode's optimized dimensions: the two gap lengths, tilt, and A1's two schedule
-# offsets borrowed from complex mode. insulation_gap_m / fin_area_ratio / salt_loading
-# used to be swept here and are now pinned at solar_lumped's own defaults (SIMPLE_FIXED).
+# Simple mode's optimized dimensions: the two-stage pipeline's design block (thickness,
+# vapor gap, salt loading), tilt, and A1's two schedule offsets. This is the per-site
+# true-physics reference that sawh_bayesopt.two_stage is validated against, so it spans
+# the same design space; insulation_gap_m / fin_area_ratio stay pinned (SIMPLE_FIXED).
 #
-# The offsets are the reason simple mode is no longer cheap in weather: they move the
+# vapor_gap_m came back after being pinned at 16 mm post-12-degree campaign (flat over
+# 12-60 mm, ~1.1% of LCOW, and unpriced). Keep in mind when reading its GP length scale:
+# the 7 mm floor is a transport wall (LCOW 20.15 vs 6.18 USD/m3 at 16 mm), not a gradient.
+#
+# The offsets are the reason simple mode is not cheap in weather: they move the
 # day/night split, which lives in the *profile*, so profiles are rebuilt per design point
 # the way complex mode's already were -- see evaluator._profiles_for_design. tilt_deg is
 # in the profile too, via POA transposition (to_profile_kwargs).
 VAR_ORDER: tuple[str, ...] = (
     "hydrogel_thickness_m",
+    "vapor_gap_m",
+    "salt_loading",
     "tilt_deg",
     "seal_offset_h",
     "open_offset_h",
@@ -45,22 +52,6 @@ BASE_VAR_ORDER: tuple[str, ...] = (
 SIMPLE_FIXED: dict[str, float] = {
     "insulation_gap_m": L_INS_M,
     "fin_area_ratio": FIN_AREA_RATIO,
-    "salt_loading": SALT_LOADING_DEFAULT,
-    # Dropped from VAR_ORDER after the 12-degree campaign: the dimension is flat and the
-    # optimizer was spending a GP dimension on noise. Two 1-D scans on measured Stanford
-    # weather put the optimum at 15 mm (case2) and 16 mm (optical limits + instant g +
-    # perfect condenser), and the whole 12-60 mm range spans ~1.1% of LCOW. The campaign's
-    # own fit agreed independently: length_scale for this dimension pinned at its upper
-    # bound, i.e. the GP saw no signal in it.
-    #
-    # 16 mm is within 0.4% of both scans' optima and clear of the transport cliff -- at
-    # 7 mm LCOW is 20.15 vs 6.18 USD/m3, a wall rather than a gradient, so this must never
-    # be lowered toward the DesignBounds floor without re-scanning.
-    #
-    # Not a claim that gap height is unimportant: it is that gap height is unpriced (system
-    # height is not in the BOM -- that was B5, out of scope), so the optimizer had nothing
-    # to trade against conduction. Price it and this belongs back in VAR_ORDER.
-    "vapor_gap_m": 0.016,
 }
 
 # --- Complex-fidelity dimensions (solar_lumped.complex_model) ---
@@ -180,7 +171,7 @@ VAR_GRID: dict[str, float] = {
 
 @dataclass(frozen=True, slots=True)
 class DesignBounds:
-    """(low, high) box bounds. 5 rows in simple mode, 13 with ``complex_mode=True``.
+    """(low, high) box bounds. 6 rows in simple mode, 13 with ``complex_mode=True``.
 
     No condenser_thickness_m: LCOW charges a flat condenser BOM cost and the JAX fast
     path hardcodes condenser thermal mass at the Table S3 constant, which is already
@@ -266,7 +257,7 @@ def to_system_config_kwargs(
 
     Simple mode's seal/open_offset_h dims are deliberately absent from the result: they
     are not SystemConfig fields, they reshape the weather profile -- see
-    ``to_profile_kwargs``. The three geometry fields it no longer sweeps come from
+    ``to_profile_kwargs``. The two geometry fields it does not sweep come from
     SIMPLE_FIXED.
 
     In complex mode the vector carries COMPLEX_VAR_ORDER as well, ``case`` is

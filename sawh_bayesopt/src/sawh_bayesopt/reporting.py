@@ -1,6 +1,6 @@
 """History CSV, convergence plot, and a final JSON report comparing the
 recommended design against Wilson's Table S3 baseline (through the same
-two-site pipeline) and, where a genuinely comparable metric exists, the best
+single-site pipeline) and, where a genuinely comparable metric exists, the best
 point already on disk in solar_lumped's own parameter-sweep outputs."""
 
 from __future__ import annotations
@@ -40,6 +40,10 @@ def write_run_config(cfg: BayesOptConfig, path: str | Path) -> None:
         "stall_rel_tol": cfg.stall_rel_tol,
         "stall_rounds": cfg.stall_rounds,
         "case": cfg.case,
+        # Both change what a design vector means (13 vs 6 dims) or how it was scored, so
+        # diagnostics replaying this run must not have to guess them.
+        "complex_mode": cfg.complex_mode,
+        "backend": cfg.backend,
         # Part of what the run optimized, not a tuning detail: a strided run's LCOW is a
         # different objective and its numbers are not comparable to a stride-1 run's.
         "day_stride": cfg.day_stride,
@@ -186,8 +190,8 @@ def evaluate_baselines(
 
 def _best_sweep_reference() -> dict | None:
     """Best-effort floor from solar_lumped's own sweep outputs, explicitly
-    flagged as single-site (not the combined two-site metric this optimizer
-    targets) rather than silently treated as comparable."""
+    flagged as coming from a different site and objective rather than silently
+    treated as comparable."""
     import pandas as pd
 
     for name in ("full_oat_sweep_cambridge.csv", "full_oat_sweep.csv", "parameter_sweep.csv"):
@@ -204,8 +208,8 @@ def _best_sweep_reference() -> dict | None:
         return {
             "source_file": str(path),
             "note": (
-                "Single-site sweep result, not the two-site combined metric this "
-                "optimizer targets -- a rough floor, not an apples-to-apples comparison."
+                "Parameter-sweep result at the sweep's own site and weather, not this "
+                "run's -- a rough floor, not an apples-to-apples comparison."
             ),
             "lcow_usd_per_m3": float(row["lcow_usd_per_m3"]),
         }

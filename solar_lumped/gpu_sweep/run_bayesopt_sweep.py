@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
 """BayesOpt at every map point run_gpu_sweep.py would brute-force sweep: same site
 selection CLI and 12-month Aitken JAX fast path, optimizing hydrogel_thickness /
-vapor_gap over the min/max of the sweep's own combo lists, plus tilt and the A1
-seal/open schedule offsets (design_space.VAR_ORDER).
+vapor_gap over the min/max of the sweep's own combo lists, plus salt loading, tilt and
+the A1 seal/open schedule offsets (design_space.VAR_ORDER). This is the per-site
+true-physics reference that sawh_bayesopt.two_stage's surrogate pipeline is validated
+against.
 
 Sites run in lockstep groups of --sites-per-group: every site keeps its own GP, history
 and cache, but each round's designs across the whole group go into ONE batched evaluation,
@@ -84,12 +86,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     # Fixed (non-optimized) system constants -- same role as run_gpu_sweep.py's
     # matching flags, just not swept here.
     p.add_argument("--salt", type=str, default="LiCl")
-    # salt_loading / insulation_gap_m are pinned by design_space.SIMPLE_FIXED now, at the
-    # same values these defaults carried, and tilt_deg is an optimized dim in both modes.
-    # The three flags are reported in summary.csv but no longer change anything; they are
-    # kept only so existing sbatch command lines still parse.
-    p.add_argument("--salt-loading", type=float, default=SIMPLE_FIXED["salt_loading"],
-                   help="Ignored (pinned by design_space.SIMPLE_FIXED).")
+    # insulation_gap_m is pinned by design_space.SIMPLE_FIXED, and tilt_deg is an optimized
+    # dim in both modes. The two flags no longer change anything; they are kept only so
+    # existing sbatch command lines still parse.
     p.add_argument("--insulation-gap-mm", type=float, default=SIMPLE_FIXED["insulation_gap_m"] * 1000.0,
                    help="Ignored (pinned by design_space.SIMPLE_FIXED).")
     p.add_argument("--tilt-deg", type=float, default=gps.TILT_DEG,
@@ -118,8 +117,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument(
         "--complex", action="store_true",
         help="Optimize the 13-dim complex-fidelity space (A1/B1/B2/B3/B4/B8) instead of "
-             "simple mode's 5 dims. Frees insulation_gap_m/fin_area_ratio/salt_loading, "
-             "which simple mode pins -- see _bounds().",
+             "simple mode's 6 dims. Frees insulation_gap_m/fin_area_ratio, which simple "
+             "mode pins -- see _bounds().",
     )
 
     # Combo variables the brute-force sweep grids over -- min/max of these lists become
@@ -161,11 +160,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def _bounds(args: argparse.Namespace) -> DesignBounds:
     """Box bounds for the run's optimized dims.
 
-    Simple mode optimizes 5: hydrogel_thickness_m and vapor_gap_m over the sweep's own
-    combo lists (min/max, mm -> m), plus tilt_deg and A1's two schedule offsets over their
-    workbook ranges. insulation_gap_m / fin_area_ratio / salt_loading are not dimensions
-    at all any more -- design_space.SIMPLE_FIXED pins them, so the matching CLI flags no
-    longer feed anything.
+    Simple mode optimizes 6: hydrogel_thickness_m and vapor_gap_m over the sweep's own
+    combo lists (min/max, mm -> m), plus salt_loading, tilt_deg and A1's two schedule
+    offsets over their workbook ranges. insulation_gap_m / fin_area_ratio are not
+    dimensions -- design_space.SIMPLE_FIXED pins them, so the matching CLI flags no longer
+    feed anything.
 
     That replaced the old _FIXED_DIM_EPS trick, which was worse than absence: to_unit_cube
     divides by the span, so a 1e-9-wide axis still spread its samples across the full
@@ -177,7 +176,8 @@ def _bounds(args: argparse.Namespace) -> DesignBounds:
     existed to mirror run_gpu_sweep.py's brute-force grid so the two were comparable;
     complex mode has no brute-force counterpart to match, and holding insulation and salt
     loading at that sweep's constants while optimizing 7 exotic glazing/blend/schedule
-    dims optimizes the wrong system.
+    dims optimizes the wrong system. (The fin_area_ratio range below is read only in
+    complex mode.)
     """
     return DesignBounds(
         hydrogel_thickness_m=(min(args.hydrogel_thickness_mm) / 1000.0, max(args.hydrogel_thickness_mm) / 1000.0),

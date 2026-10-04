@@ -59,9 +59,8 @@ class BayesOptConfig:
     # IR emissivity variant (design_space.CASE_EPS_IR): "case2" matches solar_lumped's
     # base case, "case1" Wilson's original blackbody/cavity approximation.
     case: str = "case2"
-    # Complex fidelity (solar_lumped.complex_model): 13 design dims evaluated on the
-    # CPU ODE path. Must agree with ``bounds.complex_mode``; the JAX fast path is
-    # LiCl-hardcoded and cannot represent glazing stacks or ZSR blends.
+    # Complex fidelity (solar_lumped.complex_model): 13 design dims, on either backend.
+    # Must agree with ``bounds.complex_mode``.
     complex_mode: bool = False
     # False (default): solar_lumped's Eq. 2 condenser ODE. True: T_cond == T_amb, the
     # infinite-cooling-capacity limit, in either fidelity mode.

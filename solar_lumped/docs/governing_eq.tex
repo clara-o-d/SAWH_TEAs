@@ -102,7 +102,11 @@ halves are not forced to equal length) in \code{real}/replay weather modes; the
 single-axis parameter sweeps hold the forcing schedule constant. Multi-day runs either warm up
 for a fixed cycle count or use Aitken $\Delta^2$ extrapolation (\code{find\_cyclic\_state}) to
 locate the true steady periodic post-desorption $(c_w, H)$ state before reporting a single
-representative day.
+representative day. In the batched JAX year walk an Aitken jump $x^\ast$ is accepted only if
+it is finite and every component lands within $10\times$ its own last fixed-point motion,
+$|x^\ast_i - x_{2,i}| \le 10\,|x_{2,i} - x_i|$ (exact for contraction ratio $r \le 0.9$).
+Otherwise the plain iterate $x_2$ is kept. The check is per component because $c_w$
+($\sim\SI{1e5}{\mole\per\metre\cubed}$) would otherwise mask a runaway $H$.
 
 \section{Physics model assumptions}
 

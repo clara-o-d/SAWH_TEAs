@@ -1,6 +1,6 @@
 #!/bin/bash
 # hp_sweep.py full grid: ei_xi x stall_rel_tol x n_init, 3 values each (27
-# combinations), real two-site/monthly evaluations, 4 workers split across 2
+# combinations), real full-year single-site evaluations, 4 workers split across 2
 # GPUs (2 combinations sharing each GPU's memory at a time -- see
 # hp_sweep.py's module docstring for why XLA_PYTHON_CLIENT_MEM_FRACTION and
 # max_tasks_per_child=1 make that safe). Deliberately only 2-way, not 4-way,
