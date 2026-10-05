@@ -243,7 +243,7 @@ def fig_daily_tilt(anchors: pd.DataFrame, schedules, mode: str, path: Path) -> N
     for color, c in zip(SERIES3, picks):
         tilt = pd.Series(controls[int(c.cell)][:, 2]).rolling(7, center=True, min_periods=1).mean()
         ns = "" if round(abs(c.lat)) == 0 else ("N" if c.lat > 0 else "S")
-        label = f"{abs(c.lat):.0f}°{ns}, {abs(c.lon):.0f}°{'E' if c.lon >= 0 else 'W'} ({REGIME_LABEL[c.regime]})"
+        label = f"{abs(c.lat):.0f}°{ns}, {abs(c.lon):.0f}°{'E' if c.lon >= 0 else 'W'}"
         ax.plot(days, tilt, color=color, label=label)
         ax.annotate(label, (days[-1], tilt.iloc[-1]), xytext=(6, 0), textcoords="offset points",
                     va="center", fontsize=8.5, color=INK2)
