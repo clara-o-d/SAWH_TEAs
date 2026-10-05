@@ -38,7 +38,7 @@ weather cache ──► daily climate features ──► representative location
 | Select representative locations, run physics | done: 15,472 physics-years, 23 GPU chunks |
 | Train surrogate, test on held-out locations | done (Fig. 3) |
 | Design search on the 822 training ("anchor") locations | done for **daily tilt + hindsight** (Fig. 4–6) |
-| Active round (physics re-run at the chosen optima) | not yet |
+| Active round: true physics at 300 chosen optima | done: surrogate over-predicts water by ≤ 1.2% (median) |
 | Design search on all ~14.7k locations; other control modes | not yet |
 | Comparison against per-location true-physics optimization (`validate-bo`) | not yet |
 
@@ -140,10 +140,22 @@ equator. The fixed- and seasonal-tilt runs will put a number on what that freedo
 
 ## What the numbers can and cannot be trusted for yet
 
-- **They are surrogate predictions.** The surrogate is very accurate on held-out locations, but
-  a search that picks the best of many options also picks up the surrogate's optimistic errors.
-  The active round re-runs each chosen optimum in true physics and measures that bias
-  (`active-check`); `validate-bo` then compares against per-location true-physics optimization.
+- **They are surrogate predictions, and true physics confirms them.** A search that picks the
+  best of many options also picks up the surrogate's optimistic errors, so the active round re-ran
+  300 chosen optima, each on its exact 366-day schedule, in the true physics (`active-check`):
+
+  | climate | n | water over-prediction, median | 90th pct (abs) | LCOW surrogate − physics, median |
+  |---|---:|---:|---:|---:|
+  | other | 192 | 0.1% | 2.7% | −$0.01/m³ |
+  | monsoonal | 14 | 0.5% | 2.3% | −$0.02/m³ |
+  | high-altitude | 29 | 0.4% | 3.3% | −$0.05/m³ |
+  | hyper-arid | 28 | 0.9% | 2.0% | −$0.08/m³ |
+  | coastal-humid | 37 | 1.2% | 6.0% | −$0.12/m³ |
+
+  The optimism is real but small — about a percent of water, cents per m³ — and no chosen design
+  breaks the swelling cap in physics. `validate-bo` will still compare against per-location
+  true-physics optimization, which tests whether the search finds the best design, not only
+  whether it scores its choice correctly.
 - **Hindsight + daily tilt is a ceiling.** Persistence (yesterday's weather as the forecast) and
   climatological schedules are the realistic cases.
 - **Two design limits bind.** Salt loading sits at its upper bound (8) in 62% of locations, so
@@ -154,7 +166,7 @@ equator. The fixed- and seasonal-tilt runs will put a number on what that freedo
 
 ## Next steps
 
-1. Active round on the daily/hindsight optima → `active-check` → re-fit → re-run anchors.
+1. Re-fit with the active-round rows (one round was enough: bias ≤ 1.2%).
 2. Realistic modes: fixed tilt + persistence (headline), then seasonal tilt and climatological.
 3. Design search on all ~14.7k locations, with out-of-distribution climates flagged.
 4. `validate-bo`: the optimality gap in $/m³ against per-location true-physics BO.
