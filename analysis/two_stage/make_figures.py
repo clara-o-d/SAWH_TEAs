@@ -65,7 +65,12 @@ def main() -> int:
                             out / "fig2_featurization_check.png")
     fig_surrogate_holdout(json.loads((run / "holdout_report.json").read_text()), out / "fig3_surrogate_holdout.png")
     anchors = pd.read_csv(run / "opt" / args.mode / "anchors.csv")
-    fig_anchor_lcow_map(anchors, args.mode, out / "fig4_anchor_lcow_map.png")
+    fig_anchor_map(anchors, "lcow_usd_m3", "predicted LCOW (USD/m³), darker = more expensive",
+                   f"Fig. 4  Best predicted cost at the {{n}} anchor locations  ({_mode_label(args.mode)})",
+                   out / "fig4_anchor_lcow_map.png")
+    fig_anchor_map(anchors, "hydrogel_thickness_mm", "optimal hydrogel thickness (mm), darker = thicker",
+                   f"Fig. 4b  Optimal hydrogel thickness at the {{n}} anchor locations  ({_mode_label(args.mode)})",
+                   out / "fig4b_anchor_thickness_map.png")
     fig_lcow_by_regime(anchors, args.mode, out / "fig5_lcow_by_regime.png")
     fig_daily_tilt(anchors, np.load(run / "opt" / args.mode / "anchors.npz"), args.mode, out / "fig6_daily_tilt.png")
     return 0
@@ -180,24 +185,23 @@ def fig_surrogate_holdout(report: dict, path: Path) -> None:
     plt.close(fig)
 
 
-def fig_anchor_lcow_map(anchors: pd.DataFrame, mode: str, path: Path) -> None:
-    """Predicted LCOW at every anchor location."""
+def fig_anchor_map(anchors: pd.DataFrame, col: str, cbar_label: str, title: str, path: Path) -> None:
+    """One anchor-location column on a world map, sequential blue (2nd-98th percentile)."""
     import cartopy.crs as ccrs
 
     d = anchors[anchors.feasible]
-    lo, hi = np.floor(d.lcow_usd_m3.quantile(0.02)), np.ceil(d.lcow_usd_m3.quantile(0.98))
+    lo, hi = d[col].quantile(0.02), d[col].quantile(0.98)
     cmap = mcolors.LinearSegmentedColormap.from_list("blue_ramp", BLUE_RAMP)
     fig = plt.figure(figsize=(12, 5.2), layout="constrained")
     ax = world_ax(fig, (1, 1, 1))
     ax.set_extent([-180, 180, -58, 80], crs=ccrs.PlateCarree())
-    sc = ax.scatter(d.lon, d.lat, c=d.lcow_usd_m3.clip(lo, hi), cmap=cmap, vmin=lo, vmax=hi, s=22,
+    sc = ax.scatter(d.lon, d.lat, c=d[col].clip(lo, hi), cmap=cmap, vmin=lo, vmax=hi, s=22,
                     edgecolors="#fcfcfb", linewidths=0.4, transform=ccrs.PlateCarree(), zorder=3)
     cb = fig.colorbar(sc, ax=ax, shrink=0.7, pad=0.01, extend="both")
-    cb.set_label("predicted LCOW (USD/m³), darker = more expensive", color=INK2)
+    cb.set_label(cbar_label, color=INK2)
     cb.outline.set_edgecolor(AXIS)
-    ax.set_title(f"Fig. 4  Best predicted cost at the {len(d)} anchor locations  ({_mode_label(mode)})",
-                 loc="left", fontsize=12, fontweight="bold", color=INK)
-    fig.savefig(path, dpi=180)
+    ax.set_title(title.format(n=len(d)), loc="left", fontsize=12, fontweight="bold", color=INK)
+    fig.savefig(path, dpi=180, bbox_inches="tight", pad_inches=0.15)  # set_extent leaves blank figure rows
     plt.close(fig)
 
 

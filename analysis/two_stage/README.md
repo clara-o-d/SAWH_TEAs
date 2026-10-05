@@ -106,6 +106,15 @@ not a forecast-driven result.
 
 ![LCOW map](figures/fig4_anchor_lcow_map.png)
 
+![Thickness map](figures/fig4b_anchor_thickness_map.png)
+
+The optimal gel is thickest (4–5 mm) across the hot deserts — Sahara, Arabia, the US Southwest
+and Mexico, interior Australia, the Kalahari and the Atacama — and thinnest (~1.5–2.5 mm) in the
+humid tropics and along coasts (median 2.8 mm overall; hyper-arid 3.8, coastal-humid 2.3). Strong
+sun and dry air can fully regenerate a thick gel every day, so its extra capacity pays for its
+sorbent cost; where the drying drive is weak, extra gel mostly adds cost. Thickness is the one
+design variable whose optimum sits well inside its range everywhere.
+
 ![LCOW by climate](figures/fig5_lcow_by_regime.png)
 
 | climate | locations | median LCOW (USD/m³) | median water (kg/m²/day) |
