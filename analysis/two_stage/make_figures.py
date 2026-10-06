@@ -25,7 +25,7 @@ import pandas as pd  # noqa: E402
 
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "analysis" / "global"))
-from plot_map import world_ax  # noqa: E402
+from plot_map import interpolate_to_grid, world_ax  # noqa: E402
 
 # Palette: the dataviz reference instance. The four tail regimes take categorical slots
 # 1-4 (validated: worst adjacent CVD dE 9.1, normal-vision 22.9; aqua and yellow sit below
@@ -73,6 +73,12 @@ def main() -> int:
                    out / "fig4b_anchor_thickness_map.png")
     fig_lcow_by_regime(anchors, args.mode, out / "fig5_lcow_by_regime.png")
     fig_daily_tilt(anchors, np.load(run / "opt" / args.mode / "anchors.npz"), args.mode, out / "fig6_daily_tilt.png")
+    maps_csv = run / f"maps_{args.mode}.csv"
+    if maps_csv.exists():  # the all-locations search has run for this mode
+        world = pd.read_csv(maps_csv)
+        fig_global_lcow(world, args.mode, out / "fig7_global_lcow.png")
+        fig_global_panels(world, args.mode, out / "fig8_global_design_and_operation.png")
+        fig_lcow_cdf(world, args.mode, out / "fig9_lcow_cdf.png")
     return 0
 
 
@@ -230,6 +236,93 @@ def fig_lcow_by_regime(anchors: pd.DataFrame, mode: str, path: Path) -> None:
         axes[0].set_xticks(ticks, [str(t) for t in ticks])
         axes[0].minorticks_off()
     fig.suptitle(f"Fig. 5  Cost and yield of each anchor's best design, by climate  ({_mode_label(mode)})",
+                 x=0.01, ha="left", fontsize=12, fontweight="bold", color=INK)
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
+
+
+def fig_global_lcow(world: pd.DataFrame, mode: str, path: Path) -> None:
+    """Predicted LCOW over all land, gridded from every mapped location; OOD climates ringed."""
+    import cartopy.crs as ccrs
+
+    d = world[world.feasible]
+    fig = plt.figure(figsize=(12, 5.2), layout="constrained")
+    ax = world_ax(fig, (1, 1, 1))
+    ax.set_extent([-180, 180, -58, 80], crs=ccrs.PlateCarree())
+    mesh = _grid_mesh(ax, d, "lcow_usd_m3")
+    ood = world[world.ood]
+    ax.scatter(ood.lon, ood.lat, s=14, facecolors="none", edgecolors=INK, linewidths=0.7,
+               transform=ccrs.PlateCarree(), zorder=4, label=f"climate outside the training range ({len(ood)})")
+    ax.legend(loc="lower left", fontsize=9, frameon=True, facecolor="#fcfcfb", edgecolor=AXIS)
+    cb = fig.colorbar(mesh, ax=ax, shrink=0.7, pad=0.01, extend="both")
+    cb.set_label("predicted LCOW (USD/m³), darker = more expensive", color=INK2)
+    cb.outline.set_edgecolor(AXIS)
+    ax.set_title(f"Fig. 7  Best predicted cost everywhere: {len(d):,} locations  ({_mode_label(mode)})",
+                 loc="left", fontsize=12, fontweight="bold", color=INK)
+    fig.savefig(path, dpi=180, bbox_inches="tight", pad_inches=0.15)
+    plt.close(fig)
+
+
+def fig_global_panels(world: pd.DataFrame, mode: str, path: Path) -> None:
+    """Small multiples: yield, optimal thickness, seasonal re-tilting, model uncertainty."""
+    import cartopy.crs as ccrs
+
+    d = world[world.feasible].assign(water_rel_std_pct=lambda t: 100 * t.water_rel_std)
+    panels = [("water_kg_m2_day", "water (kg/m²/day)", "Water yield"),
+              ("hydrogel_thickness_mm", "thickness (mm)", "Optimal hydrogel thickness"),
+              ("tilt_std_deg", "tilt spread over the year (deg)", "How much the tilt is re-chosen"),
+              ("water_rel_std_pct", "ensemble spread (% of water)", "Surrogate uncertainty")]
+    fig = plt.figure(figsize=(13, 6.6), layout="constrained")
+    for i, (col, cbar_label, title) in enumerate(panels):
+        ax = world_ax(fig, (2, 2, i + 1))
+        ax.set_extent([-180, 180, -58, 80], crs=ccrs.PlateCarree())
+        mesh = _grid_mesh(ax, d, col)
+        cb = fig.colorbar(mesh, ax=ax, shrink=0.75, pad=0.01, extend="both")
+        cb.set_label(cbar_label, color=INK2, fontsize=9)
+        cb.outline.set_edgecolor(AXIS)
+        ax.set_title(title, loc="left", fontsize=11, fontweight="bold", color=INK)
+    fig.suptitle(f"Fig. 8  Design and operation at the optimum, all {len(d):,} locations  ({_mode_label(mode)})",
+                 x=0.01, ha="left", fontsize=12, fontweight="bold", color=INK)
+    fig.savefig(path, dpi=160, bbox_inches="tight", pad_inches=0.15)
+    plt.close(fig)
+
+
+def _grid_mesh(ax, d: pd.DataFrame, col: str):
+    """Grid one column onto 0.5 deg land cells (plot_map.interpolate_to_grid) and draw it on
+    the sequential blue ramp, 2nd-98th percentile."""
+    import cartopy.crs as ccrs
+    from scipy.spatial import cKDTree
+
+    lons, lats, vals = d.lon.to_numpy(float), d.lat.to_numpy(float), d[col].to_numpy(float)
+    pts = np.column_stack([lons, lats])
+    spacing = float(np.median(cKDTree(pts).query(pts, k=2)[0][:, 1]))
+    lon_v, lat_v, grid = interpolate_to_grid(lons, lats, vals, sample_step_deg=2.0 * spacing, fine_step_deg=0.5)
+    lo, hi = np.nanquantile(vals, 0.02), np.nanquantile(vals, 0.98)
+    cmap = mcolors.LinearSegmentedColormap.from_list("blue_ramp", BLUE_RAMP)
+    return ax.pcolormesh(lon_v, lat_v, np.clip(grid, lo, hi), cmap=cmap, vmin=lo, vmax=hi, shading="auto",
+                         transform=ccrs.PlateCarree(), zorder=2)
+
+
+def fig_lcow_cdf(world: pd.DataFrame, mode: str, path: Path) -> None:
+    """Share of locations at or below each LCOW, by climate and overall."""
+    d = world[world.feasible]
+    fig, ax = plt.subplots(figsize=(11, 4.2), layout="constrained")
+    xmax = float(np.ceil(d.lcow_usd_m3.quantile(0.995)))
+    curves = [(REGIME_LABEL[r], d.loc[d.regime == r, "lcow_usd_m3"], REGIME_COLOR[r], 1.6) for r in REGIME_COLOR
+              if (d.regime == r).any()] + [("all locations", d.lcow_usd_m3, INK, 2.4)]
+    for label, v, color, lw in curves:
+        v = np.sort(v.to_numpy())
+        ax.plot(v, 100 * np.arange(1, len(v) + 1) / len(v), color=color, linewidth=lw, label=f"{label} (n={len(v):,})")
+    for x in (5, 10):
+        ax.axvline(x, color=AXIS, linewidth=0.8)
+        share = 100 * (d.lcow_usd_m3 <= x).mean()
+        ax.text(x, 101.5, f"{share:.0f}% of all ≤ ${x}/m³", color=INK2, fontsize=9, ha="center", va="bottom")
+    ax.set_xlim(float(np.floor(d.lcow_usd_m3.min())), xmax)
+    ax.set_ylim(0, 100)
+    ax.set_xlabel("predicted LCOW (USD/m³)")
+    ax.set_ylabel("share of mapped locations at or below (%)\n(locations, not land area)")
+    ax.legend(loc="lower right", fontsize=9)
+    fig.suptitle(f"Fig. 9  How much of the world is cheap?  ({_mode_label(mode)})",
                  x=0.01, ha="left", fontsize=12, fontweight="bold", color=INK)
     fig.savefig(path, dpi=180)
     plt.close(fig)

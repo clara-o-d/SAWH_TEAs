@@ -39,7 +39,8 @@ weather cache ──► daily climate features ──► representative location
 | Train surrogate, test on held-out locations | done (Fig. 3) |
 | Design search on the 822 training ("anchor") locations | done for **daily tilt + hindsight** (Fig. 4–6) |
 | Active round: true physics at 300 chosen optima | done: surrogate over-predicts water by ≤ 1.2% (median) |
-| Design search on all ~14.7k locations; other control modes | not yet |
+| Design search on all 14,711 locations | done for **daily tilt + hindsight** (Fig. 7–9) |
+| Other control modes (fixed / seasonal tilt, persistence, climatological) | not yet |
 | Comparison against per-location true-physics optimization (`validate-bo`) | not yet |
 
 ## Fig. 1 — Each day's weather as a few numbers
@@ -138,6 +139,44 @@ The controller re-tilts by ~16° over a typical year, tracking the sun: steep in
 60° limit at 40°N), shallow in summer, mirrored in the southern hemisphere, near flat on the
 equator. The fixed- and seasonal-tilt runs will put a number on what that freedom is worth.
 
+## Fig. 7–9 — Every mapped location
+
+The same design search, run at all 14,711 cached locations: the 822 anchors with their full
+budget, every other location warm-started from the best designs of its three most similar
+anchors (by climate) and given 12 evaluations. Locations are gridded onto 0.5° land cells for
+the maps. Still **daily tilt + hindsight**, so still the ceiling.
+
+![Global LCOW](figures/fig7_global_lcow.png)
+
+Cost falls almost monotonically toward the equator: median **$4.04/m³ within 15° of the
+equator**, 5.23 at 15–30°, 6.39 at 30–45°, 8.72 at 45–60°, and 14.07 above 60°. The other
+expensive belts are the Tibet–Central Asia highlands and the Sahara. Ringed points (81) are
+climates outside the range the surrogate was trained on — mostly the Tibetan Plateau, the
+Andes, Greenland and the East African highlands (median elevation 1.8 km) — where the map is
+extrapolation and should be checked with physics before it is quoted.
+
+![Global panels](figures/fig8_global_design_and_operation.png)
+
+Water yield and optimal thickness tell different stories: yield is highest in the wet tropics
+(Amazon, Congo, Southeast Asia: 3–3.5 kg/m²/day), while the gel is thickest in the dry subtropics
+(Sahara, Arabia, Australia, the Kalahari, the US Southwest), where strong drying can fully
+cycle a thick layer. Re-tilting matters least in an equatorial band, where the noon sun barely
+moves through the year, and most at mid-to-high latitudes. Surrogate uncertainty is ~1–2%
+almost everywhere, rising to ~5% in the Arctic and Greenland.
+
+![LCOW CDF](figures/fig9_lcow_cdf.png)
+
+**26% of mapped locations come in at or below $5/m³ and 73% at or below $10/m³** (median
+$7.30/m³, 2.0 kg/m²/day). By climate, the medians are monsoonal 5.34, other 7.04,
+high-altitude 9.17, hyper-arid 9.23 and coastal-humid 13.56 USD/m³; coastal-humid has the
+longest tail but its cheapest fifth is among the cheapest anywhere. These are shares of the
+cached locations, which are not spread evenly over land, so they are not land-area fractions.
+
+The map's 822 anchor rows come from the anchor search run before the active-round re-fit;
+the other ~13,900 used the re-fitted model. The re-fit changed held-out accuracy by under
+0.1%, so the mix does not change the picture, but re-running the anchors on the re-fitted
+model would make it uniform.
+
 ## What the numbers can and cannot be trusted for yet
 
 - **They are surrogate predictions, and true physics confirms them.** A search that picks the
@@ -168,7 +207,7 @@ equator. The fixed- and seasonal-tilt runs will put a number on what that freedo
 
 1. Re-fit with the active-round rows (one round was enough: bias ≤ 1.2%).
 2. Realistic modes: fixed tilt + persistence (headline), then seasonal tilt and climatological.
-3. Design search on all ~14.7k locations, with out-of-distribution climates flagged.
+3. All-locations search for the realistic modes; physics checks at the out-of-distribution locations.
 4. `validate-bo`: the optimality gap in $/m³ against per-location true-physics BO.
 
 ## Files
