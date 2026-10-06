@@ -79,6 +79,7 @@ def main() -> int:
         fig_global_lcow(world, args.mode, out / "fig7_global_lcow.png")
         fig_global_panels(world, args.mode, out / "fig8_global_design_and_operation.png")
         fig_lcow_cdf(world, args.mode, out / "fig9_lcow_cdf.png")
+        fig_sawh_vs_desal(world, args.mode, out / "fig10_sawh_vs_desal.png")
     return 0
 
 
@@ -323,6 +324,59 @@ def fig_lcow_cdf(world: pd.DataFrame, mode: str, path: Path) -> None:
     ax.set_ylabel("share of mapped locations at or below (%)\n(locations, not land area)")
     ax.legend(loc="lower right", fontsize=9)
     fig.suptitle(f"Fig. 9  How much of the world is cheap?  ({_mode_label(mode)})",
+                 x=0.01, ha="left", fontsize=12, fontweight="bold", color=INK)
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
+
+
+def fig_sawh_vs_desal(world: pd.DataFrame, mode: str, path: Path) -> None:
+    """Fig. 9's SAWH curve against delivered desalination at the same locations.
+
+    Desalination is analysis/comparison/desal_vs_sawh_map.py's model (Kocher & Menon 2023):
+    $1/m3 coastal RO plus levelized conveyance, c_vert * elevation + c_horiz * distance to the
+    ocean coastline, with a multiplier on both conveyance costs for the paper's
+    higher-transport scenarios. Elevation is each location's own (Open-Meteo cell) elevation."""
+    sys.path.insert(0, str(_REPO / "analysis" / "comparison"))
+    import desal_vs_sawh_map as dv
+
+    d = world[world.feasible].copy()
+    coast_km = dv.coast_distance_km(d.lat.to_numpy(float), d.lon.to_numpy(float))
+    transport = dv.C_VERT_USD_M3_PER_M * d.elevation_m.clip(lower=0).to_numpy() + dv.C_HORIZ_USD_M3_PER_KM * coast_km
+    sawh = d.lcow_usd_m3.to_numpy()
+    scenarios = [(1, "#86b6ef"), (5, "#2a78d6"), (10, "#104281")]  # ordinal blue: more transport = darker
+
+    fig, axes = plt.subplots(1, 2, figsize=(13, 4.4), layout="constrained", gridspec_kw={"width_ratios": [1.5, 1]})
+    ax = axes[0]
+    xmax = float(np.ceil(np.quantile(sawh, 0.995)))
+    for m, color in scenarios:
+        v = np.sort(dv.LCOW_RO_USD_M3 + m * transport)
+        ax.plot(v, 100 * np.arange(1, len(v) + 1) / len(v), color=color, linewidth=1.8,
+                label=f"desalination, {m}× transport cost (median ${np.median(v):.2f})")
+    v = np.sort(sawh)
+    ax.plot(v, 100 * np.arange(1, len(v) + 1) / len(v), color=INK, linewidth=2.4,
+            label=f"SAWH, this work (median ${np.median(v):.2f})")
+    ax.set_xlim(0, xmax)
+    ax.set_ylim(0, 100)
+    ax.set_xlabel("LCOW (USD/m³)")
+    ax.set_ylabel("share of mapped locations at or below (%)")
+    ax.legend(loc="lower right", fontsize=9)
+    ax.set_title("Cost distributions over the same locations")
+
+    ax = axes[1]
+    mult = np.linspace(1, 20, 191)
+    share = [100 * np.mean(sawh < dv.LCOW_RO_USD_M3 + m * transport) for m in mult]
+    ax.plot(mult, share, color=INK, linewidth=2)
+    for m, color in scenarios:
+        y = 100 * np.mean(sawh < dv.LCOW_RO_USD_M3 + m * transport)
+        ax.plot(m, y, "o", color=color, markersize=8, markeredgecolor="#fcfcfb", markeredgewidth=1.5, zorder=3)
+        ax.annotate(f"{y:.0f}% at {m}×", (m, y), xytext=(8, -4), textcoords="offset points", fontsize=9, color=INK2)
+    ax.set_xlim(0, 20.5)
+    ax.set_ylim(-2, 100)
+    ax.set_xticks([1, 5, 10, 15, 20], ["1×", "5×", "10×", "15×", "20×"])
+    ax.set_xlabel("desalination transport cost, multiple of the baseline")
+    ax.set_ylabel("locations where SAWH is cheaper (%)")
+    ax.set_title("Where SAWH beats delivered desalination")
+    fig.suptitle(f"Fig. 10  SAWH vs coastal desalination piped inland  ({_mode_label(mode)}; Kocher & Menon 2023 conveyance)",
                  x=0.01, ha="left", fontsize=12, fontweight="bold", color=INK)
     fig.savefig(path, dpi=180)
     plt.close(fig)

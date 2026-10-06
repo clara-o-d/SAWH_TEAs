@@ -172,6 +172,21 @@ high-altitude 9.17, hyper-arid 9.23 and coastal-humid 13.56 USD/m³; coastal-hum
 longest tail but its cheapest fifth is among the cheapest anywhere. These are shares of the
 cached locations, which are not spread evenly over land, so they are not land-area fractions.
 
+![SAWH vs desalination](figures/fig10_sawh_vs_desal.png)
+
+**Against delivered desalination.** Desalination uses the repo's existing model
+(`analysis/comparison/desal_vs_sawh_map.py`, after Kocher & Menon 2023): coastal seawater RO
+at $1/m³ plus levelized conveyance to the site — $5×10⁻⁴/m³ per m of elevation and
+$1.358×10⁻³/m³ per km from the nearest ocean coastline (median 383 km here) — with a multiplier
+on both conveyance costs for higher-transport scenarios. At the baseline transport cost
+desalination is cheaper **everywhere** (median $1.84 vs $7.30/m³), even against SAWH's
+daily-tilt, hindsight ceiling. SAWH starts to win only where moving water inland costs several
+times the baseline: at **36% of locations at 5×** and **60% at 10×** (the paper's high-cost
+scenario); the median location breaks even at 7.3×. The comparison is location-by-location
+(right panel), which the overlaid distributions (left) cannot show on their own. Desalination
+here assumes a connected conveyance network and ignores the fixed cost of small, remote
+demand, which is where SAWH's case is strongest.
+
 The map's 822 anchor rows come from the anchor search run before the active-round re-fit;
 the other ~13,900 used the re-fitted model. The re-fit changed held-out accuracy by under
 0.1%, so the mix does not change the picture, but re-running the anchors on the re-fitted
