@@ -15,8 +15,9 @@
 #      sbatch --array=0-4 scripts/sbatch_two_stage_validate_bo.sh bo
 #
 # 2. Merge the tasks' summaries and score the two-stage designs + schedules in true
-#    physics against them (one physics chunk per mode in VALIDATE_MODES, ~2.5 h each).
-#      sbatch --time=16:00:00 scripts/sbatch_two_stage_validate_bo.sh score
+#    physics against them, one physics chunk (~2.5 h) per mode. Extra arguments go to
+#    validate-bo, e.g. --modes; fixed:constant is the like-for-like gap.
+#      sbatch --time=08:00:00 scripts/sbatch_two_stage_validate_bo.sh score --modes fixed:constant,daily:hindsight
 #
 # Results: ${RUN_DIR}/validate_bo.csv and validate_bo_summary.csv.
 #SBATCH --job-name=sawh-two-stage-validate-bo
@@ -54,8 +55,9 @@ parts = sorted(glob.glob('${RUN_DIR}/bo_reference/task_*/summary.csv'))
 df = pd.concat([pd.read_csv(p) for p in parts])
 df.to_csv('${RUN_DIR}/bo_reference/summary.csv', index=False)
 print(f'merged {len(parts)} task summaries: {len(df)} sites')"
+    shift
     python3 scripts/run_two_stage.py --run-dir "${RUN_DIR}" validate-bo \
-      --bo-summary "${RUN_DIR}/bo_reference/summary.csv"
+      --bo-summary "${RUN_DIR}/bo_reference/summary.csv" "$@"
     ;;
   *)
     echo "usage: sbatch [--array=0-4] $0 bo|score"; exit 1 ;;

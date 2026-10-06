@@ -107,6 +107,9 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--emit-sites", action="store_true",
                    help="Write bo_sites.txt (held-out cells) for run_bayesopt_sweep.py and stop.")
     p.add_argument("--bo-summary", type=Path, help="run_bayesopt_sweep.py summary.csv over those sites.")
+    p.add_argument("--modes", type=lambda v: tuple(tuple(m.split(":")) for m in v.split(",")), default=VALIDATE_MODES,
+                   help="tilt:schedule pairs to score, e.g. fixed:constant,daily:hindsight. fixed:constant is the "
+                        "like-for-like gap (the reference BO's own control space); others add daily control's value.")
     p.add_argument("--chunk-size", type=int, default=700)
     _bo_args(p)
 
@@ -420,7 +423,7 @@ def stage_validate_bo(args) -> int:
     test_cells = sel.loc[sel.split == "test", "cell"].to_numpy()
     bo = pd.read_csv(args.bo_summary)
     rows = []
-    for tilt_mode, schedule_mode in VALIDATE_MODES:
+    for tilt_mode, schedule_mode in args.modes:
         args.tilt_mode, args.schedule_mode = tilt_mode, schedule_mode
         anchors_path = args.run_dir / "opt" / f"{tilt_mode}_{schedule_mode}" / "anchors.pkl"
         warm = neighbor_warm_starts(desc, _load_anchors(args), test_cells) if anchors_path.exists() else None

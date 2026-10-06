@@ -79,7 +79,7 @@ python scripts/run_two_stage.py $R maps --tilt-mode fixed --schedule-mode persis
 python scripts/run_two_stage.py $R validate-bo --emit-sites      # login node: held-out sites
 python ../solar_lumped/gpu_sweep/warm_weather_cache.py --sites-file outputs/two_stage/main/bo_sites.txt
 sbatch --array=0-4 scripts/sbatch_two_stage_validate_bo.sh bo     # per-site true-physics BO
-sbatch --time=16:00:00 scripts/sbatch_two_stage_validate_bo.sh score   # $/m3 gap vs per-site BO
+sbatch --time=08:00:00 scripts/sbatch_two_stage_validate_bo.sh score --modes fixed:constant,daily:hindsight
 ```
 
 Outputs, all in the run directory:
