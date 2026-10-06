@@ -8,6 +8,7 @@ the MISSING count: 0 means the campaign can run offline.
 Cheap to re-run. Every already-cached site is a sqlite hit, so this doubles as a checker.
 
     python3 gpu_sweep/warm_weather_cache.py --step 12.0
+    python3 gpu_sweep/warm_weather_cache.py --sites-file ../sawh_bayesopt/outputs/two_stage/main/bo_sites.txt
 """
 
 from __future__ import annotations
@@ -25,12 +26,18 @@ from solar_lumped.weather import fetch_year_weather, grid_land_points  # noqa: E
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--step", type=float, default=12.0, help="Grid spacing in degrees.")
+    p.add_argument("--sites-file", type=Path,
+                   help="Fetch these 'LAT LON' lines instead of the land grid (e.g. validate-bo's bo_sites.txt).")
     p.add_argument("--year", type=int, default=2024)
     p.add_argument("--cache-dir", type=str, default=str(_REPO / ".weather_cache"))
     args = p.parse_args(argv)
 
-    points = grid_land_points(args.step)
-    print(f"{len(points)} land point(s) at {args.step} deg -> {args.cache_dir}", flush=True)
+    if args.sites_file:
+        points = [tuple(float(v) for v in line.split()[:2]) for line in args.sites_file.read_text().splitlines() if line.strip()]
+        print(f"{len(points)} site(s) from {args.sites_file} -> {args.cache_dir}", flush=True)
+    else:
+        points = grid_land_points(args.step)
+        print(f"{len(points)} land point(s) at {args.step} deg -> {args.cache_dir}", flush=True)
 
     failed: list[tuple[float, float, str]] = []
     for i, (lat, lon) in enumerate(points):

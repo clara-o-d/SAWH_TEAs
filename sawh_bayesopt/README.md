@@ -76,7 +76,10 @@ sbatch --array=0-5 scripts/sbatch_two_stage_physics.sh active --round 0 \
     --tilt-mode fixed --schedule-mode persistence                  # then re-fit, 1-2 rounds
 sbatch --array=0-29%8 scripts/sbatch_two_stage_optimize.sh all fixed persistence
 python scripts/run_two_stage.py $R maps --tilt-mode fixed --schedule-mode persistence
-sbatch scripts/sbatch_two_stage_validate_bo.sh                     # $/m3 gap vs per-site BO
+python scripts/run_two_stage.py $R validate-bo --emit-sites      # login node: held-out sites
+python ../solar_lumped/gpu_sweep/warm_weather_cache.py --sites-file outputs/two_stage/main/bo_sites.txt
+sbatch --array=0-4 scripts/sbatch_two_stage_validate_bo.sh bo     # per-site true-physics BO
+sbatch --time=16:00:00 scripts/sbatch_two_stage_validate_bo.sh score   # $/m3 gap vs per-site BO
 ```
 
 Outputs, all in the run directory:
