@@ -11,7 +11,8 @@
 # 1. Per-site true-physics BO over the same design box (run_bayesopt_sweep.py), split
 #    across array tasks. A task's sites share one lockstep group, so a task costs ~12
 #    full-year calls (~20 h) whatever its width; more tasks only cut wall time. Each site
-#    keeps a cache.jsonl, so a timed-out task resubmitted with the same array resumes.
+#    keeps a cache.jsonl, so a timed-out task resumes when resubmitted -- alone, with the
+#    original task count: NUM_TASKS=5 sbatch --array=1 scripts/sbatch_two_stage_validate_bo.sh bo
 #      sbatch --array=0-4 scripts/sbatch_two_stage_validate_bo.sh bo
 #
 # 2. Merge the tasks' summaries and score the two-stage designs + schedules in true
@@ -39,7 +40,10 @@ SITES="${RUN_DIR}/bo_sites.txt"
 case "${1:-}" in
   bo)
     [ -f "${SITES}" ] || { echo "no ${SITES}: run step 0 on a login node first"; exit 1; }
-    NUM_TASKS=$(( SLURM_ARRAY_TASK_MAX - SLURM_ARRAY_TASK_MIN + 1 ))
+    # NUM_TASKS must be the size of the ORIGINAL split, also when resubmitting one task
+    # (NUM_TASKS=5 sbatch --array=1 ...): from a one-task array it would read 1, and the
+    # split below would hand task 1 no sites at all.
+    NUM_TASKS="${NUM_TASKS:-$(( SLURM_ARRAY_TASK_MAX - SLURM_ARRAY_TASK_MIN + 1 ))}"
     # Task i takes every NUM_TASKS-th site, so tasks get a similar spread of climates.
     LAT_LON_ARGS=$(awk -v n="${NUM_TASKS}" -v i="${SLURM_ARRAY_TASK_ID}" \
       '(NR - 1) % n == i {printf "--lat-lon %s %s ", $1, $2}' "${SITES}")
