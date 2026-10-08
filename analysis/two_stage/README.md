@@ -192,6 +192,20 @@ the other ~13,900 used the re-fitted model. The re-fit changed held-out accuracy
 0.1%, so the mix does not change the picture, but re-running the anchors on the re-fitted
 model would make it uniform.
 
+## Fig. 11–12 — How well the two-stage route performs
+
+![Self-scoring](figures/fig11_self_scoring.png)
+
+**Does the surrogate score its own choices correctly?** The 300 optima the active round
+re-ran in true physics — each on its exact chosen 366-day schedule — against what the surrogate
+predicted for them: median bias +0.3%, 90% within ±3%. A search that picks the best of
+thousands of options favours whatever the model overrates, so this is the check that matters
+for the optimizer, not ordinary test error. Once `validate_bo.csv` is synced, a second panel
+does the same for LCOW at the held-out locations' picks.
+
+Fig. 12 (two-stage vs per-location true-physics BO on the 145 held-out locations: like-for-like
+gap, gap by climate, and what daily control adds) is drawn once `validate_bo.csv` is synced.
+
 ## What the numbers can and cannot be trusted for yet
 
 - **They are surrogate predictions, and true physics confirms them.** A search that picks the

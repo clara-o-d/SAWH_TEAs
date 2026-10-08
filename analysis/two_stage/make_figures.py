@@ -80,6 +80,13 @@ def main() -> int:
         fig_global_panels(world, args.mode, out / "fig8_global_design_and_operation.png")
         fig_lcow_cdf(world, args.mode, out / "fig9_lcow_cdf.png")
         fig_sawh_vs_desal(world, args.mode, out / "fig10_sawh_vs_desal.png")
+    checks = sorted(run.glob("active_check_round*.csv"))
+    validate = pd.read_csv(run / "validate_bo.csv") if (run / "validate_bo.csv").exists() else None
+    if checks:
+        fig_self_scoring(pd.read_csv(checks[-1]), validate, out / "fig11_self_scoring.png")
+    if validate is not None:
+        world = pd.read_csv(maps_csv) if maps_csv.exists() else None
+        fig_vs_true_physics_bo(validate, world, out / "fig12_vs_true_physics_bo.png")
     return 0
 
 
@@ -380,6 +387,122 @@ def fig_sawh_vs_desal(world: pd.DataFrame, mode: str, path: Path) -> None:
                  x=0.01, ha="left", fontsize=12, fontweight="bold", color=INK)
     fig.savefig(path, dpi=180)
     plt.close(fig)
+
+
+def fig_self_scoring(check: pd.DataFrame, validate: pd.DataFrame | None, path: Path) -> None:
+    """Does the surrogate score its own picks correctly? Its prediction at each chosen optimum
+    vs the same design and 366-day schedule replayed in true physics."""
+    n_panels = 2 if validate is not None else 1
+    fig, axes = plt.subplots(1, n_panels, figsize=(5.6 * n_panels + 0.6, 4.6), layout="constrained", squeeze=False)
+    _pred_vs_true(axes[0, 0], check.water_physics, check.water_surrogate, check.regime,
+                  "true-physics water (kg/m²/day)", "surrogate prediction (kg/m²/day)",
+                  f"Water at {len(check)} active-round optima (daily tilt, hindsight)")
+    if validate is not None:
+        v = validate.dropna(subset=["lcow_true"])
+        _pred_vs_true(axes[0, 1], v.lcow_true, v.lcow_surrogate, v.regime,
+                      "true-physics LCOW (USD/m³)", "surrogate prediction (USD/m³)",
+                      f"LCOW at {v.cell.nunique()} held-out locations' picks (all modes)", log=True)
+    fig.suptitle("Fig. 11  The surrogate scores its own choices correctly",
+                 x=0.01, ha="left", fontsize=12, fontweight="bold", color=INK)
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
+
+
+def _pred_vs_true(ax, true, pred, regime, xlabel, ylabel, title, log=False) -> None:
+    """Prediction-vs-truth scatter on a 1:1 line, per-regime median bias in the corner."""
+    lo, hi = min(true.min(), pred.min()) * 0.95, max(true.max(), pred.max()) * 1.05
+    ax.plot([lo, hi], [lo, hi], color=AXIS, linewidth=1, zorder=1)
+    for r, color in REGIME_COLOR.items():
+        m = regime == r
+        if m.any():
+            ax.scatter(true[m], pred[m], s=16, color=color, alpha=0.75, linewidths=0, label=REGIME_LABEL[r], zorder=2)
+    bias = 100 * (pred / true - 1)
+    ax.text(0.03, 0.97, f"median bias {bias.median():+.1f}%\n90% of points within ±{bias.abs().quantile(0.9):.1f}%",
+            transform=ax.transAxes, va="top", fontsize=9, color=INK2)
+    if log:
+        ax.set_xscale("log"); ax.set_yscale("log")
+        ticks = [t for t in (2, 3, 4, 5, 7, 10, 15, 20, 30) if lo <= t <= hi]
+        ax.set_xticks(ticks, [str(t) for t in ticks]); ax.set_yticks(ticks, [str(t) for t in ticks])
+        ax.minorticks_off()
+    ax.set_xlim(lo, hi); ax.set_ylim(lo, hi)
+    ax.set_xlabel(xlabel); ax.set_ylabel(ylabel)
+    ax.set_title(title, fontsize=10.5)
+    ax.legend(loc="lower right", fontsize=8.5, markerscale=1.3)
+
+
+def fig_vs_true_physics_bo(validate: pd.DataFrame, world: pd.DataFrame | None, path: Path) -> None:
+    """Does it find the best design? Two-stage designs replayed in true physics vs per-location
+    true-physics BO on the held-out locations, both under the BO's own rules (one tilt, one
+    annual schedule) -- plus what daily control adds against the same BO."""
+    v = validate.dropna(subset=["gap_usd_m3"]).copy()
+    v["gap_pct"] = 100 * v.gap_usd_m3 / v.lcow_bo_true
+    if world is not None:
+        v = v.merge(world[["cell", "ood", "elevation_m"]], on="cell", how="left")
+    fc = v[(v.tilt_mode == "fixed") & (v.schedule_mode == "constant")]
+    fig, axes = plt.subplots(1, 3, figsize=(15.5, 4.8), layout="constrained", gridspec_kw={"width_ratios": [1.05, 1, 1]})
+
+    ax = axes[0]
+    lo, hi = min(fc.lcow_bo_true.min(), fc.lcow_true.min()) * 0.92, max(fc.lcow_bo_true.max(), fc.lcow_true.max()) * 1.08
+    ax.plot([lo, hi], [lo, hi], color=AXIS, linewidth=1)
+    ax.scatter(fc.lcow_bo_true, fc.lcow_true, s=24, color=SERIES3[0], edgecolors="#fcfcfb", linewidths=0.6, zorder=2,
+               label="held-out location")
+    if "ood" in fc:
+        o = fc[fc.ood.fillna(False).astype(bool)]
+        ax.scatter(o.lcow_bo_true, o.lcow_true, s=70, facecolors="none", edgecolors=INK, linewidths=1, zorder=3,
+                   label=f"climate outside training range ({len(o)})")
+    for _, r in fc[fc.gap_pct > 10].iterrows():  # label only the real outliers
+        ax.annotate(f"+{r.gap_pct:.0f}%", (r.lcow_bo_true, r.lcow_true), xytext=(6, -2), textcoords="offset points",
+                    fontsize=8.5, color=INK2)
+    ax.set_xscale("log"); ax.set_yscale("log")
+    ticks = [t for t in (2, 3, 4, 5, 7, 10, 15, 20, 30) if lo <= t <= hi]
+    ax.set_xticks(ticks, [str(t) for t in ticks]); ax.set_yticks(ticks, [str(t) for t in ticks]); ax.minorticks_off()
+    ax.set_xlim(lo, hi); ax.set_ylim(lo, hi)
+    ax.set_xlabel("per-location true-physics BO, best LCOW (USD/m³)")
+    ax.set_ylabel("two-stage pick, replayed in true physics (USD/m³)")
+    ax.set_title("Same rules: one tilt, one annual schedule", fontsize=10.5)
+    ax.text(0.03, 0.97, f"median {fc.gap_pct.median():+.1f}%\nwithin 2% of BO or better: {100 * (fc.gap_pct <= 2).mean():.0f}%\n"
+            "below the line = two-stage cheaper", transform=ax.transAxes, va="top", fontsize=9, color=INK2)
+    ax.legend(loc="lower right", fontsize=8.5)
+
+    ax = axes[1]
+    _gap_strip(ax, fc, "two-stage − BO, fixed tilt & annual schedule (%)", clip=(-30, 30))
+    ax.set_title("Gap by climate (like-for-like)", fontsize=10.5)
+
+    ax = axes[2]
+    dh = v[(v.tilt_mode == "daily") & (v.schedule_mode == "hindsight")]
+    if len(dh):
+        _gap_strip(ax, dh, "daily tilt & hindsight schedule − BO (%)", clip=(-40, 10))
+        ax.set_title("What daily control adds vs the same BO", fontsize=10.5)
+    else:
+        ax.set_visible(False)
+    fig.suptitle(f"Fig. 12  Two-stage vs per-location true-physics BO on {fc.cell.nunique()} held-out locations",
+                 x=0.01, ha="left", fontsize=12, fontweight="bold", color=INK)
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
+
+
+def _gap_strip(ax, d: pd.DataFrame, xlabel: str, clip) -> None:
+    """Per-regime strip of percentage gaps with median bars; points beyond the axis are
+    clipped to its edge and labelled with their true value."""
+    rng = np.random.default_rng(0)
+    regimes = [r for r in REGIME_COLOR if (d.regime == r).any()]
+    ax.axvspan(-2, 2, color=GRID, alpha=0.6, zorder=0)
+    ax.axvline(0, color=AXIS, linewidth=1)
+    for yi, r in enumerate(regimes[::-1]):
+        g = d.loc[d.regime == r, "gap_pct"].to_numpy()
+        shown = np.clip(g, *clip)
+        ax.scatter(shown, yi + rng.uniform(-0.18, 0.18, len(g)), s=14, color=REGIME_COLOR[r], alpha=0.7, linewidths=0)
+        for x, true_x in zip(shown, g):
+            if true_x != x:
+                ax.annotate(f"{true_x:+.0f}%", (x, yi), xytext=(-4 if x > 0 else 4, 9), textcoords="offset points",
+                            ha="right" if x > 0 else "left", fontsize=8, color=INK2)
+        med = np.median(g)
+        ax.plot([med, med], [yi - 0.3, yi + 0.3], color=INK, linewidth=1.6)
+        ax.text(med, yi + 0.34, f"{med:+.1f}%", ha="center", va="bottom", fontsize=8.5, color=INK)
+    ax.set_yticks(range(len(regimes)), [f"{REGIME_LABEL[r]} (n={int((d.regime == r).sum())})" for r in regimes[::-1]])
+    ax.set_xlim(*clip)
+    ax.set_xlabel(xlabel + ";  grey band = ±2%")
+    ax.grid(axis="y", visible=False)
 
 
 def fig_daily_tilt(anchors: pd.DataFrame, schedules, mode: str, path: Path) -> None:
