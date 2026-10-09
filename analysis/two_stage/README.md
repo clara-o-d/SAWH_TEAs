@@ -247,9 +247,12 @@ control freedom, not a test of the surrogate.
   | coastal-humid | 37 | 1.2% | 6.0% | −$0.12/m³ |
 
   The optimism is real but small — about a percent of water, cents per m³ — and no chosen design
-  breaks the swelling cap in physics. `validate-bo` will still compare against per-location
-  true-physics optimization, which tests whether the search finds the best design, not only
-  whether it scores its choice correctly.
+  breaks the swelling cap in physics. Whether the search also *finds* the best design is the
+  separate question `validate-bo` answers (Fig. 12): within 2% of per-location true-physics BO
+  or better at 92% of held-out locations.
+- **Extreme climates are the weak spot.** The validation failures sit at very high elevation
+  or on ice sheets; the out-of-distribution flag catches some but not all (the Greenland ice
+  sheet passes it). Treat flagged and ice-covered locations as unverified.
 - **Hindsight + daily tilt is a ceiling.** Persistence (yesterday's weather as the forecast) and
   climatological schedules are the realistic cases.
 - **Two design limits bind.** Salt loading sits at its upper bound (8) in 62% of locations, so
@@ -260,10 +263,12 @@ control freedom, not a test of the surrogate.
 
 ## Next steps
 
-1. Re-fit with the active-round rows (one round was enough: bias ≤ 1.2%).
-2. Realistic modes: fixed tilt + persistence (headline), then seasonal tilt and climatological.
-3. All-locations search for the realistic modes; physics checks at the out-of-distribution locations.
-4. `validate-bo`: the optimality gap in $/m³ against per-location true-physics BO.
+1. Realistic modes: fixed tilt + persistence (headline), then seasonal tilt and climatological —
+   anchors, then the all-locations search and maps for each.
+2. Re-run the daily/hindsight anchors on the re-fitted model so that map is uniform.
+3. Out-of-distribution and ice-sheet locations: per-location true-physics BO, or mask them.
+4. Find why the reference BO found nothing feasible at six Arctic locations (per-site
+   `cache.jsonl` failure reasons on Sherlock).
 
 ## Files
 
