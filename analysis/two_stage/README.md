@@ -41,7 +41,7 @@ weather cache ──► daily climate features ──► representative location
 | Active round: true physics at 300 chosen optima | done: surrogate over-predicts water by ≤ 1.2% (median) |
 | Design search on all 14,711 locations | done for **daily tilt + hindsight** (Fig. 7–9) |
 | Other control modes (fixed / seasonal tilt, persistence, climatological) | not yet |
-| Comparison against per-location true-physics optimization (`validate-bo`) | not yet |
+| Comparison against per-location true-physics optimization (`validate-bo`) | done (Fig. 12): median −1.8%, within 2% at 92% |
 
 ## Fig. 1 — Each day's weather as a few numbers
 
@@ -203,8 +203,34 @@ thousands of options favours whatever the model overrates, so this is the check 
 for the optimizer, not ordinary test error. Once `validate_bo.csv` is synced, a second panel
 does the same for LCOW at the held-out locations' picks.
 
-Fig. 12 (two-stage vs per-location true-physics BO on the 145 held-out locations: like-for-like
-gap, gap by climate, and what daily control adds) is drawn once `validate_bo.csv` is synced.
+The right panel does the same for LCOW at the held-out locations' picks: median bias 0.0%,
+90% within ±2.3%.
+
+![vs true-physics BO](figures/fig12_vs_true_physics_bo.png)
+
+**Does it find the best design?** On the held-out locations, per-location Bayesian
+optimization run directly on the true physics (50 full-year evaluations per location, over the
+same design box plus tilt and one annual schedule) is the reference. The two-stage pick for each
+location is replayed in the same true physics under the **same rules** — one tilt, one annual
+schedule (left, middle):
+
+- median **−1.8%** LCOW (−$0.11/m³), **within 2% of the BO or better at 92% of locations**;
+  by climate the median runs from +0.2% (hyper-arid) to −4.6% (coastal-humid);
+- the two-stage route is usually *cheaper* because it splits the problem: operation is solved
+  exactly (every one of ~14,000 tilt × seal × open combinations tried for each design), leaving a
+  3-D design search, while the BO has to search all 6 dimensions with 50 evaluations — its best
+  is good but not fully converged;
+- the failures are extreme climates: Tien Shan at 5.7 km (+95%, flagged out-of-distribution),
+  the Greenland ice sheet (+17%), the New Guinea highlands (+20%, flagged), one Sahara location
+  (+11%). At most of these the surrogate scored its own pick correctly; it misjudged how other
+  designs would do, so its search missed the region the BO found.
+
+Six held-out locations, all above 66°N, are excluded: the BO found **no** feasible design there
+in 50 evaluations, while the two-stage picks are feasible in true physics at $13.7–22.9/m³.
+
+With daily tilt and hindsight (right), the same locations come out a median **7.3% cheaper than
+the BO's fixed operation** (−$0.56/m³; −13% in coastal-humid climates) — the value of the
+control freedom, not a test of the surrogate.
 
 ## What the numbers can and cannot be trusted for yet
 

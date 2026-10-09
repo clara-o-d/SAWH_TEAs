@@ -435,6 +435,11 @@ def fig_vs_true_physics_bo(validate: pd.DataFrame, world: pd.DataFrame | None, p
     true-physics BO on the held-out locations, both under the BO's own rules (one tilt, one
     annual schedule) -- plus what daily control adds against the same BO."""
     v = validate.dropna(subset=["gap_usd_m3"]).copy()
+    # A BO that found nothing feasible reports its finite 1e4 penalty, not a cost: those
+    # locations are no comparison (the two-stage pick may be perfectly feasible there), so
+    # they are dropped and counted in the title rather than plotted as -100% gaps.
+    no_bo = v.loc[v.lcow_bo_true >= 1000, "cell"].nunique()
+    v = v[v.lcow_bo_true < 1000]
     v["gap_pct"] = 100 * v.gap_usd_m3 / v.lcow_bo_true
     if world is not None:
         v = v.merge(world[["cell", "ood", "elevation_m"]], on="cell", how="left")
@@ -460,8 +465,8 @@ def fig_vs_true_physics_bo(validate: pd.DataFrame, world: pd.DataFrame | None, p
     ax.set_xlabel("per-location true-physics BO, best LCOW (USD/m³)")
     ax.set_ylabel("two-stage pick, replayed in true physics (USD/m³)")
     ax.set_title("Same rules: one tilt, one annual schedule", fontsize=10.5)
-    ax.text(0.03, 0.97, f"median {fc.gap_pct.median():+.1f}%\nwithin 2% of BO or better: {100 * (fc.gap_pct <= 2).mean():.0f}%\n"
-            "below the line = two-stage cheaper", transform=ax.transAxes, va="top", fontsize=9, color=INK2)
+    ax.text(0.97, 0.2, f"median {fc.gap_pct.median():+.1f}%\nwithin 2% of BO or better: {100 * (fc.gap_pct <= 2).mean():.0f}%\n"
+            "below the line = two-stage cheaper", transform=ax.transAxes, ha="right", va="bottom", fontsize=9, color=INK2)
     ax.legend(loc="lower right", fontsize=8.5)
 
     ax = axes[1]
@@ -475,7 +480,8 @@ def fig_vs_true_physics_bo(validate: pd.DataFrame, world: pd.DataFrame | None, p
         ax.set_title("What daily control adds vs the same BO", fontsize=10.5)
     else:
         ax.set_visible(False)
-    fig.suptitle(f"Fig. 12  Two-stage vs per-location true-physics BO on {fc.cell.nunique()} held-out locations",
+    excluded = f"  ({no_bo} where the BO found no feasible design excluded)" if no_bo else ""
+    fig.suptitle(f"Fig. 12  Two-stage vs per-location true-physics BO on {fc.cell.nunique()} held-out locations{excluded}",
                  x=0.01, ha="left", fontsize=12, fontweight="bold", color=INK)
     fig.savefig(path, dpi=180)
     plt.close(fig)
