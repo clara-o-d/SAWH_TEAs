@@ -40,7 +40,8 @@ weather cache ──► daily climate features ──► representative location
 | Design search on the 822 training ("anchor") locations | done for **daily tilt + hindsight** (Fig. 4–6) |
 | Active round: true physics at 300 chosen optima | done: surrogate over-predicts water by ≤ 1.2% (median) |
 | Design search on all 14,711 locations | done for **daily tilt + hindsight** (Fig. 7–9) |
-| Other control modes (fixed / seasonal tilt, persistence, climatological) | not yet |
+| Realistic mode: fixed tilt + persistence, all 14,711 locations | done (Fig. 13; full set in `figures/fixed_persistence/`) |
+| Seasonal tilt, climatological schedules | not yet |
 | Comparison against per-location true-physics optimization (`validate-bo`) | done (Fig. 12): median −1.8%, within 2% at 92% |
 
 ## Fig. 1 — Each day's weather as a few numbers
@@ -232,6 +233,33 @@ With daily tilt and hindsight (right), the same locations come out a median **7.
 the BO's fixed operation** (−$0.56/m³; −13% in coastal-humid climates) — the value of the
 control freedom, not a test of the surrogate.
 
+## Fig. 13 — The realistic headline: fixed tilt, yesterday's weather
+
+Everything above is the ceiling (daily tilt, perfect foresight). The buildable case — one tilt
+for the whole year, each day's seal/open schedule chosen from **yesterday's** weather — was run
+through the same pipeline at all 14,711 locations; its full figure set (Figs. 4–10 for that
+mode) is in [`figures/fixed_persistence/`](figures/fixed_persistence/).
+
+![Cost of realism](figures/fig13_cost_of_realism.png)
+
+| | ceiling: daily tilt, hindsight | **realistic: fixed tilt, persistence** |
+|---|---:|---:|
+| median LCOW | $7.30/m³ | **$7.57/m³** |
+| locations ≤ $5/m³ | 26.4% | **24.1%** |
+| locations ≤ $10/m³ | 73.3% | **71.1%** |
+
+Per location, realism costs a median **+3.9%** (10th–90th percentile +1.6 to +5.6%; by climate
+from +2.3% high-altitude to +5.2% coastal-humid): daily re-tilting and perfect foresight
+together are worth only about 4%. It costs least in the wet tropics (~1–2%), where the sun
+barely moves through the year and one day's weather predicts the next, and most at high
+latitudes and across Australia and southern Africa (~5–6%). The optimal designs barely change
+(median thickness 2.63 vs 2.66 mm).
+
+The realistic optima were checked in true physics the same way (a scoring-only active round,
+300 anchors, each on its exact schedule): median water bias **0.0%** in every climate, 90% within
+1–4%, LCOW errors of cents, none breaking the swelling cap — cleaner than the ceiling's check,
+as fewer daily options leave the search less room to land on ones the surrogate overrates.
+
 ## What the numbers can and cannot be trusted for yet
 
 - **They are surrogate predictions, and true physics confirms them.** A search that picks the
@@ -253,8 +281,9 @@ control freedom, not a test of the surrogate.
 - **Extreme climates are the weak spot.** The validation failures sit at very high elevation
   or on ice sheets; the out-of-distribution flag catches some but not all (the Greenland ice
   sheet passes it). Treat flagged and ice-covered locations as unverified.
-- **Hindsight + daily tilt is a ceiling.** Persistence (yesterday's weather as the forecast) and
-  climatological schedules are the realistic cases.
+- **Hindsight + daily tilt is a ceiling;** the realistic fixed-tilt / persistence case costs
+  ~4% more (Fig. 13). Persistence is a stand-in for a day-ahead forecast; a real forecast
+  could do somewhat better.
 - **Two design limits bind.** Salt loading sits at its upper bound (8) in 62% of locations, so
   the true optimum lies beyond the explored range; vapor gap sits at 60 mm in 28%, most likely
   because gap height is not priced in the cost model. Neither is the current focus, but both
@@ -263,8 +292,7 @@ control freedom, not a test of the surrogate.
 
 ## Next steps
 
-1. Realistic modes: fixed tilt + persistence (headline), then seasonal tilt and climatological —
-   anchors, then the all-locations search and maps for each.
+1. Seasonal tilt and climatological schedules, to split the 4% between tilt and forecast.
 2. Re-run the daily/hindsight anchors on the re-fitted model so that map is uniform.
 3. Out-of-distribution and ice-sheet locations: per-location true-physics BO, or mask them.
 4. Find why the reference BO found nothing feasible at six Arctic locations (per-site

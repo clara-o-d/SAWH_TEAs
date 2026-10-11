@@ -80,6 +80,9 @@ def main() -> int:
         fig_global_panels(world, args.mode, out / "fig8_global_design_and_operation.png")
         fig_lcow_cdf(world, args.mode, out / "fig9_lcow_cdf.png")
         fig_sawh_vs_desal(world, args.mode, out / "fig10_sawh_vs_desal.png")
+    ceiling, realistic = run / "maps_daily_hindsight.csv", run / "maps_fixed_persistence.csv"
+    if ceiling.exists() and realistic.exists():
+        fig_cost_of_realism(pd.read_csv(ceiling), pd.read_csv(realistic), out / "fig13_cost_of_realism.png")
     checks = sorted(run.glob("active_check_round*.csv"))
     validate = pd.read_csv(run / "validate_bo.csv") if (run / "validate_bo.csv").exists() else None
     if checks:
@@ -386,6 +389,55 @@ def fig_sawh_vs_desal(world: pd.DataFrame, mode: str, path: Path) -> None:
     fig.suptitle(f"Fig. 10  SAWH vs coastal desalination piped inland  ({_mode_label(mode)}; Kocher & Menon 2023 conveyance)",
                  x=0.01, ha="left", fontsize=12, fontweight="bold", color=INK)
     fig.savefig(path, dpi=180)
+    plt.close(fig)
+
+
+def fig_cost_of_realism(ceiling: pd.DataFrame, realistic: pd.DataFrame, path: Path) -> None:
+    """What a buildable controller gives up: fixed tilt + yesterday's weather vs daily tilt +
+    hindsight, at the same locations. A map of the per-location LCOW increase, and both cost
+    distributions."""
+    import cartopy.crs as ccrs
+
+    m = ceiling.merge(realistic, on="cell", suffixes=("_dh", "_fp"))
+    m = m[m.feasible_dh & m.feasible_fp].copy()
+    m["realism_pct"] = 100 * (m.lcow_usd_m3_fp / m.lcow_usd_m3_dh - 1)
+    fig = plt.figure(figsize=(15, 5), layout="constrained")
+    gs = fig.add_gridspec(1, 2, width_ratios=[1.75, 1])
+    ax = fig.add_subplot(gs[0], projection=ccrs.PlateCarree())
+    ax.set_global()
+    import cartopy.feature as cfeature
+    ax.add_feature(cfeature.NaturalEarthFeature("physical", "land", "110m", facecolor="0.88", edgecolor="0.4", linewidth=0.3, zorder=0))
+    ax.add_feature(cfeature.NaturalEarthFeature("physical", "ocean", "110m", facecolor="0.92", zorder=0))
+    ax.coastlines(resolution="110m", color="0.35", linewidth=0.4, zorder=1)
+    ax.set_extent([-180, 180, -58, 80], crs=ccrs.PlateCarree())
+    mesh = _grid_mesh(ax, m.rename(columns={"lon_dh": "lon", "lat_dh": "lat"}), "realism_pct")
+    cb = fig.colorbar(mesh, ax=ax, shrink=0.75, pad=0.01, extend="both")
+    cb.set_label("LCOW increase, realistic vs ceiling (%)", color=INK2)
+    cb.outline.set_edgecolor(AXIS)
+    ax.set_title(f"Cost of realism per location: median +{m.realism_pct.median():.1f}% "
+                 f"(10th–90th pct +{m.realism_pct.quantile(.1):.1f} to +{m.realism_pct.quantile(.9):.1f}%)",
+                 loc="left", fontsize=10.5, fontweight="bold", color=INK)
+
+    ax = fig.add_subplot(gs[1])
+    for col, label, color, lw in [("lcow_usd_m3_dh", "ceiling: daily tilt, hindsight", SERIES3[0], 1.8),
+                                  ("lcow_usd_m3_fp", "realistic: fixed tilt, persistence", INK, 2.4)]:
+        v = np.sort(m[col].to_numpy())
+        ax.plot(v, 100 * np.arange(1, len(v) + 1) / len(v), color=color, linewidth=lw,
+                label=f"{label} (median ${np.median(v):.2f})")
+    for x in (5, 10):
+        ax.axvline(x, color=AXIS, linewidth=0.8)
+    ax.text(0.97, 0.3, "locations at or below, realistic / ceiling:\n" + "\n".join(
+        f"${x}/m³: {100 * (m.lcow_usd_m3_fp <= x).mean():.0f}% / {100 * (m.lcow_usd_m3_dh <= x).mean():.0f}%" for x in (5, 10)),
+        transform=ax.transAxes, ha="right", va="bottom", fontsize=8.5, color=INK2)
+    ax.set_xlim(float(np.floor(m.lcow_usd_m3_dh.min())), float(np.ceil(m.lcow_usd_m3_fp.quantile(0.995))))
+    ax.set_ylim(0, 100)
+    ax.set_xlabel("predicted LCOW (USD/m³)")
+    ax.set_ylabel("share of mapped locations at or below (%)")
+    ax.legend(loc="lower right", fontsize=8.5)
+    ax.set_title("Same locations, both controllers", fontsize=10.5)
+    fig.suptitle(f"Fig. 13  What a buildable controller gives up, all {len(m):,} locations",
+                 x=0.01, ha="left", fontsize=12, fontweight="bold", color=INK)
+    fig.savefig(path, dpi=170, bbox_inches="tight", pad_inches=0.15)
     plt.close(fig)
 
 
