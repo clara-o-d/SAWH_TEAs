@@ -39,11 +39,10 @@ SERIES3 = ("#2a78d6", "#eb6834", "#1baf7a")  # first three slots: validated all-
 BLUE_RAMP = ["#cde2fb", "#9ec5f4", "#6da7ec", "#3987e5", "#256abf", "#184f95", "#0d366b"]
 INK, INK2, MUTED, GRID, AXIS = "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3c2b7"
 
-# Global maps follow the repo's earlier global figures (analysis/global/plot_scenario_maps.py,
-# plot_map.py): viridis -- perceptually uniform and colour-blind-safe -- reversed where low is
-# good, so BRIGHT = GOOD throughout (bright = cheap for cost, bright = more for yield).
-# Quantities with no better direction (thickness, tilt spread) read bright = more.
-MAP_CMAP = {"lcow_usd_m3": "viridis_r", "realism_pct": "viridis_r", "water_rel_std_pct": "viridis_r"}
+# Global maps use viridis like the repo's earlier global figures (analysis/global/plot_map.py):
+# perceptually uniform, colour-blind-safe, and one rule for every map -- purple = low,
+# yellow = high (so purple = cheaper for LCOW). Add a column here with "viridis_r" to flip it.
+MAP_CMAP: dict[str, str] = {}
 
 plt.rcParams.update({
     "figure.facecolor": "#fcfcfb", "axes.facecolor": "#fcfcfb", "savefig.facecolor": "#fcfcfb",
@@ -71,10 +70,10 @@ def main() -> int:
                             out / "fig2_featurization_check.png")
     fig_surrogate_holdout(json.loads((run / "holdout_report.json").read_text()), out / "fig3_surrogate_holdout.png")
     anchors = pd.read_csv(run / "opt" / args.mode / "anchors.csv")
-    fig_anchor_map(anchors, "lcow_usd_m3", "predicted LCOW (USD/m³); bright = cheaper",
+    fig_anchor_map(anchors, "lcow_usd_m3", "predicted LCOW (USD/m³); purple = cheaper",
                    f"Fig. 4  Best predicted cost at the {{n}} anchor locations  ({_mode_label(args.mode)})",
                    out / "fig4_anchor_lcow_map.png")
-    fig_anchor_map(anchors, "hydrogel_thickness_mm", "optimal hydrogel thickness (mm); bright = thicker",
+    fig_anchor_map(anchors, "hydrogel_thickness_mm", "optimal hydrogel thickness (mm); yellow = thicker",
                    f"Fig. 4b  Optimal hydrogel thickness at the {{n}} anchor locations  ({_mode_label(args.mode)})",
                    out / "fig4b_anchor_thickness_map.png")
     fig_lcow_by_regime(anchors, args.mode, out / "fig5_lcow_by_regime.png")
@@ -272,7 +271,7 @@ def fig_global_lcow(world: pd.DataFrame, mode: str, path: Path) -> None:
                transform=ccrs.PlateCarree(), zorder=4, label=f"climate outside the training range ({len(ood)})")
     ax.legend(loc="lower left", fontsize=9, frameon=True, facecolor="#fcfcfb", edgecolor=AXIS)
     cb = fig.colorbar(mesh, ax=ax, shrink=0.7, pad=0.01, extend="both")
-    cb.set_label("predicted LCOW (USD/m³); bright = cheaper", color=INK2)
+    cb.set_label("predicted LCOW (USD/m³); purple = cheaper", color=INK2)
     cb.outline.set_edgecolor(AXIS)
     ax.set_title(f"Fig. 7  Best predicted cost everywhere: {len(d):,} locations  ({_mode_label(mode)})",
                  loc="left", fontsize=12, fontweight="bold", color=INK)
@@ -285,10 +284,10 @@ def fig_global_panels(world: pd.DataFrame, mode: str, path: Path) -> None:
     import cartopy.crs as ccrs
 
     d = world[world.feasible].assign(water_rel_std_pct=lambda t: 100 * t.water_rel_std)
-    panels = [("water_kg_m2_day", "water (kg/m²/day); bright = more", "Water yield"),
-              ("hydrogel_thickness_mm", "thickness (mm); bright = thicker", "Optimal hydrogel thickness"),
-              ("tilt_std_deg", "tilt spread (deg); bright = more", "How much the tilt is re-chosen"),
-              ("water_rel_std_pct", "spread (% of water); bright = surer", "Surrogate uncertainty")]
+    panels = [("water_kg_m2_day", "water (kg/m²/day); yellow = more", "Water yield"),
+              ("hydrogel_thickness_mm", "thickness (mm); yellow = thicker", "Optimal hydrogel thickness"),
+              ("tilt_std_deg", "tilt spread (deg); yellow = more", "How much the tilt is re-chosen"),
+              ("water_rel_std_pct", "spread (% of water); purple = surer", "Surrogate uncertainty")]
     fig = plt.figure(figsize=(13, 6.6), layout="constrained")
     for i, (col, cbar_label, title) in enumerate(panels):
         ax = world_ax(fig, (2, 2, i + 1))
@@ -320,7 +319,7 @@ def _grid_mesh(ax, d: pd.DataFrame, col: str):
 
 
 def _map_cmap(col: str):
-    """viridis, reversed for the columns in MAP_CMAP (where low is better)."""
+    """viridis, unless MAP_CMAP overrides the column."""
     return MAP_CMAP.get(col, "viridis")
 
 
@@ -422,7 +421,7 @@ def fig_cost_of_realism(ceiling: pd.DataFrame, realistic: pd.DataFrame, path: Pa
     ax.set_extent([-180, 180, -58, 80], crs=ccrs.PlateCarree())
     mesh = _grid_mesh(ax, m.rename(columns={"lon_dh": "lon", "lat_dh": "lat"}), "realism_pct")
     cb = fig.colorbar(mesh, ax=ax, shrink=0.75, pad=0.01, extend="both")
-    cb.set_label("LCOW increase, realistic vs ceiling (%); bright = smaller", color=INK2)
+    cb.set_label("LCOW increase, realistic vs ceiling (%); purple = smaller", color=INK2)
     cb.outline.set_edgecolor(AXIS)
     ax.set_title(f"Cost of realism per location: median +{m.realism_pct.median():.1f}% "
                  f"(10th–90th pct +{m.realism_pct.quantile(.1):.1f} to +{m.realism_pct.quantile(.9):.1f}%)",
