@@ -88,6 +88,11 @@ def main() -> int:
     ceiling, realistic = run / "maps_daily_hindsight.csv", run / "maps_fixed_persistence.csv"
     if ceiling.exists() and realistic.exists():
         fig_cost_of_realism(pd.read_csv(ceiling), pd.read_csv(realistic), out / "fig13_cost_of_realism.png")
+    for mode in ("fixed_persistence", "daily_hindsight"):
+        opt_csv, base_csv = run / f"maps_{mode}.csv", run / f"maps_baseline_{mode}.csv"
+        if opt_csv.exists() and base_csv.exists():
+            fig_gain_over_baseline(pd.read_csv(opt_csv), pd.read_csv(base_csv), mode,
+                                   out / f"fig14_gain_over_baseline_{mode}.png")
     checks = sorted(run.glob("active_check_round*.csv"))
     validate = pd.read_csv(run / "validate_bo.csv") if (run / "validate_bo.csv").exists() else None
     if checks:
@@ -257,23 +262,25 @@ def fig_lcow_by_regime(anchors: pd.DataFrame, mode: str, path: Path) -> None:
     plt.close(fig)
 
 
+ARCTIC_CIRCLE_DEG = 66.56
+
+
 def fig_global_lcow(world: pd.DataFrame, mode: str, path: Path) -> None:
-    """Predicted LCOW over all land, gridded from every mapped location; OOD climates ringed."""
+    """Predicted LCOW over all land, gridded from every mapped location."""
     import cartopy.crs as ccrs
 
+    # No colour above the Arctic Circle: polar-night locations saturate the color scale.
+    world = world[world.lat <= ARCTIC_CIRCLE_DEG]
     d = world[world.feasible]
-    fig = plt.figure(figsize=(12, 5.2), layout="constrained")
+    fig = plt.figure(figsize=(9, 5.4), layout="constrained")
     ax = world_ax(fig, (1, 1, 1))
     ax.set_extent([-180, 180, -58, 80], crs=ccrs.PlateCarree())
+    ax.set_aspect(1.4)  # stretched vertically so the map reads taller than plain lat/lon
     mesh = _grid_mesh(ax, d, "lcow_usd_m3")
-    ood = world[world.ood]
-    ax.scatter(ood.lon, ood.lat, s=14, facecolors="none", edgecolors=INK, linewidths=0.7,
-               transform=ccrs.PlateCarree(), zorder=4, label=f"climate outside the training range ({len(ood)})")
-    ax.legend(loc="lower left", fontsize=9, frameon=True, facecolor="#fcfcfb", edgecolor=AXIS)
     cb = fig.colorbar(mesh, ax=ax, shrink=0.7, pad=0.01, extend="both")
     cb.set_label("predicted LCOW (USD/m³); purple = cheaper", color=INK2)
     cb.outline.set_edgecolor(AXIS)
-    ax.set_title(f"Fig. 7  Best predicted cost everywhere: {len(d):,} locations  ({_mode_label(mode)})",
+    ax.set_title(f"Best predicted cost everywhere: {len(d):,} locations  ({_mode_label(mode)})",
                  loc="left", fontsize=12, fontweight="bold", color=INK)
     fig.savefig(path, dpi=180, bbox_inches="tight", pad_inches=0.15)
     plt.close(fig)
@@ -445,6 +452,61 @@ def fig_cost_of_realism(ceiling: pd.DataFrame, realistic: pd.DataFrame, path: Pa
     ax.legend(loc="lower right", fontsize=8.5)
     ax.set_title("Same locations, both controllers", fontsize=10.5)
     fig.suptitle(f"Fig. 13  What a buildable controller gives up, all {len(m):,} locations",
+                 x=0.01, ha="left", fontsize=12, fontweight="bold", color=INK)
+    fig.savefig(path, dpi=170, bbox_inches="tight", pad_inches=0.15)
+    plt.close(fig)
+
+
+def fig_gain_over_baseline(opt: pd.DataFrame, base: pd.DataFrame, mode: str, path: Path) -> None:
+    """LCOW cut from the baseline (Table S3 design, seal at sunrise / open at sunset, tilt =
+    |latitude|) to the two-stage optimum, mapped per location; and by climate, split into
+    what optimizing operation buys (baseline design, optimized schedule) and what design adds."""
+    import cartopy.crs as ccrs
+
+    m = opt.merge(base[[c for c in base.columns if c.startswith(("base_", "ops_")) or c == "cell"]], on="cell")
+    m = m[m.lat <= ARCTIC_CIRCLE_DEG]
+    infeasible_base = int((m.feasible & ~m.base_feasible).sum())
+    split = "ops_lcow_usd_m3" in m  # absent when the baseline stage ran --base-only
+    m = m[m.feasible & m.base_feasible & (m.ops_feasible if split else True)].copy()
+    m["gain_pct"] = 100 * (1 - m.lcow_usd_m3 / m.base_lcow_usd_m3)
+    if split:
+        m["ops_pct"] = 100 * (1 - m.ops_lcow_usd_m3 / m.base_lcow_usd_m3)
+        m["design_pct"] = m.gain_pct - m.ops_pct
+
+    fig = plt.figure(figsize=(15, 5), layout="constrained")
+    gs = fig.add_gridspec(1, 2, width_ratios=[1.75, 1])
+    ax = world_ax(fig, gs[0])
+    ax.set_extent([-180, 180, -58, 80], crs=ccrs.PlateCarree())
+    mesh = _grid_mesh(ax, m, "gain_pct")
+    cb = fig.colorbar(mesh, ax=ax, shrink=0.75, pad=0.01, extend="both")
+    cb.set_label("LCOW reduction vs baseline (%); yellow = bigger gain", color=INK2)
+    cb.outline.set_edgecolor(AXIS)
+    ax.set_title(f"Per location: median −{m.gain_pct.median():.0f}% "
+                 f"(10th–90th pct −{m.gain_pct.quantile(.1):.0f} to −{m.gain_pct.quantile(.9):.0f}%)",
+                 loc="left", fontsize=10.5, fontweight="bold", color=INK)
+
+    ax = fig.add_subplot(gs[1])
+    order = [r for r in REGIME_LABEL if r in set(m.regime)]
+    med = m.groupby("regime")[["ops_pct", "design_pct", "gain_pct"] if split else ["gain_pct"]].median().loc[order]
+    y = np.arange(len(order))
+    if split:
+        ax.barh(y, med.ops_pct, color=SERIES3[0], label="operation (schedule + tilt)")
+        ax.barh(y, med.design_pct, left=med.ops_pct, color=SERIES3[1], label="design (gel, gap, salt)")
+    else:
+        ax.barh(y, med.gain_pct, color=SERIES3[0])
+    for yi, v in zip(y, med.gain_pct):
+        ax.annotate(f"−{v:.0f}%", (v, yi), xytext=(4, 0), textcoords="offset points",
+                    va="center", fontsize=8.5, color=INK2)
+    ax.set_yticks(y, [f"{REGIME_LABEL[r]} ({(m.regime == r).sum():,})" for r in order])
+    ax.invert_yaxis()
+    ax.set_xlabel("median LCOW reduction vs baseline (%)")
+    if split:
+        ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.14), ncol=2, fontsize=8.5)
+    ax.grid(axis="y", visible=False)
+    ax.set_title("Where the gain comes from, by climate" if split else "By climate", fontsize=10.5)
+    note = f"; {infeasible_base:,} more where the baseline is infeasible" if infeasible_base else ""
+    fig.suptitle(f"What two-stage optimization gains over a baseline design and operation: "
+                 f"{len(m):,} locations ({_mode_label(mode)}{note})",
                  x=0.01, ha="left", fontsize=12, fontweight="bold", color=INK)
     fig.savefig(path, dpi=170, bbox_inches="tight", pad_inches=0.15)
     plt.close(fig)

@@ -121,6 +121,39 @@ def evaluate_designs(model: DailySurrogate, requests: list[tuple[int, np.ndarray
     return out
 
 
+def evaluate_fixed_controls(model: DailySurrogate, requests: list[tuple[int, np.ndarray, np.ndarray]],
+                            day_features: np.ndarray, *, econ, chunk: int = 256) -> list[dict]:
+    """Surrogate year for each (cell, design, control): the one control every day, no
+    schedule search -- the un-optimized baseline. Same result keys as evaluate_designs."""
+    def year(mdl, design, feats, state_guess, control):
+        def step(s, a):
+            p = predict(mdl, assemble_inputs(design, control[None], s, a))
+            return jnp.clip(p["state_mean"][0], mdl.state_lo, mdl.state_hi)
+
+        # Cyclic start, as _cell_year: repeat day 1 under the control until the state settles.
+        state0 = jax.lax.fori_loop(0, WARMUP_ROUNDS, lambda _i, s: step(s, feats[0]), state_guess)
+        water, std, capped = _fixed(mdl, design, state0, feats, control)
+        return {"water": water, "water_std": std, "capped": capped}
+
+    run = eqx.filter_jit(jax.vmap(year, in_axes=(None, 0, 0, 0, 0)))
+    out: list[dict] = []
+    for i in range(0, len(requests), chunk):
+        part = requests[i:i + chunk]
+        cells = np.array([c for c, _x, _u in part])
+        designs = np.array([x for _c, x, _u in part], dtype=float)
+        controls = np.array([u for _c, _x, u in part], dtype=float)
+        res = run(model, jnp.asarray(designs), jnp.asarray(day_features[cells]),
+                  jnp.asarray(initial_states(designs)), jnp.asarray(controls))
+        res = {k: np.asarray(v) for k, v in res.items()}
+        for j, x in enumerate(designs):
+            water, capped = float(res["water"][j].mean()), float(res["capped"][j].mean())
+            lcow, feasible = lcow_or_penalty(water, capped, x, econ)
+            out.append({"water": water, "water_std": float(res["water_std"][j].mean()), "capped_frac": capped,
+                        "controls": np.broadcast_to(controls[j], (day_features.shape[1], 3)), "lcow": lcow,
+                        "feasible": feasible})
+    return out
+
+
 def _segments(month: np.ndarray, tilt_mode: str) -> tuple[tuple[int, int], ...]:
     """Static day ranges within which tilt is held: the whole year for fixed, quarters for
     seasonal. Daily tilt rides in the candidate set instead, so it needs no segments."""

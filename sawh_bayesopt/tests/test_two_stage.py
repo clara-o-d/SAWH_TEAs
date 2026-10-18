@@ -113,6 +113,21 @@ def test_more_control_freedom_and_more_information_never_lose(model):
     assert water["fixed", "hindsight"] - water["fixed", "persistence"] > 0.05
 
 
+def test_fixed_control_baseline_tracks_truth_and_never_beats_the_schedule_search(model):
+    from solar_lumped.economics import LCOEconomicParams
+
+    feats, month = _cell()
+    x, u = np.array([0.004, 0.02, 4.0]), np.array([0.0, 0.0, 45.0])
+    [base] = ts.evaluate_fixed_controls(model, [(0, x, u)], feats, econ=LCOEconomicParams())
+    assert abs(base["water"] - _true_water(x, u, feats[0]).mean()) < 0.15
+    assert base["controls"].shape == (feats.shape[1], 3) and np.all(base["controls"] == u)
+    # The constant-schedule search covers u itself, so it can only match or beat it.
+    [const] = ts.evaluate_designs(model, [(0, x)], feats, month, tilt_mode="fixed", schedule_mode="constant",
+                                  econ=LCOEconomicParams())
+    assert const["water"] >= base["water"] - 1e-4
+    assert const["lcow"] <= base["lcow"] + 1e-6
+
+
 def test_outer_loop_respects_budget_and_bounds(model):
     from solar_lumped.economics import LCOEconomicParams
 

@@ -15,6 +15,8 @@ Stages, in order, all under --run-dir (default outputs/two_stage/<run-id>):
   active             physics at/around the optima -> active/roundR_chunk_NNNN.npz    (GPU, array)
   active-check       physics vs surrogate at those optima -> active_check_roundR.csv  (CPU)
   maps               merge optimize parts -> maps_<mode>.csv                        (CPU)
+  baseline           baseline design, un-optimized and schedule-optimized -> opt/baseline_<mode>/  (GPU, array)
+                     --merge -> maps_baseline_<mode>.csv (CPU); --physics-check N -> baseline_physics_check.csv (GPU)
   validate-bo        two-stage vs per-site BO on held-out cells -> validate_bo.*     (GPU)
 
 Chunked stages are resumable: a chunk whose output exists is skipped. Every stage reads
@@ -43,6 +45,7 @@ from sawh_bayesopt import climate  # noqa: E402
 _DEFAULT_CACHE = _PKG.parent / "solar_lumped" / ".weather_cache"
 BASELINE_DESIGN = np.array([0.004, 0.016, 4.0])  # Table S3 thickness/loading, the 16 mm scan optimum
 BASELINE_CONTROL = np.array([0.0, 0.0, 30.0])
+BASELINE_TILT_MAX_DEG = 60.0  # top of the surrogate's tilt grid (daily_surrogate.TILT_GRID)
 # Modes validate-bo scores. (fixed, constant) is the per-site BO's own control space.
 VALIDATE_MODES = (("fixed", "constant"), ("fixed", "persistence"), ("seasonal", "persistence"),
                   ("daily", "persistence"), ("daily", "hindsight"))
@@ -103,6 +106,16 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("maps")
     _mode_args(p)
 
+    p = sub.add_parser("baseline", help="What the two-stage optimum gains over a baseline design and operation.")
+    _mode_args(p)
+    p.add_argument("--cell-range", type=int, nargs=2, metavar=("START", "END"))
+    p.add_argument("--merge", action="store_true", help="Merge the parts -> maps_baseline_<mode>.csv and stop.")
+    p.add_argument("--base-only", action="store_true",
+                   help="Skip the ops year (no schedule search): base columns only. The mode then only names "
+                        "which optimum maps_<mode>.csv the figure compares against.")
+    p.add_argument("--physics-check", type=int, metavar="N",
+                   help="True physics of the full baseline at N held-out cells vs the surrogate, and stop.")
+
     p = sub.add_parser("validate-bo")
     p.add_argument("--emit-sites", action="store_true",
                    help="Write bo_sites.txt (held-out cells) for run_bayesopt_sweep.py and stop.")
@@ -119,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
         "features": stage_features, "validate-features": stage_validate_features, "select": stage_select,
         "simulate": stage_simulate, "fit": stage_fit, "holdout": stage_holdout,
         "optimize": stage_optimize, "active": stage_active, "active-check": stage_active_check,
-        "maps": stage_maps, "validate-bo": stage_validate_bo,
+        "maps": stage_maps, "baseline": stage_baseline, "validate-bo": stage_validate_bo,
     }[args.stage](args)
 
 
@@ -397,6 +410,93 @@ def stage_maps(args) -> int:
     maps.to_csv(out, index=False)
     print(f"wrote {out}: {len(maps)} cells, {int(maps.ood.sum())} flagged out-of-distribution, "
           f"{int((~maps.feasible).sum())} infeasible")
+    return 0
+
+
+def stage_baseline(args) -> int:
+    """Per cell, two years on the surrogate, both at BASELINE_DESIGN:
+
+      base  the baseline operation every day -- seal at sunrise, open at sunset, tilt =
+            |latitude| (capped at the grid's 60 deg), equator-facing (weather.poa default)
+      ops   the same design with the schedule optimized under --tilt-mode/--schedule-mode
+
+    so against maps_<mode>.csv (optimized design and schedule), base -> ops is what
+    operation buys and ops -> optimum what design buys. Parts go to opt/baseline_<mode>/;
+    --merge joins them. The base columns do not depend on the mode."""
+    from sawh_bayesopt.two_stage import evaluate_designs, evaluate_fixed_controls
+
+    mode = f"{args.tilt_mode}_{args.schedule_mode}"
+    out_dir = args.run_dir / "opt" / f"baseline_{mode}"
+    if args.merge:
+        parts = sorted(out_dir.glob("part_*.csv"))
+        if not parts:
+            print(f"no parts under {out_dir}")
+            return 1
+        maps = pd.concat([pd.read_csv(p) for p in parts]).drop_duplicates("cell").sort_values("cell")
+        out = args.run_dir / f"maps_baseline_{mode}.csv"
+        maps.to_csv(out, index=False)
+        print(f"wrote {out}: {len(maps)} cells, {int((~maps.base_feasible).sum())} baseline infeasible")
+        return 0
+
+    _cfg, f, sel, model, econ, feats, desc = _optimize_context(args)
+
+    def baseline_controls(cells):
+        tilt = np.clip(np.abs(f["lat"][cells]), 0.0, BASELINE_TILT_MAX_DEG)
+        return np.column_stack([np.zeros_like(tilt), np.zeros_like(tilt), tilt])
+
+    if args.physics_check:
+        test_cells = sel.loc[sel.split == "test", "cell"].to_numpy()
+        cells = np.sort(np.random.default_rng(args.seed).choice(test_cells, min(args.physics_check, len(test_cells)),
+                                                                replace=False))
+        controls = baseline_controls(cells)
+        surr = evaluate_fixed_controls(model, [(c, BASELINE_DESIGN, u) for c, u in zip(cells, controls)], feats,
+                                       econ=econ)
+        rows = _physics([(c, BASELINE_DESIGN, np.tile(u, (climate.N_DAYS, 1))) for c, u in zip(cells, controls)],
+                        args, f)
+        table = []
+        for j, c in enumerate(cells):
+            m = rows["instance"] == j
+            # Drop the first walked day, as _load_rows does: its start state is the warm-up's
+            # extrapolation, not a simulated previous day.
+            water = rows["water"][m][np.argsort(rows["day"][m])][1:]
+            table.append({"cell": int(c), "regime": f["regime"][c], "lat": f["lat"][c], "lon": f["lon"][c],
+                          "water_surrogate": surr[j]["water"], "water_physics": float(water.mean())})
+        t = pd.DataFrame(table)
+        t["water_bias"] = t.water_surrogate / t.water_physics - 1
+        t.to_csv(args.run_dir / "baseline_physics_check.csv", index=False)
+        print(t.groupby("regime").agg(n=("cell", "size"), median_water_bias=("water_bias", "median"),
+                                      p90_abs_water_bias=("water_bias", lambda v: v.abs().quantile(0.9))).round(3)
+              .to_string())
+        print(f"overall: median {t.water_bias.median():+.3f}, p90 |bias| {t.water_bias.abs().quantile(0.9):.3f}")
+        return 0
+
+    n = len(f["lat"])
+    start, end = args.cell_range or (0, n)
+    end = min(end, n)
+    part = out_dir / f"part_{start:05d}_{end:05d}.csv"
+    if part.exists():
+        print(f"{part} exists")
+        return 0
+    cells = np.arange(start, end)
+    controls = baseline_controls(cells)
+    base = evaluate_fixed_controls(model, [(c, BASELINE_DESIGN, u) for c, u in zip(cells, controls)], feats, econ=econ)
+    ops = [None] * len(cells) if args.base_only else evaluate_designs(
+        model, [(c, BASELINE_DESIGN) for c in cells], feats, f["month"], tilt_mode=args.tilt_mode,
+        schedule_mode=args.schedule_mode, econ=econ)
+    train_cells = sel.loc[sel.split == "train", "cell"].to_numpy()
+    _d2, ood, _thr = climate.mahalanobis_ood(desc[train_cells], desc)
+    rows = []
+    for c, u, b, o in zip(cells, controls, base, ops):
+        row = {"cell": int(c), "lat": f["lat"][c], "lon": f["lon"][c], "regime": f["regime"][c], "ood": bool(ood[c]),
+               "base_tilt_deg": u[2], "base_water_kg_m2_day": b["water"], "base_lcow_usd_m3": b["lcow"],
+               "base_feasible": b["feasible"], "base_capped_frac": b["capped_frac"]}
+        if o is not None:
+            row.update({"ops_water_kg_m2_day": o["water"], "ops_lcow_usd_m3": o["lcow"], "ops_feasible": o["feasible"],
+                        "ops_tilt_mean_deg": o["controls"][:, 2].mean()})
+        rows.append(row)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    pd.DataFrame(rows).to_csv(part, index=False)
+    print(f"wrote {part} ({len(rows)} cells)")
     return 0
 
 
