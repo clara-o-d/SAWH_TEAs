@@ -44,6 +44,10 @@ INK, INK2, MUTED, GRID, AXIS = "#0b0b0b", "#52514e", "#898781", "#e1e0d9", "#c3c
 # yellow = high (so purple = cheaper for LCOW). Add a column here with "viridis_r" to flip it.
 MAP_CMAP: dict[str, str] = {}
 
+# Köppen-Geiger main groups (B split into desert / steppe) per cell, from koppen_labels.py.
+KOPPEN_CSV = Path(__file__).resolve().parent / "koppen.csv"
+KOPPEN_ORDER = ("tropical", "steppe", "desert", "temperate", "continental", "polar/alpine")
+
 plt.rcParams.update({
     "figure.facecolor": "#fcfcfb", "axes.facecolor": "#fcfcfb", "savefig.facecolor": "#fcfcfb",
     "font.size": 10, "axes.edgecolor": AXIS, "axes.labelcolor": INK2, "axes.titlecolor": INK,
@@ -93,6 +97,7 @@ def main() -> int:
         if opt_csv.exists() and base_csv.exists():
             fig_gain_over_baseline(pd.read_csv(opt_csv), pd.read_csv(base_csv), mode,
                                    out / f"fig14_gain_over_baseline_{mode}.png")
+    fig_lcow_ladder(run, out / "fig15_lcow_ladder.png")
     checks = sorted(run.glob("active_check_round*.csv"))
     validate = pd.read_csv(run / "validate_bo.csv") if (run / "validate_bo.csv").exists() else None
     if checks:
@@ -355,6 +360,10 @@ def fig_lcow_cdf(world: pd.DataFrame, mode: str, path: Path) -> None:
     plt.close(fig)
 
 
+# Kocher & Menon's sorbent AWH LCOW is location-insensitive and published only as this global range (their Fig. 5b).
+KM_SORBENT_LCOW = (10.8, 12.8)
+
+
 def fig_sawh_vs_desal(world: pd.DataFrame, mode: str, path: Path) -> None:
     """Fig. 9's SAWH curve against delivered desalination at the same locations.
 
@@ -381,6 +390,8 @@ def fig_sawh_vs_desal(world: pd.DataFrame, mode: str, path: Path) -> None:
     v = np.sort(sawh)
     ax.plot(v, 100 * np.arange(1, len(v) + 1) / len(v), color=INK, linewidth=2.4,
             label=f"SAWH, this work (median ${np.median(v):.2f})")
+    ax.axvspan(*KM_SORBENT_LCOW, color=MUTED, alpha=0.25, linewidth=0,
+               label=f"sorbent AWH, Kocher & Menon 2023 (${KM_SORBENT_LCOW[0]:g}–{KM_SORBENT_LCOW[1]:g})")
     ax.set_xlim(0, xmax)
     ax.set_ylim(0, 100)
     ax.set_xlabel("LCOW (USD/m³)")
@@ -391,7 +402,10 @@ def fig_sawh_vs_desal(world: pd.DataFrame, mode: str, path: Path) -> None:
     ax = axes[1]
     mult = np.linspace(1, 20, 191)
     share = [100 * np.mean(sawh < dv.LCOW_RO_USD_M3 + m * transport) for m in mult]
-    ax.plot(mult, share, color=INK, linewidth=2)
+    km_lo, km_hi = ([100 * np.mean(c < dv.LCOW_RO_USD_M3 + m * transport) for m in mult] for c in KM_SORBENT_LCOW[::-1])
+    ax.fill_between(mult, km_lo, km_hi, color=MUTED, alpha=0.25, linewidth=0, label="Kocher & Menon 2023 sorbent AWH")
+    ax.plot(mult, share, color=INK, linewidth=2, label="SAWH, this work")
+    ax.legend(loc="upper left", fontsize=9)
     for m, color in scenarios:
         y = 100 * np.mean(sawh < dv.LCOW_RO_USD_M3 + m * transport)
         ax.plot(m, y, "o", color=color, markersize=8, markeredgecolor="#fcfcfb", markeredgewidth=1.5, zorder=3)
@@ -464,7 +478,8 @@ def fig_gain_over_baseline(opt: pd.DataFrame, base: pd.DataFrame, mode: str, pat
     import cartopy.crs as ccrs
 
     m = opt.merge(base[[c for c in base.columns if c.startswith(("base_", "ops_")) or c == "cell"]], on="cell")
-    m = m[m.lat <= ARCTIC_CIRCLE_DEG]
+    m = m.merge(pd.read_csv(KOPPEN_CSV, usecols=["cell", "koppen_group"]), on="cell")
+    m = m[(m.lat <= ARCTIC_CIRCLE_DEG) & (m.koppen_group != "ocean")]
     infeasible_base = int((m.feasible & ~m.base_feasible).sum())
     split = "ops_lcow_usd_m3" in m  # absent when the baseline stage ran --base-only
     m = m[m.feasible & m.base_feasible & (m.ops_feasible if split else True)].copy()
@@ -486,8 +501,8 @@ def fig_gain_over_baseline(opt: pd.DataFrame, base: pd.DataFrame, mode: str, pat
                  loc="left", fontsize=10.5, fontweight="bold", color=INK)
 
     ax = fig.add_subplot(gs[1])
-    order = [r for r in REGIME_LABEL if r in set(m.regime)]
-    med = m.groupby("regime")[["ops_pct", "design_pct", "gain_pct"] if split else ["gain_pct"]].median().loc[order]
+    order = [g for g in KOPPEN_ORDER if g in set(m.koppen_group)]
+    med = m.groupby("koppen_group")[["ops_pct", "design_pct", "gain_pct"] if split else ["gain_pct"]].median().loc[order]
     y = np.arange(len(order))
     if split:
         ax.barh(y, med.ops_pct, color=SERIES3[0], label="operation (schedule + tilt)")
@@ -497,19 +512,79 @@ def fig_gain_over_baseline(opt: pd.DataFrame, base: pd.DataFrame, mode: str, pat
     for yi, v in zip(y, med.gain_pct):
         ax.annotate(f"−{v:.0f}%", (v, yi), xytext=(4, 0), textcoords="offset points",
                     va="center", fontsize=8.5, color=INK2)
-    ax.set_yticks(y, [f"{REGIME_LABEL[r]} ({(m.regime == r).sum():,})" for r in order])
+    ax.set_yticks(y, [f"{g} ({(m.koppen_group == g).sum():,})" for g in order])
     ax.invert_yaxis()
     ax.set_xlabel("median LCOW reduction vs baseline (%)")
     if split:
         ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.14), ncol=2, fontsize=8.5)
     ax.grid(axis="y", visible=False)
-    ax.set_title("Where the gain comes from, by climate" if split else "By climate", fontsize=10.5)
+    ax.set_title("Where the gain comes from, by Köppen-Geiger group" if split else "By Köppen-Geiger group",
+                 fontsize=10.5)
     note = f"; {infeasible_base:,} more where the baseline is infeasible" if infeasible_base else ""
     fig.suptitle(f"What two-stage optimization gains over a baseline design and operation: "
                  f"{len(m):,} locations ({_mode_label(mode)}{note})",
                  x=0.01, ha="left", fontsize=12, fontweight="bold", color=INK)
     fig.savefig(path, dpi=170, bbox_inches="tight", pad_inches=0.15)
     plt.close(fig)
+
+
+# Fig. 15's steps, least to most optimized. A step is drawn once its file exists; the modes
+# beyond the two already run each need one `optimize --cells anchors` job.
+LADDER_MODES = (
+    ("fixed_constant", "optimized design\nfixed tilt\nannual schedule"),
+    ("fixed_climatological", "optimized design\nfixed tilt\nmonthly-mean sched."),
+    ("fixed_persistence", "optimized design\nfixed tilt\nday-ahead sched."),
+    ("seasonal_persistence", "optimized design\nseasonal tilt\nday-ahead sched."),
+    ("daily_persistence", "optimized design\ndaily tilt\nday-ahead sched."),
+    ("daily_hindsight", "optimized design\ndaily tilt\nhindsight sched."),
+)
+
+
+def fig_lcow_ladder(run: Path, path: Path) -> None:
+    """One box per level of optimization, from the baseline device to the hindsight ceiling,
+    over the anchor cells every drawn step is feasible at (same cells in every box)."""
+    steps = []
+    base_csv = run / "maps_baseline_fixed_persistence.csv"
+    if base_csv.exists():  # base columns are mode-independent; ops columns are fixed tilt + persistence
+        b = pd.read_csv(base_csv)
+        steps.append(("baseline design\n|lat| tilt\nsunrise/sunset", b.cell, b.base_lcow_usd_m3, b.base_feasible))
+        if "ops_lcow_usd_m3" in b:
+            steps.append(("baseline design\nfixed tilt\nday-ahead sched.", b.cell, b.ops_lcow_usd_m3, b.ops_feasible))
+    for mode, label in LADDER_MODES:
+        f = run / "opt" / mode / "anchors.csv"
+        if f.exists():
+            a = pd.read_csv(f)
+            steps.append((label, a.cell, a.lcow_usd_m3, a.feasible))
+    if len(steps) < 2:
+        return
+    tables = [pd.DataFrame({"cell": c, label: v.where(ok)}).set_index("cell") for label, c, v, ok in steps]
+    d = pd.concat(tables, axis=1, join="inner").dropna()  # the anchor-row tables set the cells
+    d = d.join(pd.read_csv(KOPPEN_CSV, usecols=["cell", "koppen_group"]).set_index("cell"))
+    lat = pd.read_csv(run / "opt" / "daily_hindsight" / "anchors.csv", usecols=["cell", "lat"]).set_index("cell").lat
+    d = d[(d.index.map(lat) <= ARCTIC_CIRCLE_DEG) & (d.koppen_group != "ocean")]
+    labels = [s[0] for s in steps]
+
+    fig, ax = plt.subplots(figsize=(max(1.45 * len(labels) + 2, 9), 5.4), layout="constrained")
+    bp = ax.boxplot([d[l].to_numpy() for l in labels], widths=0.6, patch_artist=True, showfliers=True,
+                    flierprops=dict(marker="o", markersize=2.5, markerfacecolor=INK2, markeredgecolor="none", alpha=0.6),
+                    medianprops=dict(color="#fcfcfb", linewidth=2.0),
+                    whiskerprops=dict(color=INK2, linewidth=1.0), capprops=dict(color=INK2, linewidth=1.0))
+    for patch in bp["boxes"]:
+        patch.set(facecolor="#2a78d6", edgecolor="#fcfcfb", linewidth=2.0)
+    ax.set_yscale("log")
+    lo, hi = d[labels].min().min(), d[labels].max().max()
+    ticks = [t for t in (1, 2, 3, 4, 6, 9, 14, 20, 30, 50, 80) if lo * 0.8 <= t <= hi * 1.2]
+    ax.set_yticks(ticks, [str(t) for t in ticks])
+    ax.minorticks_off()
+    ax.set_xticks(range(1, len(labels) + 1), [f"{l}\nmedian ${d[l].median():.2f}" for l in labels], fontsize=8.5)
+    ax.set_ylabel("predicted LCOW (USD/m³, log scale)")
+    ax.grid(axis="x", visible=False)
+    fig.suptitle(f"Fig. 15  What each level of optimization buys ({len(d):,} anchor locations, the same in every box)",
+                 x=0.01, ha="left", fontsize=12, fontweight="bold", color=INK)
+    fig.savefig(path, dpi=180)
+    plt.close(fig)
+    d[labels].describe().T[["min", "25%", "50%", "75%", "max"]].round(2).rename(
+        index=lambda l: l.replace("\n", " ")).to_csv(path.with_suffix(".csv"))
 
 
 def fig_self_scoring(check: pd.DataFrame, validate: pd.DataFrame | None, path: Path) -> None:
