@@ -114,7 +114,7 @@ def main() -> int:
     ax.set_title(args.title or _title(result))
     fig.tight_layout()
 
-    out = args.output or Path(f"single_day_{_tag(result)}.png")
+    out = args.output or Path(__file__).parent / "outputs" / f"single_day_{_tag(result)}.png"
     out.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(out, dpi=200, bbox_inches="tight")
     plt.close(fig)

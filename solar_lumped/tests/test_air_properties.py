@@ -415,13 +415,6 @@ def test_sweep_and_cli_builders_carry_elevation() -> None:
     assert cli_build().site_elevation_m == 0.0
 
 
-def test_sweep_csv_schema_records_elevation() -> None:
-    """A sweep row without elevation is ambiguous now that elevation changes yield."""
-    from solar_lumped.site_sweep import _CSV_COLUMNS
-
-    assert "elevation_m" in _CSV_COLUMNS
-
-
 # --- Cumulative water as an ODE state -------------------------------------------------
 
 

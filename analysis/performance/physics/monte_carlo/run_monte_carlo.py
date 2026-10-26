@@ -115,11 +115,6 @@ NOT_SAMPLED: dict[str, str] = {
     "Atmospheric pressure (P0)": "weather forcing; both sites sit at sea level on a measured day",
     "Ambient convection density exponent": "multiplies (rho_amb/rho_ref)^n, which is ~1 at these sea-level sites",
     "Aluminum thermal conductivity (k_Al)": "read only by the complex-mode fin-efficiency model",
-    "Air thermal conductivity (k_air)": "not read; air properties come from physics.humid_air_props",
-    "Water-vapor-in-air diffusivity (D_air)": "not read; physics.d_h2o_air_m2_s (Marrero-Mason)",
-    "Air kinematic viscosity (nu_air)": "not read; physics.humid_air_props",
-    "Air density (rho_air)": "not read; physics.humid_air_props",
-    "Air specific heat (cp_air)": "not read; physics.humid_air_props",
 }
 
 # Wilson measured daily yields (L/m2 ~ kg/m2). Atacama: Fig. 4D endpoint. Cambridge:

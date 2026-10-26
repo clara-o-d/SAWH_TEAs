@@ -84,7 +84,7 @@ SALTS: tuple[str, ...] = ("LiCl", "LiBr")
 DAY = date(2025, 6, 15)
 # Stanford reads its own met tower instead of reanalysis; the rest have no measured record.
 MEASURED_SITE = "stanford_us"
-CACHE_DIR = str(_REPO / ".weather_cache")
+CACHE_DIR = str(_REPO / "solar_lumped" / ".weather_cache")
 OUT_DIR = _SOLAR / "outputs" / "site_diagnostics"
 
 

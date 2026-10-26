@@ -28,7 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--step", type=float, default=3.0)
     p.add_argument("--year", type=int, default=2024)
-    p.add_argument("--cache-dir", type=str, default=str(_REPO / ".weather_cache"))
+    p.add_argument("--cache-dir", type=str, default=str(Path(__file__).resolve().parents[4] / "solar_lumped" / ".weather_cache"))
     p.add_argument("--sleep", type=float, default=0.3, help="Seconds between requests")
     p.add_argument(
         "--cooldown-base",

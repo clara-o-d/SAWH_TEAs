@@ -55,7 +55,7 @@ class BayesOptConfig:
     ei_xi: float = 0.01
     stall_rel_tol: float = 0.005
     stall_rounds: int = 3
-    weather_cache_dir: str = ".weather_cache"
+    weather_cache_dir: str = str(Path(__file__).resolve().parents[3] / "solar_lumped" / ".weather_cache")
     # IR emissivity variant (design_space.CASE_EPS_IR): "case2" matches solar_lumped's
     # base case, "case1" Wilson's original blackbody/cavity approximation.
     case: str = "case2"

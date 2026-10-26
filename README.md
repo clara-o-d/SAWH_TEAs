@@ -5,45 +5,40 @@ Techno-economic analysis of sorbent atmospheric water harvesting (SAWH).
 The core is a physics-based simulation of the passive solar PAM-LiCl hydrogel device of
 Wilson & Díaz-Marín (*Device*, 2025). Its LCOW economics are identical to
 [electrolyte_optimization](https://github.com/clara/electrolyte_optimization). Built on
-that are a GPU sweep across the globe, design and operation optimization, and a sibling
-waste-heat-driven variant.
+that is global design and operation optimization.
 
 ## Repository layout
 
 | Path | What it is |
 |---|---|
-| [`solar_lumped/`](solar_lumped/) | Solar device: physics, weather, LCOW, CLI (`src/`), and the JAX/diffrax GPU fast path (`gpu_sweep/`). Described below. |
+| [`solar_lumped/`](solar_lumped/) | Solar device: physics, weather, LCOW, CLI (`src/`), and the JAX/diffrax fast path (`gpu_sweep/`). Described below. |
 | [`sawh_bayesopt/`](sawh_bayesopt/) | Global design + daily-operation optimization on top of `solar_lumped`: the two-stage surrogate pipeline, and per-site true-physics BO. See its [README](sawh_bayesopt/README.md). |
-| [`waste-heat/`](waste-heat/) | Waste-heat-driven, two-bed variant (data-center waste heat, vacuum desorption). See its [README](waste-heat/README.md). |
 | [`analysis/`](analysis/) | Paper recreations (Wilson, Díaz-Marín), physics checks, sensitivity/tornado sweeps, global maps, BO diagnostics, water-source comparison. |
 | [`benchmark/tariff/`](benchmark/tariff/) | Scraped per-country tap-water tariffs and maps, the first comparator for LCOW. |
 
 ## Documentation
 
 - [`solar_lumped/docs/governing_eq.tex`](solar_lumped/docs/governing_eq.tex): solar device governing equations.
-- [`waste-heat/docs/governing_eq.tex`](waste-heat/docs/governing_eq.tex): waste-heat device governing equations.
 - [`sawh_bayesopt/docs/problem_formulation.tex`](sawh_bayesopt/docs/problem_formulation.tex): the optimization problem and its two-stage decomposition.
 - [`sawh_bayesopt/docs/design_notes.md`](sawh_bayesopt/docs/design_notes.md): why the optimizers are built the way they are.
-- [`solar_lumped/docs/sherlock_param_sweep.tex`](solar_lumped/docs/sherlock_param_sweep.tex): plan for the global LiCl parameter sweep on Sherlock.
-- [`solar_lumped/docs/parameters.xlsx`](solar_lumped/docs/parameters.xlsx): the single source of truth for every physics and economics constant, in all packages.
+- [`solar_lumped/docs/parameters.xlsx`](solar_lumped/docs/parameters.xlsx): the single source of truth for every physics and economics constant, in both packages.
 
 ## Install
 
-Each package is installed separately, in editable mode. `sawh_bayesopt` and `waste-heat`
-import `solar_lumped`, so install that first.
+Each package is installed separately, in editable mode. `sawh_bayesopt` imports
+`solar_lumped`, so install that first.
 
 ```bash
 pip install -e "solar_lumped[dev]"
 pip install -e sawh_bayesopt
-pip install -e waste-heat
 ```
 
-The GPU path (`gpu_sweep/`, `sawh_bayesopt`) also needs `jax`, `diffrax` and `equinox`.
+The JAX path (`gpu_sweep/`, `sawh_bayesopt`) also needs `jax`, `diffrax` and `equinox`.
 These are already in `solar_lumped/.venv_gpu`. On a GPU node, add `pip install "jax[cuda12]"`.
 
 ## Tests
 
-Use the GPU venv for anything that touches `solar_lumped/gpu_sweep/` or `sawh_bayesopt`:
+Use `.venv_gpu` (the only venv with jax) for anything that touches `solar_lumped/gpu_sweep/` or `sawh_bayesopt`:
 
 ```bash
 solar_lumped/.venv_gpu/bin/python -m pytest solar_lumped/tests sawh_bayesopt/tests -q
@@ -56,7 +51,6 @@ physics backends in step. [`CLAUDE.md`](CLAUDE.md) has more on this, and on edit
 physics in both backends.
 
 ```bash
-python -m pytest waste-heat/tests -q          # CPU only
 SAWH_BAYESOPT_SLOW_TESTS=1 solar_lumped/.venv_gpu/bin/python -m pytest \
   sawh_bayesopt/tests/test_integration_real_model.py -q   # opt-in real-model test
 ```
@@ -78,8 +72,7 @@ SAWH_BAYESOPT_SLOW_TESTS=1 solar_lumped/.venv_gpu/bin/python -m pytest \
   - **`baseline`**: the synthetic paper profile, with a fixed 12 h/12 h split.
   - **`atacama-replay`**, **`cambridge-replay`**, **`fig-s1-replay`**: validation replays.
 - LCOW and cost breakdown, using the same equation as `lcow_zsr_at_sl`.
-- Global site × scenario sweeps on GPU, plus parameter sweeps and tornado plots
-  (`analysis/sensitivity/`).
+- Parameter sweeps and tornado plots (`analysis/sensitivity/`).
 
 ### Run
 
@@ -96,17 +89,13 @@ python -m solar_lumped.system --weather-mode real --lat -23.65 --lon -70.40 --da
 
 # One measured Stanford day (defaults to the latest complete day in --year)
 python -m solar_lumped.system --weather-mode stanford-measured --year 2025
-
-# Global scenario sweep. GPU only: all 365 real days x the 8 scenarios in
-# site_sweep.SCENARIOS, each at the parameters.xlsx baseline design
-python3 solar_lumped/gpu_sweep/run_gpu_sweep.py --lat-lon -23.65 -70.40 --output-csv outputs/gpu_scenario_sweep/site.csv
 ```
 
 ### Architecture
 
 The package is a single day-cycle simulation (`src/solar_lumped/`) driven by CLI entry
-points. A JAX/diffrax fast path (`gpu_sweep/`) handles cluster-scale multi-site sweeps,
-and BayesOpt lives in the separate `sawh_bayesopt/` package. Every parameter value comes
+points. A JAX/diffrax fast path (`gpu_sweep/`) batches many (site, design) instances for
+`sawh_bayesopt`, and BayesOpt lives in the separate `sawh_bayesopt/` package. Every parameter value comes
 from `docs/parameters.xlsx` (Physics/Economics sheets) via `_parameters_xlsx.py`; there
 are no hardcoded constants in the physics.
 
@@ -124,7 +113,7 @@ are no hardcoded constants in the physics.
   breakdown, and optionally the detailed and water-inventory CSVs and plots.
 - `weather.py`: the Open-Meteo client and the weather modes listed above. It produces the
   `DailyWeatherProfile` fed to the simulation, applies plane-of-array transposition, and
-  provides the land-grid sampling used by the GPU sweep.
+  provides the land-grid sampling used by the per-site BO.
 - `physics.py`: geometry and material constants, brine/salt thermodynamics, heat-transfer
   correlations, and the coupled thermal and mass-transfer equations (Wilson et al.
   Eqs. 1–6). It does no I/O; every function is pure over the physical state.
@@ -144,28 +133,24 @@ are no hardcoded constants in the physics.
 - `economics.py`: LCOW, NPV and payback economics, identical to
   `electrolyte_optimization`. Costs are read from `docs/parameters.xlsx`. There is no
   purchased-energy term, since this is a passive solar system.
-- `site_sweep.py`: the shared definition of the global sweep. It holds the scenario
-  list, the baseline design every scenario runs at, the per-instance `SystemConfig`, and
-  the output CSV schema. `gpu_sweep/run_gpu_sweep.py` imports it and is the only sweep
-  driver; there is no CPU sweep.
+- `site_sweep.py`: the shared multi-site definitions -- the scenario list, the baseline
+  design, the per-instance `SystemConfig`, and the output CSV schema. `run_bayesopt_sweep.py`
+  imports it.
 - `plotting.py`: shared matplotlib rcParams matching the paper's MATLAB figure style.
 - `_parameters_xlsx.py`: loads the `docs/parameters.xlsx` Physics/Economics/Salts sheets.
 - `utils.py`: a bracketed root-finding helper shared by `physics.py` and `weather.py`.
 
-**`gpu_sweep/`**: the JAX/diffrax port, which runs many (site, design, scenario)
-instances at once on a GPU. See `GPU_PRIMER.md`, `SHERLOCK_GPU_RUNBOOK.md`, and
-`FINDINGS.md` for CPU/JAX parity results.
+**`gpu_sweep/`**: the JAX/diffrax port, which runs many (site, design) instances at once
+(on CPU or GPU). `solar_lumped/tests/test_cpu_jax_parity.py` holds it to the CPU path.
 - `jax_physics.py`: JAX port of the quasi-steady desorption right-hand side from
   `physics.py`. It is LiCl-only, and uses fixed-iteration Newton/bisection in place of
   `scipy.root`/`brentq`.
 - `jax_daily_cycle.py`: the `diffrax.Tsit5` daily-cycle integrator, the batched year walk
   and the Aitken steady-periodic-state search. It is the JAX counterpart to
   `simulation.run_daily_cycle` and `find_cyclic_state`.
-- `run_gpu_sweep.py`: the global sweep driver. It runs every land site × the
-  `site_sweep.SCENARIOS`, vmapped across instances and walked through all 365 real days
-  in lockstep.
 - `run_bayesopt_sweep.py`: per-site true-physics BayesOpt (via `sawh_bayesopt`) across
   many sites. It is the reference that the two-stage pipeline is validated against.
+- `warm_weather_cache.py`: prefetches weather for a sites file into the cache.
 
 ## Reference
 

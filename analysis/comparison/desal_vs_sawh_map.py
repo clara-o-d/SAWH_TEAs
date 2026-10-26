@@ -15,7 +15,7 @@ deleted from the working tree, so the default is read straight out of git histor
 Examples::
 
   python desal_vs_sawh_map.py
-  python desal_vs_sawh_map.py --transport-multiplier 10 --output plots/desal_high_transport.png
+  python desal_vs_sawh_map.py --transport-multiplier 10 --output outputs/desal_high_transport.png
   python desal_vs_sawh_map.py --sawh-csv my_sweep.csv --sawh-col lcow_usd_per_m3
 """
 
@@ -58,7 +58,7 @@ def main() -> int:
     ap.add_argument("--transport-multiplier", type=float, default=1.0,
                     help="Scale both conveyance unit costs (10 = paper's high-cost scenario)")
     ap.add_argument("--points", action="store_true", help="Plot site markers instead of interpolating")
-    ap.add_argument("--output", type=Path, default=Path(__file__).with_name("desal_vs_sawh_map.png"))
+    ap.add_argument("--output", type=Path, default=Path(__file__).parent / "outputs" / "desal_vs_sawh_map.png")
     ap.add_argument("--selftest", action="store_true", help="Check the coast-distance and cost math, then exit")
     args = ap.parse_args()
     if args.selftest:
@@ -85,6 +85,7 @@ def main() -> int:
         r = df.loc[need]
         print(f"  SAWH first wins at ({r.lat:g}, {r.lon:g}) if transport costs are "
               f"{(r.sawh_lcow - LCOW_RO_USD_M3) / base[need]:.1f}x the baseline")
+    args.output.parent.mkdir(parents=True, exist_ok=True)
     csv_out = args.output.with_suffix(".csv")
     df.to_csv(csv_out, index=False)
     print(f"Wrote {csv_out}")

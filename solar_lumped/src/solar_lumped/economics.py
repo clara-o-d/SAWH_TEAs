@@ -35,11 +35,6 @@ _ECON_FIELD_ROWS: dict[str, str] = {
 
 # No electricity / electric-heat rows: solar_lumped is the *passive* solar system, so
 # there is no purchased-energy term at all (Wilson's Note S4 TEA likewise has none).
-# The parameters.xlsx Economics sheet still carries "Electricity price (p_elec)",
-# "Desorption hours per day (t_des)" and "Max electric heat, optimizer bound
-# (Q_elec,max)" rows -- deliberately left unread here, since the waste-heat packages
-# (which do have parasitic/supplemental electric loads) read the same workbook.
-
 
 def _coerce_bool(raw: Any) -> bool:
     if isinstance(raw, bool):
@@ -231,7 +226,7 @@ def lcow_from_daily_yield(
     drives the per-cycle energy term, so it has to be the true cycle count. This device
     runs one cycle per day, so every caller here leaves ``cycles_per_day`` at 1.0 and
     passes the day's yield. Feeding a multi-cycle daily total *and* the real cycle count
-    double-counts the water by that count -- see the same note on waste_heat's copy."""
+    double-counts the water by that count."""
     if yield_per_cycle_kg_per_m2 <= 0.0 or not math.isfinite(yield_per_cycle_kg_per_m2):
         return FAIL_LCO
     if (

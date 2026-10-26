@@ -41,7 +41,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Use weather.stanford_year_weather(year) rather than fetching --lat/--lon.",
     )
     p.add_argument("--year", type=int, default=2024)
-    p.add_argument("--cache-dir", type=str, default=str(_REPO / ".weather_cache"))
+    p.add_argument("--cache-dir", type=str, default=str(Path(__file__).resolve().parents[3] / "solar_lumped" / ".weather_cache"))
     p.add_argument("--stride", type=int, default=1, help="Simulate every Nth day (default: 1)")
     p.add_argument(
         "--warmup-cycles",

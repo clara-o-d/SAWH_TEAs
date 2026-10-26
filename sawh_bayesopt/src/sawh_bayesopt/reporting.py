@@ -284,8 +284,8 @@ def write_final_report(
         "caveats": [
             "combined_lcow comes from solar_lumped/gpu_sweep's JAX fast path "
             "(fixed-round-count Aitken, Tsit5), not solar_lumped's CPU ode_system.py "
-            "directly -- gpu_sweep/FINDINGS.md documents <0.03% worst-case "
-            "disagreement between the two, so this is not expected to be a "
+            "directly -- the two disagree by <0.03% worst-case (test_cpu_jax_parity.py "
+            "asserts <0.05%), so this is not expected to be a "
             "meaningfully different physics model.",
         ],
     }

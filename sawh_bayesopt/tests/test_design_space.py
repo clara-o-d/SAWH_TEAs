@@ -167,8 +167,8 @@ def test_case_optics_match_site_sweep_scenarios():
 
 def test_every_scenario_is_reachable_through_the_case_flag():
     """All 8 SCENARIOS must be expressible as (case, instant_equilibrium,
-    condenser_ambient) -- that mapping is what sbatch_bayesopt_global_12deg.sh derives its
-    per-task flags from, so an unreachable scenario there means a silently wrong campaign."""
+    condenser_ambient) -- the flags run_bayesopt_sweep.py takes -- or that scenario cannot
+    be run through the BO at all."""
     from solar_lumped.site_sweep import SCENARIOS
 
     for name, sc in SCENARIOS.items():

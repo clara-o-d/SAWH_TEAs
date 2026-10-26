@@ -121,7 +121,7 @@ CASE_EPS_IR: dict[str, tuple[float | None, float | None]] = {
 # just its IR half -- case3 IS site_sweep._LIMITS, whose "optical material limits" mean a
 # perfect absorber behind perfect glass as well as no IR loss. These were previously
 # hardcoded to (EPS_ABS, TAU_GLASS) in to_system_config_kwargs, which silently made case3
-# the IR-only limit and left the BayesOpt path unable to reproduce run_gpu_sweep.py's four
+# the IR-only limit and left the BayesOpt path unable to reproduce site_sweep's four
 # optical_limits scenarios at all.
 #
 # Duplicated from site_sweep rather than imported: site_sweep pulls in weather (and so

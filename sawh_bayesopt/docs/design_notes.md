@@ -86,9 +86,9 @@ pipeline is validated against.
 ## Why Bayesian optimization, not a grid or an evolutionary search
 
 `solar_lumped` has no optimizer -- only brute-force grid/OAT sweeps
-(`scripts/parameter_sweep.py`, `scripts/grid_param_sweep.py`). One LCOW
+(`analysis/sensitivity/parameter_sweep.py`). One LCOW
 evaluation (all 365 real days, Aitken-converged cyclic state on day 1) costs ~380s on
-a laptop (`solar_lumped/docs/sherlock_param_sweep.tex`), which rules out
+a laptop, which rules out
 anything that needs hundreds-to-thousands of evaluations. Bayesian
 optimization (EGO: GP surrogate + Expected Improvement) is designed
 specifically for this "few, expensive, black-box evaluations" regime, unlike
@@ -113,8 +113,8 @@ There are two models involved, and it's easy to conflate them:
    ...) and it simulates a year of operation and returns one number,
    `combined_lcow` (USD/m^3 of water at the one site being optimized).
    This is the function we're minimizing. It agrees with
-   `solar_lumped`'s CPU `ode_system.py` to <0.03% (`gpu_sweep/FINDINGS.md`)
-   and is ~8x faster even single-threaded on a CPU with no GPU.
+   `solar_lumped`'s CPU `ode_system.py` to <0.03% (measured; `solar_lumped/tests/test_cpu_jax_parity.py`
+   asserts <0.05%) and is ~8x faster even single-threaded on a CPU with no GPU.
 2. **The surrogate** -- a Gaussian Process (GP), built in `surrogate.py`
    with scikit-learn's `GaussianProcessRegressor`. This is the "ML model" in
    the familiar sense: fit on whatever (design, LCOW) pairs have been
@@ -314,7 +314,8 @@ No `condenser_thickness_m` row: it isn't a design variable in this package
   specifically `jax_daily_cycle.py`), not `solar_lumped`'s CPU `ode_system.py`
   directly. It already matched this package's LiCl+hydrogel+quasi_steady
   scope and is ~8x faster even single-threaded on a CPU with no GPU, agreeing
-  with the CPU path to <0.03% (`gpu_sweep/FINDINGS.md` Results 6/7).
+  with the CPU path to <0.03% (measured; `solar_lumped/tests/test_cpu_jax_parity.py`
+  asserts <0.05%).
   `evaluator.py::evaluate_requests` stacks every (site, design) instance
   in a round -- across every uncached design, not just one -- into one
   `jax.vmap`-compiled call instead of dispatching one CPU process per design.

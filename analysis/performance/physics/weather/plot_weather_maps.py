@@ -5,7 +5,7 @@ Reads every response already sitting in the requests-cache sqlite (no network), 
 each site to its annual means, and interpolates onto a 1 deg land-masked grid.
 
   python plot_weather_maps.py
-  python plot_weather_maps.py --cache-dir ../../../sawh_bayesopt/.weather_cache --refresh
+  python plot_weather_maps.py --refresh
 """
 
 from __future__ import annotations
@@ -37,7 +37,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--cache-dir", type=Path, default=_REPO / "solar_lumped" / ".weather_cache")
     ap.add_argument("--step-deg", type=float, default=1.0, help="Interpolation grid resolution")
     ap.add_argument("--refresh", action="store_true", help="Re-read the sqlite cache instead of the summary CSV")
-    ap.add_argument("--output", type=Path, default=Path(__file__).with_name("weather_maps.png"))
+    ap.add_argument("--output", type=Path, default=Path(__file__).parent / "outputs" / "weather_maps.png")
     args = ap.parse_args()
 
     summary_csv = args.cache_dir / "site_means.csv"
@@ -67,6 +67,7 @@ def main(argv: list[str] | None = None) -> int:
         axes.append(ax)
 
     fig.tight_layout()
+    args.output.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(args.output, dpi=200, bbox_inches="tight")
     plt.close(fig)
     print(f"Wrote {args.output}")

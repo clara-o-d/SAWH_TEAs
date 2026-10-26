@@ -2,7 +2,7 @@
 """Figures for analysis/two_stage/README.md: the two-stage pipeline's results so far.
 
 Reads the run directory synced from Sherlock (sawh_bayesopt/outputs/two_stage/main) and
-writes PNGs to analysis/two_stage/figures/. Rerun after syncing newer results:
+writes PNGs to analysis/two_stage/outputs/. Rerun after syncing newer results:
 
     python analysis/two_stage/make_figures.py
     python analysis/two_stage/make_figures.py --run-dir sawh_bayesopt/outputs/two_stage/main --mode daily_hindsight
@@ -63,7 +63,7 @@ def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--run-dir", type=Path, default=_REPO / "sawh_bayesopt" / "outputs" / "two_stage" / "main")
     ap.add_argument("--mode", default="daily_hindsight", help="opt/<mode>/anchors.* to plot")
-    ap.add_argument("--out-dir", type=Path, default=Path(__file__).resolve().parent / "figures")
+    ap.add_argument("--out-dir", type=Path, default=Path(__file__).resolve().parent / "outputs")
     args = ap.parse_args()
     args.out_dir.mkdir(parents=True, exist_ok=True)
     run, out = args.run_dir, args.out_dir

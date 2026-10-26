@@ -17,16 +17,16 @@ import pytest
 from solar_lumped._parameters_xlsx import ECONOMICS, PHYSICS, SALTS
 
 _REPO_ROOT = pathlib.Path(__file__).resolve().parents[2]
-_PACKAGES = ("solar_lumped", "waste-heat", "sawh_bayesopt")
+_PACKAGES = ("solar_lumped", "sawh_bayesopt")
 
 # BOM line items are read by prefix scan, not by row name, so a literal-string search
 # will never find them. Their prefixes are checked separately below.
-_BOM_PREFIXES = ("BOM: ", "Waste-heat BOM: ")
+_BOM_PREFIXES = ("BOM: ",)
 
 
 @pytest.fixture(scope="module")
 def source_text() -> str:
-    """Every git-tracked .py file in the three packages. Tracked-only on purpose:
+    """Every git-tracked .py file in the two packages. Tracked-only on purpose:
     solar_lumped carries a .venv_gpu whose site-packages would both slow this to a crawl
     and match row names by coincidence."""
     try:
@@ -59,7 +59,7 @@ def test_every_workbook_row_is_read_somewhere(sheet_name: str, source_text: str)
     )
 
 
-def test_both_bom_prefixes_are_populated() -> None:
+def test_bom_prefix_is_populated() -> None:
     for prefix in _BOM_PREFIXES:
         assert any(name.startswith(prefix) for name in ECONOMICS), prefix
 

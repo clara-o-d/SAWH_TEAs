@@ -6,7 +6,7 @@ sweeps affordable. "cpu" is solar_lumped's own ODE path -- sequential, no GPU st
 and single-site only -- the reference for studying one location closely.
 
 Both backends implement simple *and* complex fidelity, and agree to <0.03% simple /
-<0.5% complex (FINDINGS.md 6/7, solar_lumped/tests/test_cpu_jax_parity.py)."""
+<0.5% complex (solar_lumped/tests/test_cpu_jax_parity.py)."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ Backend = Literal["jax", "cpu"]
 PENALTY_LCOW_USD_PER_M3: float = 1.0e4
 
 # Fixed-round-count Aitken convergence: <0.03% worst-per-month cost vs. adaptive
-# (FINDINGS.md Result 7), and run_gpu_sweep.py's own default.
+# (gpu_sweep/FINDINGS.md Result 7, removed after 8610d05).
 JAX_AITKEN_MAX_ROUNDS: int = 8
 
 # A year is ~366 sequential day-steps at ~10s each on an A100 (the batch axis is where

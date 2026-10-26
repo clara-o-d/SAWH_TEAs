@@ -1,14 +1,14 @@
 # SAWH_TEAs
 
-## Running tests: use the GPU venv for anything touching `gpu_sweep/`
+## Running tests: use `.venv_gpu` for anything touching `gpu_sweep/` or the two-stage pipeline
 
 There are two interpreters, and the default one silently under-tests the repo.
 
 ```bash
-# CPU-only. Fine for solar_lumped/src, sawh_bayesopt, waste-heat.
+# CPU-only. Fine for solar_lumped/src and the per-site BO's cpu backend.
 python -m pytest solar_lumped/tests sawh_bayesopt/tests -q
 
-# Has jax + diffrax. REQUIRED for anything touching solar_lumped/gpu_sweep/.
+# Has jax + diffrax + equinox. REQUIRED for gpu_sweep/ and sawh_bayesopt's two-stage code.
 solar_lumped/.venv_gpu/bin/python -m pytest solar_lumped/tests sawh_bayesopt/tests -q
 ```
 
@@ -17,9 +17,9 @@ solar_lumped/.venv_gpu/bin/python -m pytest solar_lumped/tests sawh_bayesopt/tes
 those tests **skip silently** and the run still reports all-green. That guard is the
 only thing keeping the CPU and JAX physics in lockstep — `SIMPLE_PARITY_TOL` is 5e-4,
 tight enough to catch sub-0.1% divergence — so a green CPU-only run means nothing about
-the GPU path.
+the JAX path (which the two-stage surrogate runs on, CPU or GPU).
 
-Two extra checks worth running before trusting a sweep:
+One extra check worth running before trusting a run:
 
 ```bash
 # Opt-in real-model integration test (skipped by default even in the GPU venv)

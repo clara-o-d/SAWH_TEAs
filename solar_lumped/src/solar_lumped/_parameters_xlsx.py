@@ -1,8 +1,7 @@
 """Loads the Physics, Economics and Salts parameter tables directly from
 ``docs/parameters.xlsx`` -- the repo-wide single source of truth for system physics
-constants, LCOW/NPV economics inputs, and salt properties. ``waste_heat`` and
-``sawh_bayesopt`` read the same workbook through this module; ``waste_heat``'s rows
-carry a "Waste-heat" prefix where its value differs from the solar device's.
+constants, LCOW/NPV economics inputs, and salt properties. ``sawh_bayesopt``
+reads the same workbook through this module.
 """
 
 from __future__ import annotations

@@ -1,10 +1,11 @@
 # Water-source comparison
 
-Room for comparing SAWH against the alternatives it has to beat: desalination, tap /
-piped supply, trucked water, and bottled water — on cost per m³ first, then energy
-intensity and carbon.
+SAWH against the alternatives it has to beat, on cost per m³.
 
-`benchmark/tariff/` already holds scraped per-country tap-water tariffs, which is the
-natural first comparator.
+- `desal_vs_sawh_map.py`: delivered desalination cost (coastal RO plus conveyance, per
+  `desalination_cost_methods.tex`, Kocher & Menon 2023) against SAWH LCOW on a world map.
+  Writes to `outputs/`. `analysis/two_stage/make_figures.py` reuses its cost model for
+  Fig. 10.
+- `site_elevation_cache.csv`: cached site elevations for the conveyance term.
 
-Nothing here yet.
+`benchmark/tariff/` holds scraped per-country tap-water tariffs, the next comparator.

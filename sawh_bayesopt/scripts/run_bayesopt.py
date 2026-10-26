@@ -83,7 +83,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
              "comparable to stride-1 runs, and it gets its own cache key.",
     )
     p.add_argument("--case", choices=tuple(CASE_EPS_IR), default="case2")
-    p.add_argument("--weather-cache-dir", type=str, default=str(_REPO / ".weather_cache"))
+    p.add_argument("--weather-cache-dir", type=str, default=str(_REPO.parent / "solar_lumped" / ".weather_cache"))
     p.add_argument("--run-id", type=str, default="run")
     p.add_argument("--n-verify-neighbors", type=int, default=5)
     p.add_argument("--verify-perturbation-frac", type=float, default=0.10)

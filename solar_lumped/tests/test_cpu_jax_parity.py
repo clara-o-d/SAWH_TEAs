@@ -33,7 +33,7 @@ from solar_lumped.weather import baseline_profile  # noqa: E402
 # JAX side reads water activity off a tabulated ZSR inversion while the CPU side
 # interpolates the same table at a different point, and the ODE solvers differ
 # (Radau vs Tsit5). 0.5% bounds every configuration measured; the simple path holds
-# to <0.03% (gpu_sweep/FINDINGS.md) and is asserted tighter below.
+# to <0.03% (gpu_sweep/FINDINGS.md, removed after 8610d05) and is asserted tighter below.
 COMPLEX_PARITY_TOL = 0.005
 SIMPLE_PARITY_TOL = 0.0005
 

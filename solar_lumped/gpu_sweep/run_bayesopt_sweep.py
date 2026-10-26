@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""BayesOpt at every map point run_gpu_sweep.py would brute-force sweep: same site
-selection CLI and 12-month Aitken JAX fast path, optimizing hydrogel_thickness /
-vapor_gap over the min/max of the sweep's own combo lists, plus salt loading, tilt and
+"""Per-site BayesOpt over a land grid or listed sites, on the 12-month Aitken JAX fast
+path, optimizing hydrogel_thickness / vapor_gap over the min/max of site_sweep's DEFAULT_*
+ranges, plus salt loading, tilt and
 the A1 seal/open schedule offsets (design_space.VAR_ORDER). This is the per-site
 true-physics reference that sawh_bayesopt.two_stage's surrogate pipeline is validated
 against.
@@ -13,7 +13,7 @@ an evaluation call costs ~the same at any batch width because a year is ~366 *se
 day-steps (measured on an A100: 60.1 min for 1 design, 68.2 min for 8), so cost tracks the
 number of calls, not the number of designs.
 
-Each site writes the same artifacts hp_sweep.py records per combination (history.csv,
+Each site writes the same artifacts a single run_bayesopt.py run does (history.csv,
 convergence.png, gp_state.joblib, de_diagnostics.json, report.json, gp_regression_report
 .json, gp_slices.png). A failing stage lands in an "error"/"verify_error"/
 "diagnostics_error" field rather than killing this task's remaining sites.
@@ -45,7 +45,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from solar_lumped import site_sweep as gps  # noqa: E402
 
-from run_gpu_sweep import _site_list  # noqa: E402
+from solar_lumped.weather import grid_land_points  # noqa: E402
 
 import gp_diagnostics  # noqa: E402
 from sawh_bayesopt.bayesopt import BayesOptConfig, run_bayesopt_sites  # noqa: E402
@@ -69,6 +69,26 @@ from sawh_bayesopt.surrogate import save_state  # noqa: E402
 from sawh_bayesopt.verification import verify_optima  # noqa: E402
 
 
+def _site_list(args: argparse.Namespace) -> list[tuple[float, float]]:
+    if args.lat_lon is not None:
+        return [(lat, lon) for lat, lon in args.lat_lon]
+    points = grid_land_points(args.step)
+    if args.num_sites is not None:
+        indices = range(min(args.num_sites, len(points)))
+    elif args.site_range is not None:
+        start, end = args.site_range
+        indices = range(max(0, start), min(end, len(points)))
+    else:
+        indices = args.site_indices
+    out = []
+    for i in indices:
+        if not (0 <= i < len(points)):
+            print(f"index {i} out of range [0, {len(points) - 1}] for --step {args.step}", file=sys.stderr)
+            continue
+        out.append(points[i])
+    return out
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     site = p.add_mutually_exclusive_group(required=True)
@@ -78,13 +98,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     site.add_argument("--site-indices", type=int, nargs="+", help="Specific indices into the --step land grid.")
     site.add_argument("--site-range", type=int, nargs=2, metavar=("START", "END"),
                        help="Sites [START, END) of the --step land grid -- for splitting the full grid across "
-                       "multiple concurrent GPU jobs (see sbatch_gpu_sweep_array.sh).")
+                       "concurrent jobs.")
     p.add_argument("--step", type=float, default=3.0, help="Grid spacing in degrees, used with --num-sites/--site-indices")
     p.add_argument("--year", type=int, default=2024)
     p.add_argument("--cache-dir", type=str, default=str(_REPO / ".weather_cache"))
 
-    # Fixed (non-optimized) system constants -- same role as run_gpu_sweep.py's
-    # matching flags, just not swept here.
+    # Fixed (non-optimized) system constants.
     p.add_argument("--salt", type=str, default="LiCl")
     # insulation_gap_m is pinned by design_space.SIMPLE_FIXED, and tilt_deg is an optimized
     # dim in both modes. The two flags no longer change anything; they are kept only so
@@ -173,7 +192,7 @@ def _bounds(args: argparse.Namespace) -> DesignBounds:
     search dimension there.
 
     ``--complex`` instead frees all 13 dims at their design_space defaults. The 3-dim box
-    existed to mirror run_gpu_sweep.py's brute-force grid so the two were comparable;
+    existed to mirror the old brute-force GPU grid so the two were comparable;
     complex mode has no brute-force counterpart to match, and holding insulation and salt
     loading at that sweep's constants while optimizing 7 exotic glazing/blend/schedule
     dims optimizes the wrong system. (The fin_area_ratio range below is read only in
