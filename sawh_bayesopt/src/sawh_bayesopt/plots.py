@@ -2,7 +2,9 @@
 
 Methodology figures read what train/validate saved (coverage curves, surrogate grids and
 convergence, BO tuning regret); result figures read the merged global maps. A figure whose
-inputs are not on disk yet is reported and skipped, so this can be run after any stage.
+inputs are not on disk yet is reported and skipped, so this can be run after any stage. Map
+figures need cartopy (the ``maps`` extra), which does not install on Sherlock: there they
+are reported and skipped too, and drawn wherever cartopy is installed.
 Global maps use viridis (purple = low, so purple = cheaper for LCOW), like the repo's
 earlier global figures. Figures go to <run-dir>/figures/.
 """
@@ -47,6 +49,10 @@ def main(argv: list[str] | None = None) -> int:
             print(f"drew {name}")
         except FileNotFoundError as e:
             print(f"skipped {name}: {e.filename} not found")
+        except ModuleNotFoundError as e:
+            if (e.name or "").split(".")[0] != "cartopy":
+                raise
+            print(f"skipped {name}: needs cartopy (pip install -e '.[maps]')")
     return 0
 
 

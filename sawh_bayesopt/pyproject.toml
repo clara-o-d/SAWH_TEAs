@@ -19,8 +19,6 @@ dependencies = [
     "numpy>=1.26",
     "pandas>=2.0",
     "matplotlib>=3.8",
-    # Global maps (plots.py).
-    "cartopy>=0.22",
     "requests-cache>=1.2",
     # Physics runs through solar_lumped.jax_daily_cycle (JAX/diffrax); on a GPU node install
     # "jax[cuda12]" instead before installing this package, or reinstall it afterward.
@@ -31,6 +29,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+# The map figures in plots.py. Optional because pyproj ships no wheel for Sherlock's
+# platform and building it needs the PROJ C library; draw maps where it installs.
+maps = [
+    "cartopy>=0.22",
+]
 dev = [
     "pytest>=8.0",
     "black>=24.0",
