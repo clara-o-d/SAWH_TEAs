@@ -1079,6 +1079,14 @@ def _integrate_desorption(
             t_guess0 = (t_amb, t_amb, t_amb)
     t_guess: tuple[float, float, float] | None = t_guess0
     ambient_condenser = config.condenser_tracks_ambient
+    # A panel re-tilted during the phase (PhaseProfile.tilt_deg) carries its tilt into both
+    # parameter sets per step -- the gap convection reads it from each. Built once: rhs runs
+    # thousands of times over a few dozen steps. Mirrored by jax_daily_cycle's tilt_des.
+    if profile.tilt_deg is None:
+        mass_at, thermal_at = [mass] * n, [thermal] * n
+    else:
+        mass_at = [dataclasses.replace(mass, tilt_deg=float(t)) for t in profile.tilt_deg]
+        thermal_at = [dataclasses.replace(thermal, tilt_deg=float(t)) for t in profile.tilt_deg]
 
     def rhs(t: float, y: np.ndarray) -> np.ndarray:
         nonlocal t_guess
@@ -1094,8 +1102,8 @@ def _integrate_desorption(
             q_solar_w_m2=profile.solar_w_m2[i],
             h_amb=profile.h_amb_w_m2_k[i],
             phase="desorption",
-            mass=mass,
-            thermal=thermal,
+            mass=mass_at[i],
+            thermal=thermal_at[i],
             vapor_gap_m=config.vapor_gap_m,
             condenser_thermal_mass_j_m2_k=tmass,
             fin_area_ratio=config.fin_area_ratio,
@@ -1184,8 +1192,8 @@ def _integrate_desorption(
             q_solar_w_m2=profile.solar_w_m2[i],
             h_amb=profile.h_amb_w_m2_k[i],
             phase="desorption",
-            mass=mass,
-            thermal=thermal,
+            mass=mass_at[i],
+            thermal=thermal_at[i],
             vapor_gap_m=config.vapor_gap_m,
             condenser_thermal_mass_j_m2_k=tmass,
             fin_area_ratio=config.fin_area_ratio,

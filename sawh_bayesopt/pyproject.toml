@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "sawh-bayesopt"
 version = "0.1.0"
-description = "Two-stage (design x daily control) surrogate optimization of solar_lumped SAWH systems, with per-site GP+EI BO as the reference"
+description = "Global two-stage SAWH optimization: hydrogel thickness by constrained Bayesian optimization, daily operation by enumeration, both on a learned physics surrogate"
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -19,14 +19,14 @@ dependencies = [
     "numpy>=1.26",
     "pandas>=2.0",
     "matplotlib>=3.8",
-    # Real evaluations run through solar_lumped/gpu_sweep's JAX/diffrax fast
-    # path (see evaluator.py). Plain "jax" runs on CPU already ~8x faster
-    # than the CPU ode_system.py path; for a real GPU node, install
-    # "jax[cuda12]" instead before installing this package, or reinstall it
-    # afterward.
+    # Global maps (plots.py).
+    "cartopy>=0.22",
+    "requests-cache>=1.2",
+    # Physics runs through solar_lumped.jax_daily_cycle (JAX/diffrax); on a GPU node install
+    # "jax[cuda12]" instead before installing this package, or reinstall it afterward.
     "jax",
     "diffrax",
-    # The two-stage pipeline's daily surrogate (daily_surrogate.py).
+    # The MLP surrogate and the inner-loop predictor (surrogates.py, optimize.py).
     "equinox",
 ]
 

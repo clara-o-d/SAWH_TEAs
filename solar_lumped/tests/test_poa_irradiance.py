@@ -153,3 +153,36 @@ def test_poa_requires_site_coordinates() -> None:
     df = _day_df(lat, lon, off).drop(columns=["latitude", "longitude"])
     with pytest.raises(ValueError, match="latitude"):
         profile_from_day_df(df, poa_tilt_deg=35.0)
+
+
+def test_tilt_schedule_segments_the_sealed_window() -> None:
+    """A tuple tilt splits the desorption window into chronological thirds, transposes each
+    at its own tilt, and carries the per-step tilt; a one-element tuple is the scalar case
+    with the channel set."""
+    df = _day_df(*STANFORD)
+    scalar = profile_from_day_df(df, poa_tilt_deg=30.0)
+    single = profile_from_day_df(df, poa_tilt_deg=(30.0,))
+    assert single.desorption.solar_w_m2 == scalar.desorption.solar_w_m2
+    assert scalar.desorption.tilt_deg is None
+    assert set(single.desorption.tilt_deg) == {30.0}
+
+    split = profile_from_day_df(df, poa_tilt_deg=(0.0, 30.0, 60.0)).desorption
+    tilt = np.asarray(split.tilt_deg)
+    assert list(dict.fromkeys(tilt)) == [0.0, 30.0, 60.0]  # three segments, in order
+    assert np.all(np.diff(tilt) >= 0.0)
+    counts = [int((tilt == t).sum()) for t in (0.0, 30.0, 60.0)]
+    # Equal at the native 15-minute rows; resampling onto the physics step gives the first
+    # and last rows half an interval each, so allow one native row's worth of steps.
+    assert max(counts) - min(counts) <= 1.5 * len(tilt) / int((df.shortwave_radiation >= 5.0).sum())
+    # Each third transposes like a scalar profile at its tilt. Compared away from the
+    # segment edges, where resampling interpolates solar between rows of two segments.
+    per_row = int(np.ceil(len(tilt) / int((df.shortwave_radiation >= 5.0).sum())))
+
+    def interior(mask):
+        return np.convolve(mask, np.ones(2 * per_row + 1), mode="same") == 2 * per_row + 1
+
+    for t in (0.0, 30.0):
+        ref = profile_from_day_df(df, poa_tilt_deg=t).desorption
+        inside = interior(tilt == t)
+        assert inside.sum() > 20
+        np.testing.assert_allclose(np.asarray(split.solar_w_m2)[inside], np.asarray(ref.solar_w_m2)[inside])

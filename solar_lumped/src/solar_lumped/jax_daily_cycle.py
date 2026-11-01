@@ -6,6 +6,7 @@ The Aitken loop stays a thin Python loop -- only ~3-6 rounds, not worth fusing i
 
 from __future__ import annotations
 
+import copy
 import time
 
 import diffrax
@@ -13,7 +14,7 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 
-import jax_physics as jp
+from solar_lumped import jax_physics as jp
 
 _T0 = time.perf_counter()
 
@@ -31,11 +32,13 @@ def _pad_to(arr, n_max):
     return np.concatenate([arr, np.full(n_max - n, arr[-1])])
 
 
-# The first 8 per-instance arrays are weather (they change day to day); the rest describe
-# the system and are constant across a year.
+# The first 9 per-instance arrays are weather (they change day to day); the rest describe
+# the system and are constant across a year. tilt_des is the per-step aperture tilt of the
+# desorption phase (weather.PhaseProfile.tilt_deg), so a panel can be re-tilted within a
+# day; build_day_weather fills it with the system's constant tilt when a profile has none.
 WEATHER_KEYS: tuple[str, ...] = (
     "t_amb_abs", "rh_abs", "h_amb_abs", "n_abs_real",
-    "t_amb_des", "solar_des", "h_amb_des", "n_des_real",
+    "t_amb_des", "solar_des", "h_amb_des", "n_des_real", "tilt_des",
 )
 
 
@@ -71,7 +74,7 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
     def single(
         c_w_initial, h_initial,
         t_amb_abs, rh_abs, h_amb_abs, n_abs_real,
-        t_amb_des, solar_des, h_amb_des, n_des_real,
+        t_amb_des, solar_des, h_amb_des, n_des_real, tilt_des,
         c_s_mol_m3, formula_weight_g_mol, c_w_min_mol_m3, c_w_max_mol_m3, g_conv_m_s, eps_abs, tau_glass,
         eps_abs_ir, eps_glass_ir,
         h0_ref_m, h_floor_m, vapor_gap_m, insulation_gap_m, tilt_deg, fin_area_ratio,
@@ -136,6 +139,10 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
             t_amb_c = t_amb_des[i]
             q_solar = solar_des[i]
             h_amb = h_amb_des[i]
+            # This step's tilt, into both parameter sets: the gap convection reads it from
+            # each (mirrors simulation._integrate_desorption's per-step replace).
+            thermal_i, mass_i = copy.copy(thermal), copy.copy(mass)
+            thermal_i.tilt_deg = mass_i.tilt_deg = tilt_des[i]
             t_cond_c = t_amb_c if condenser_tracks_ambient else jp.clamp_temperature_c(y[2])
             t_gel0 = jnp.maximum(t_amb_c + 5.0, t_cond_c + 5.0)
             guess = [t_gel0, t_gel0 + jnp.clip(q_solar / 40.0, 5.0, 30.0), t_amb_c + 2.0]
@@ -146,7 +153,7 @@ def _make_single(dt, n_abs_max, n_des_max, *, complex_mode=False, condenser_trac
             x0_guess = jnp.array(guess)
             dy, aux = jp.desorption_rhs(
                 y[:3], t_amb_c=t_amb_c, q_solar_w_m2=q_solar,
-                h_amb=h_amb, thermal=thermal, mass=mass,
+                h_amb=h_amb, thermal=thermal_i, mass=mass_i,
                 h0_ref_m=h0_ref_m, h_floor_m=h_floor_m, h_fg_j_per_kg=h_fg_j_per_kg,
                 fin_area_ratio=fin_area_ratio,
                 x0_guess=x0_guess,
@@ -339,8 +346,11 @@ def build_system_arrays(configs, *, complex_mode=False, instant_equilibrium=Fals
     return arrays
 
 
-def build_day_weather(profiles, n_abs_max, n_des_max):
-    """One day's weather for every instance, padded to the year-wide shape."""
+def build_day_weather(profiles, n_abs_max, n_des_max, *, tilt_deg):
+    """One day's weather for every instance, padded to the year-wide shape. ``tilt_deg`` is
+    each instance's constant system tilt (``build_system_arrays(...)["tilt_deg"]``), the
+    desorption tilt of any profile that carries no per-step schedule of its own."""
+    tilt_deg = np.asarray(tilt_deg, dtype=float)
     return (
         jnp.array(np.stack([_pad_to(p.absorption.temperature_c, n_abs_max) for p in profiles])),
         jnp.array(np.stack([_pad_to(p.absorption.relative_humidity, n_abs_max) for p in profiles])),
@@ -350,6 +360,11 @@ def build_day_weather(profiles, n_abs_max, n_des_max):
         jnp.array(np.stack([_pad_to(p.desorption.solar_w_m2, n_des_max) for p in profiles])),
         jnp.array(np.stack([_pad_to(p.desorption.h_amb_w_m2_k, n_des_max) for p in profiles])),
         jnp.array(np.array([len(p.desorption.temperature_c) for p in profiles], dtype=np.int32)),
+        jnp.array(np.stack([
+            _pad_to(p.desorption.tilt_deg if p.desorption.tilt_deg is not None
+                    else np.full(len(p.desorption.temperature_c), tilt_deg[k]), n_des_max)
+            for k, p in enumerate(profiles)
+        ])),
     )
 
 
@@ -371,8 +386,8 @@ def make_day_step_fn(n_system, dt, n_abs_max, n_des_max, *, complex_mode=False,
                      condenser_tracks_ambient=False, h_des_isosteric=False,
                      instant_equilibrium=False):
     """The compiled step with the system arrays as an argument too, so a caller can vary a
-    system parameter day to day (sawh_bayesopt.daily_surrogate re-tilts every day) without
-    recompiling. ``system_vals`` is ``tuple(build_system_arrays(...).values())``."""
+    system parameter day to day without recompiling. ``system_vals`` is
+    ``tuple(build_system_arrays(...).values())``."""
     single = _make_single(
         dt, n_abs_max, n_des_max, complex_mode=complex_mode,
         condenser_tracks_ambient=condenser_tracks_ambient,

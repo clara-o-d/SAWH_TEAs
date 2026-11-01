@@ -11,18 +11,12 @@ default env deliberately does not, so the CPU path needs no GPU stack).
 
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 
 import numpy as np
 import pytest
 
 pytest.importorskip("diffrax")
 pytest.importorskip("jax")
-
-_GPU_SWEEP = Path(__file__).resolve().parents[1] / "gpu_sweep"
-if str(_GPU_SWEEP) not in sys.path:
-    sys.path.insert(0, str(_GPU_SWEEP))
 
 from solar_lumped.complex_model import ComplexOptions  # noqa: E402
 from solar_lumped.physics import WATER_MOLAR_MASS_KG_MOL, initial_loading  # noqa: E402
@@ -39,7 +33,7 @@ SIMPLE_PARITY_TOL = 0.0005
 
 
 def _jax_daily_yield(config: SystemConfig, profile, *, complex_mode: bool) -> float:
-    import jax_daily_cycle as jdc
+    from solar_lumped import jax_daily_cycle as jdc
 
     system = jdc.build_system_arrays(
         [config], complex_mode=complex_mode,
@@ -54,7 +48,7 @@ def _jax_daily_yield(config: SystemConfig, profile, *, complex_mode: bool) -> fl
         h_des_isosteric=(config.h_des_mode == "isosteric" and config.complex is None),
         instant_equilibrium=config.instant_equilibrium,
     )
-    weather = jdc.build_day_weather([profile], n_abs, n_des)
+    weather = jdc.build_day_weather([profile], n_abs, n_des, tilt_deg=system["tilt_deg"])
     water, _eta, _c_w, _h, ok, _capped = step(
         np.array([initial_loading(config)]),
         np.array([config.hydrogel_thickness_m]),
@@ -160,9 +154,41 @@ def test_complex_mode_backends_agree(name: str) -> None:
     assert jax_yield == pytest.approx(cpu, rel=COMPLEX_PARITY_TOL)
 
 
+def _with_desorption_tilt(profile, tilts):
+    """``profile`` with its desorption phase re-tilted through equal thirds at ``tilts``."""
+    import dataclasses
+
+    n = len(profile.desorption.temperature_c)
+    schedule = tuple(float(tilts[min(k * len(tilts) // n, len(tilts) - 1)]) for k in range(n))
+    return dataclasses.replace(profile, desorption=dataclasses.replace(profile.desorption, tilt_deg=schedule))
+
+
+def test_intraday_tilt_schedule_backends_agree() -> None:
+    """A panel re-tilted three times while sealed must desorb identically on both backends,
+    and the schedule must actually move the answer -- otherwise the channel is not wired
+    into the gap convection on one side and parity holds vacuously."""
+    config = SystemConfig.baseline()
+    profile = _with_desorption_tilt(baseline_profile(), (0.0, 30.0, 60.0))
+    cpu, _eta, _a, _d = run_daily_cycle(profile, config)
+    cpu_const, _eta, _a, _d = run_daily_cycle(baseline_profile(), config)
+    assert abs(cpu / cpu_const - 1.0) > 10 * SIMPLE_PARITY_TOL
+    assert _jax_daily_yield(config, profile, complex_mode=False) == pytest.approx(cpu, rel=SIMPLE_PARITY_TOL)
+
+
+def test_constant_tilt_schedule_is_the_system_tilt() -> None:
+    """A schedule held at the config's own tilt is the no-schedule case, bit for bit on the
+    CPU path and within parity on the JAX path."""
+    config = SystemConfig.baseline()
+    held = _with_desorption_tilt(baseline_profile(), (config.tilt_deg,))
+    cpu_none, _eta, _a, _d = run_daily_cycle(baseline_profile(), config)
+    cpu_held, _eta, _a, _d = run_daily_cycle(held, config)
+    assert cpu_held == cpu_none
+    assert _jax_daily_yield(config, held, complex_mode=False) == pytest.approx(cpu_none, rel=SIMPLE_PARITY_TOL)
+
+
 def test_forced_cooling_coefficient_has_one_definition() -> None:
     """B4 must not drift between backends: both read ComplexOptions directly."""
-    import jax_daily_cycle as jdc
+    from solar_lumped import jax_daily_cycle as jdc
     from solar_lumped.physics import H_AMB_W_M2_K
 
     passive = ComplexOptions()
@@ -179,14 +205,14 @@ def test_run_year_batched_keeps_chained_per_day_outputs():
     """Per-day arrays must chain (day d+1 starts where day d ended), reduce to the
     annual means callers used to get directly, and the system-as-argument day step
     must agree with the closure step it backs."""
-    import jax_daily_cycle as jdc
+    from solar_lumped import jax_daily_cycle as jdc
 
     configs = [SystemConfig(), SystemConfig(hydrogel_thickness_m=0.006)]
     profiles = [baseline_profile(), baseline_profile(relative_humidity=0.3), baseline_profile()]
     dt, n_abs, n_des = jdc.year_padding([profiles])
     system = jdc.build_system_arrays(configs)
     step = jdc.make_year_step_fn(system, dt, n_abs, n_des)
-    weathers = [jdc.build_day_weather([p, p], n_abs, n_des) for p in profiles]
+    weathers = [jdc.build_day_weather([p, p], n_abs, n_des, tilt_deg=system["tilt_deg"]) for p in profiles]
     days = jdc.run_year_batched(
         step, weathers,
         c_w_initial=np.array([initial_loading(c) for c in configs]),
@@ -208,7 +234,7 @@ def test_batched_aitken_rejects_wild_extrapolations():
     """A step that barely curves makes Aitken's denominator nearly vanish and fling the
     state to ~1e13 -- what a pilot saw on real designs. The safeguard must keep the result
     within the iteration's own reach."""
-    import jax_daily_cycle as jdc
+    from solar_lumped import jax_daily_cycle as jdc
 
     rng = np.random.default_rng(0)
 
@@ -226,7 +252,7 @@ def test_batched_aitken_checks_each_component_on_its_own_scale():
     extrapolation coefficient comes from c_w, so h gets thrown ~10 flips off; a
     vector-norm check never notices because c_w dominates it. That is how a campaign chunk
     reached h = 310 m on its first day."""
-    import jax_daily_cycle as jdc
+    from solar_lumped import jax_daily_cycle as jdc
 
     def two_scale(c_w, h):
         c_w, h = np.asarray(c_w, float), np.asarray(h, float)

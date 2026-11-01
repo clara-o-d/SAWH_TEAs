@@ -17,10 +17,12 @@
 
 \section*{Scope}
 
-This document states the optimization problem that \code{sawh\_bayesopt} solves and the
-approximations each solver makes. The physics behind the day map $F$ below is in
+This document states the optimization problem that \code{sawh\_bayesopt} solves, how the
+surrogate it relies on is built and selected, how the optimizer is tuned and validated, and
+the approximations each step makes. The physics behind the day map $F$ is in
 \code{solar\_lumped/docs/governing\_eq.tex}. Code references are to
-\code{sawh\_bayesopt/src/sawh\_bayesopt/}, unless noted otherwise.
+\code{sawh\_bayesopt/src/sawh\_bayesopt/} unless noted otherwise. Algorithm numbers refer to
+Kochenderfer and Wheeler, \emph{Algorithms for Optimization}, 2nd edition.
 
 The device is the PAM--LiCl hydrogel solar SAWH panel. It runs one cycle per day: it
 absorbs at night with the panel open, then it is sealed and desorbs while the sun is up. The
@@ -36,57 +38,85 @@ $D = 366$ days).
 \toprule
 \textbf{Symbol} & \textbf{Domain} & \textbf{Meaning} \\
 \midrule
-$c \in \mathcal{C}$ & $\approx$ 14.7k cells & Map cell (site), with its own weather year and elevation \\
+$c \in \mathcal{C}$ & $\approx$ 14.7k cells & Map cell (site), with its own weather year, elevation and K\"oppen--Geiger class \\
 $d \in \{1,\dots,D\}$ & $D = 366$ & Calendar day \\
 $w_{c,d}$ & --- & That day's \SI{15}{\minute} $T$, RH, GHI series (the only channels the physics reads) \\
-$x = (H_0, L_g, SL)$ & $\mathcal{X}$ & \textbf{Design}: hydrogel thickness, vapor gap, salt loading \\
-$u_d = (\delta_s, \delta_o, \theta)$ & $\mathcal{U}$ & \textbf{Control}: seal offset, open offset, tilt \\
+$x = H_0$ & $\mathcal{X}$ & \textbf{Design}: hydrogel thickness \\
+$u_d = (\delta_s, \delta_o, \theta^{(1)}, \theta^{(2)}, \theta^{(3)})$ & $\mathcal{U}$ & \textbf{Control}: seal offset, open offset, and the tilt in each third of the sealed window \\
 $s_d = (c_w, H)$ & $\mathbb{R}_{>0}^2$ & \textbf{State}: gel water concentration and thickness at the start of day $d$ \\
-$\phi_{c,d}$ & $\mathbb{R}^{k+7}$ & Day features (Section~\ref{sec:surrogate}) \\
+$\phi_{c,d}$ & $\mathbb{R}^{27}$ & Day features (Section~\ref{sec:features}) \\
 \bottomrule
 \end{tabular}
 \end{table}
 
-\paragraph{Design box} (\code{design\_space.DesignBounds}, read from the \code{parameters.xlsx} sweep columns):
+\paragraph{Design.} Hydrogel thickness is the only design variable
+(\code{simulate.THICKNESS\_BOUNDS\_M}, from the \code{parameters.xlsx} sweep column):
 \begin{equation}
-\mathcal{X} = [\SI{1}{\milli\metre}, \SI{10}{\milli\metre}] \times
-[\SI{7}{\milli\metre}, \SI{60}{\milli\metre}] \times [1, 8].
+\mathcal{X} = [\SI{1}{\milli\metre}, \SI{10}{\milli\metre}].
 \end{equation}
-The \SI{7}{\milli\metre} gap floor is a transport wall, not a soft preference. The box's
-worst corner is \SI{6.03}{\milli\metre} of dry gel against that \SI{7}{\milli\metre} minimum
-gap, so no design starts with the gel touching the condenser.
-
-\paragraph{Control grid} (\code{daily\_surrogate}):
+The other two former design variables are fixed rather than optimized. The previous
+three-variable campaign put salt loading at its upper bound almost everywhere (median 8.0),
+so it is held there, $SL = 8$. Its vapor-gap optima scattered over the whole
+\SIrange{7}{60}{\milli\metre} range, which means LCOW is nearly flat in the gap. The gap is
+therefore tied to the thickness,
 \begin{equation}
-\mathcal{U} = \mathcal{S} \times \mathcal{O} \times \Theta, \qquad
-\mathcal{S} = \mathcal{O} = \{-4, -3.75, \dots, 4\}\,\si{\hour}, \qquad
-\Theta = \{0, 5, \dots, 60\}\si{\degree},
+L_g = H_0 + \SI{7}{\milli\metre},
 \end{equation}
-which gives $|\mathcal{S}\times\mathcal{O}| = 33^2 = 1089$ schedules per tilt level and
-$|\mathcal{U}| = 14{,}157$. The offsets move the seal and open times relative to GHI sunrise
-and sunset, where GHI crosses the night threshold. Negative $\delta_s$ seals before dawn;
-positive $\delta_o$ stays shut past dusk. Both edges are clamped so that each phase keeps
-at least one sample (\code{solar\_lumped.weather.\_shifted\_desorption\_mask}). The
-\SI{0.25}{\hour} step equals the weather time step, so a finer offset would not change the
-physics. Tilt enters twice: through plane-of-array transposition of GHI, and through
-Hollands $\cos\theta$ in the vapor gap.
+because the gel is cast at $H_0$ and must fit inside the gap: at the \SI{7}{\milli\metre}
+minimum gap, any $H_0$ above about \SI{6}{\milli\metre} would not. A fixed headroom keeps
+the whole thickness box buildable, while the swelling ceiling (Section~\ref{sec:full}) still
+penalizes over-swelling.
 
-\paragraph{Held fixed} (not decision variables): LiCl salt; Case 2 optics and IR
-emissivities; insulation gap \SI{5}{\milli\metre}; condenser fin area ratio $A_r = 7.1$
-(\code{design\_space.SIMPLE\_FIXED}); $h_{amb}$; all financial parameters
-(\code{LCOEconomicParams}). Each cell's real ambient pressure comes from its elevation.
+\paragraph{Control grid} (\code{simulate}, \code{optimize.candidates}). The offsets move
+the seal and open times relative to GHI sunrise and sunset:
+\begin{equation}
+\delta_s, \delta_o \in \mathcal{S} = \{-4, -3.75, \dots, 4\}\,\si{\hour},
+\qquad |\mathcal{S}|^2 = 1089.
+\end{equation}
+Negative $\delta_s$ seals before dawn; positive $\delta_o$ stays shut past dusk. Both edges
+are clamped so that each phase keeps at least one sample
+(\code{solar\_lumped.weather.\_shifted\_desorption\_mask}). The \SI{0.25}{\hour} step equals
+the weather time step, so a finer offset would not change the physics.
+
+The sealed window is split into three chronological segments of equal duration, each held
+at its own tilt. Daily tilt is the case $\theta^{(1)} = \theta^{(2)} = \theta^{(3)}$. The
+tilt grids are
+\begin{equation}
+\Theta_5 = \{0, 5, \dots, 60\}\si{\degree} \;(13 \text{ levels}),
+\qquad
+\Theta_{15} = \{0, 15, \dots, 60\}\si{\degree} \;(5 \text{ levels}).
+\end{equation}
+Daily and seasonal tilt search $\Theta_5$; three-per-day tilt searches $\Theta_{15}$ in each
+segment ($5^3 = 125$ combinations, against $13^3 = 2197$ at \SI{5}{\degree}).
+
+\paragraph{Held fixed} (not decision variables): LiCl salt at $SL = 8$; Case 2 optics and IR
+emissivities; insulation gap \SI{5}{\milli\metre}; condenser fin area ratio $A_r = 7.1$;
+$h_{amb} = \SI{10}{\watt\per\square\metre\per\kelvin}$; an isosteric (temperature- and
+concentration-dependent) heat of desorption; all financial parameters
+(\code{LCOEconomicParams}). Each cell's ambient pressure comes from its elevation. All of
+these are \code{SystemConfig}'s defaults (\code{simulate.system\_config}).
 
 \section{The day map and the year}
 
-One simulated day is a map, from the JAX physics (\code{solar\_lumped/gpu\_sweep/jax\_daily\_cycle}):
+One simulated day is a map, from the JAX physics (\code{solar\_lumped.jax\_daily\_cycle}):
 \begin{equation}
 \bigl(m_d,\; s_{d+1},\; \kappa_d\bigr) = F\bigl(x, u_d, s_d;\, w_{c,d}\bigr),
 \label{eq:daymap}
 \end{equation}
-where $m_d$ is the water collected that day (\si{\kilogram\per\metre\squared}) and
+where $m_d$ is the water collected that day (\si{\kilogram\per\square\metre}) and
 $\kappa_d \in \{0,1\}$ flags a gel that reached the swelling ceiling (the gel--condenser
-clearance) during the day. The gel carries its state from one day to the next, so the year
-is a chained trajectory. Its start is the cyclic steady state of day 1:
+clearance) during the day.
+
+Tilt enters the desorption phase twice at every time step: through the plane-of-array
+transposition of GHI (Erbs decomposition, Liu--Jordan isotropic sky) and through the
+Hollands $\cos\theta$ term in the vapor-gap convection. With a three-segment schedule, both
+read the segment's tilt. The profile carries a per-step tilt
+(\code{weather.PhaseProfile.tilt\_deg}), and the CPU and JAX backends both swap it into the
+gap convection step by step (\code{solar\_lumped/tests/test\_cpu\_jax\_parity.py} holds them
+to $5\times10^{-4}$ under such a schedule).
+
+The gel carries its state from one day to the next, so the year is a chained trajectory.
+Its start is the cyclic steady state of day 1,
 \begin{equation}
 s_1 = s^\ast \quad\text{with}\quad s^\ast = F_s\bigl(x, u_1, s^\ast;\, w_{c,1}\bigr),
 \label{eq:cyclic}
@@ -118,22 +148,18 @@ C_{sorb}(x) = \left[\frac{p_{salt}\,SL + p_{poly}}{1 + SL} + r_w\,p_{w}\right]
 The symbols are: $C_{sys}$, the flat system bill of materials; $f_{TI}$, the
 total-investment factor; $f_{OM}$, the maintenance fraction; $f_{util}$, utilization; $i$
 and $L$, the discount rate and system life; and $L_{gel}$, the gel replacement interval.
-$C_{sorb}$ is the annualized cost of re-casting the gel. It is the dry composite mass
+$C_{sorb}$ is the annualized cost of re-casting the gel: the dry composite mass
 $\rho_{dry}H_0$, priced at the salt/polymer blend plus the DI water in the recipe.
 
-The design enters LCOW in two places, which is what creates the trade-offs:
-\begin{itemize}
-\item \textbf{Through the yield} $\bar m$: thicker and saltier gels hold more water, but
-they desorb more slowly and swell further.
-\item \textbf{Through $C_{sorb}$}: cost is linear in $H_0$, and grows with $SL$ when
-$p_{salt} > p_{poly}$.
-\end{itemize}
-The vapor gap and the controls act only through $\bar m$, since neither is priced.
+Thickness enters LCOW in two places, which is the trade the outer search resolves. A thicker
+gel holds more water but desorbs more slowly and swells further, which acts through
+$\bar m$. And $C_{sorb}$ is linear in $H_0$. The controls act only through $\bar m$.
 
-\textbf{For fixed $x$, LCOW is strictly decreasing in $\bar m$.} This property is what
-justifies the decomposition in Section~\ref{sec:decomp}.
+\textbf{For fixed $x$, LCOW is strictly decreasing in $\bar m$.} This property justifies
+the decomposition in Section~\ref{sec:decomp}.
 
 \section{The full problem}
+\label{sec:full}
 
 For each cell $c$, choose a design and a control policy:
 \begin{equation}
@@ -142,41 +168,43 @@ For each cell $c$, choose a design and a control policy:
 \text{s.t.} \quad & (m_d, s_{d+1}, \kappa_d) = F(x, u_d, s_d; w_{c,d}), \quad d = 1,\dots,D, \\
 & s_1 \text{ cyclic (Eq.~\eqref{eq:cyclic})}, \\
 & u_d = \pi_d(\mathcal{I}_d) \in \mathcal{U}, \\
-& \bar\kappa(x, u_{1:D}) \le \kappa_{\max} = 0.05 .
+& g(x) := \bar\kappa(x, u_{1:D}) - \kappa_{\max} \le 0, \qquad \kappa_{\max} = 0.05 .
 \end{aligned}
 \label{eq:full}
 \end{equation}
 
 \paragraph{Swelling constraint.} A design is infeasible if its gel sits on the swelling
-ceiling on more than 5\% of days (\code{two\_stage.CAPPED\_DAY\_FRACTION\_MAX}). On those
+ceiling on more than 5\% of days (\code{optimize.CAPPED\_DAY\_FRACTION\_MAX}). On those
 days, uptake is set by the clearance rather than by the isotherm; in the real device, this
-is brine reaching the condenser. The constraint depends on the climate, and it binds mainly
-at high RH combined with high $SL$. A share-of-days threshold is a blunt stand-in for a
-leakage model, which the repo does not have. Designs with no finite positive yield are also
-infeasible. Infeasible designs are scored at
-$\mathrm{LCOW}_{pen} = 10^4$~USD/m$^3$.
+is brine reaching the condenser. The constraint depends on the climate. A share-of-days
+threshold is a blunt stand-in for a leakage model, which the repo does not have. A design
+with no finite positive yield is also infeasible, and is assigned $g = 1$. Infeasible
+designs score $\mathrm{LCOW}_{pen} = 10^4$~USD/m$^3$ (\code{optimize.lcow\_and\_constraint}).
 
 \paragraph{Policy class $\Pi$.} The policy class has two independent axes. The \emph{tilt
 mode} says how often $\theta$ may change:
 \begin{align}
-\text{fixed:}    &\quad \theta_d = \theta \quad \forall d \quad (\theta \text{ is effectively a design variable}), \\
-\text{seasonal:} &\quad \theta_d = \theta_{q(d)}, \quad q(d) \in \{1,2,3,4\} \text{ the calendar quarter}, \\
-\text{daily:}    &\quad \theta_d \text{ free}.
+\text{three per day:} &\quad \theta^{(1)}_d, \theta^{(2)}_d, \theta^{(3)}_d \in \Theta_{15} \text{ free}, \\
+\text{daily:}         &\quad \theta^{(1)}_d = \theta^{(2)}_d = \theta^{(3)}_d \in \Theta_5, \\
+\text{seasonal:}      &\quad \theta^{(k)}_d = \theta_{q(d)} \in \Theta_5, \quad q(d) \in \{1,2,3,4\} \text{ the calendar quarter}.
 \end{align}
-These modes nest, so the LCOW gain at each step up is the value of moving the panel more
-often.
+The seal and open offsets are re-chosen every day in all three modes. Seasonal is a subset
+of daily. Three-per-day and daily overlap but do not nest, because they use different tilt
+grids.
 
-The \emph{information regime} sets what the controller knows, $\mathcal{I}_d$, when it picks
-$u_d$. It sees decision features $\tilde\phi_{c,d}$ in place of the true $\phi_{c,d}$:
+The \emph{information regime} sets what the controller knows, $\mathcal{I}_d$, when it
+picks $u_d$. It sees decision features $\tilde\phi_{c,d}$ in place of the true $\phi_{c,d}$
+(\code{optimize.decision\_features}):
 \begin{align}
-\text{hindsight:}      &\quad \tilde\phi_{c,d} = \phi_{c,d} \quad \text{(perfect foresight; an upper bound)}, \\
-\text{persistence:}    &\quad \tilde\phi_{c,d} = \phi_{c,d-1} \quad \text{(day-ahead forecast stand-in; day 1 uses day } D), \\
-\text{climatological:} &\quad \tilde\phi_{c,d} = \tfrac{1}{|M(d)|}\textstyle\sum_{d' \in M(d)} \phi_{c,d'} \quad \text{(mean day of its month)}, \\
-\text{constant:}       &\quad u_d = u \quad \forall d \quad \text{(one annual schedule; fixed tilt only)}.
+\text{hindsight:}   &\quad \tilde\phi_{c,d} = \phi_{c,d} \quad \text{(perfect foresight; an upper bound)}, \\
+\text{persistence:} &\quad \tilde\phi_{c,d} = \phi_{c,d-1} \quad \text{(day-ahead forecast stand-in; day 1 uses day } D), \\
+\text{monthly:}     &\quad \tilde\phi_{c,d} = \tfrac{1}{|M(d)|}\textstyle\sum_{d' \in M(d)} \phi_{c,d'} \quad \text{(mean day of its month)}, \\
+\text{yearly:}      &\quad \tilde\phi_{c,d} = \tfrac{1}{D}\textstyle\sum_{d'=1}^{D} \phi_{c,d'} \quad \text{(mean day of the year)}.
 \end{align}
-A control is always \emph{chosen} on $\tilde\phi$ and \emph{scored} on the real day
-$\phi_{c,d}$. The constant regime is the control space of the per-site reference BO
-(Section~\ref{sec:reference}).
+The controller also knows its own gel state $\hat s_d$. A control is always \emph{chosen} on
+$\tilde\phi$ and \emph{scored} on the real day $\phi_{c,d}$. The monthly and yearly means are
+taken over the same 2024 year, a single-year stand-in for a multi-year climatology. The 3
+tilt modes and 4 regimes give 12 scenarios (\code{optimize.SCENARIOS}).
 
 \section{Decomposition: design per cell, control per day}
 \label{sec:decomp}
@@ -185,7 +213,7 @@ Since LCOW decreases in $\bar m$ for fixed $x$, the inner problem can be posed i
 rather than dollars:
 \begin{equation}
 \min_{x \in \mathcal{X}} \; \mathrm{LCOW}\bigl(x, \bar m^\ast(x)\bigr)
-\;\;\text{s.t.}\;\; \bar\kappa\bigl(x, u^\ast_{1:D}(x)\bigr) \le \kappa_{\max},
+\;\;\text{s.t.}\;\; g\bigl(x, u^\ast_{1:D}(x)\bigr) \le 0,
 \qquad
 u^\ast_{1:D}(x) \in \argmax_{\pi \in \Pi} \bar m(x, u_{1:D}),
 \label{eq:bilevel}
@@ -203,154 +231,295 @@ retraining.
 \section{Surrogate day map}
 \label{sec:surrogate}
 
-The inner level evaluates thousands of controls per day, per design, per cell, which rules
-out calling $F$ directly. It uses a learned day map instead (\code{daily\_surrogate}):
+The inner level evaluates up to $1.4\times10^5$ controls per day, per design, per cell,
+which rules out calling $F$ directly. It uses a learned day map instead
+(\code{surrogates}):
 \begin{equation}
 g_\psi(x, u, s, \phi) \;\to\; \bigl(\hat m,\; \hat s',\; \hat p_\kappa\bigr) \approx
 \bigl(m_d,\; s_{d+1},\; \Pr[\kappa_d = 1]\bigr).
 \end{equation}
-$g_\psi$ is an ensemble of $M = 5$ multilayer perceptrons. They share a trunk and have three
-heads: $\log(1+m)$, the end-of-day state, and a swelling-cap logit. Each member is trained
-on a Poisson(1) bootstrap over \emph{cells}, so the ensemble spread $\hat\sigma_m$ reads as
-``unsure about climates like this one''. The mean across members is used everywhere. The
-predicted state is clipped to the range seen in training, and
-$\hat\kappa_d = \mathbb{1}[\hat p_\kappa > 0.5]$.
+Its 35 inputs are $H_0$ (mm), the 5 controls, the 2 state variables and the 27 day
+features. The targets are $\log(1+m)$, the end-of-day state and the cap flag, and every
+regression target is standardized on the training rows. Chained predictions of the state are
+clipped to the range seen in training, and $\hat\kappa_d = \mathbb{1}[\hat p_\kappa > 0.5]$.
 
-\paragraph{Day features.} $\phi_{c,d}$ joins two blocks:
+\subsection{Day features}
+\label{sec:features}
+
+$\phi_{c,d}$ joins two blocks (\code{climate}):
 \begin{itemize}
-\item the leading $k$ principal components of the day's standardized hourly
+\item the leading $k = 20$ principal components of the day's standardized hourly
 $[T, \mathrm{RH}, \mathrm{GHI}]$ vector ($3\times24 = 72$ numbers; the PCA is fitted over
 cached days worldwide);
-\item seven scalars: RH at the diurnal $T$ minimum, the daytime GHI integral, the
-dewpoint depression at peak sun, the diurnal $T$ amplitude, elevation, $|\text{latitude}|$,
-and noon zenith.
+\item seven scalars: RH at the diurnal $T$ minimum, the daytime GHI integral, the dewpoint
+depression at peak sun, the diurnal $T$ amplitude, elevation, $|\text{latitude}|$, and noon
+zenith.
 \end{itemize}
-The last two scalars carry the sun path, which tilt acts through. The \code{validate-features}
-stage sets $k$: it runs the physics on real years and on years rebuilt from $k$ components,
-and compares the yields.
+The last two scalars carry the sun path, which tilt acts through. The value of $k$ comes from
+the earlier \code{validate-features} study. That study ran the physics on real years and on
+years rebuilt from $k$ components: at $k = 20$, the median annual-yield error was 0.5--3\%
+in every climate regime.
 
-\paragraph{Training data.} Representative cells are chosen by KMeans in climate-descriptor
-space (800 clusters), with quotas topping up the high-altitude, hyper-arid, monsoonal and
-coastal-humid regimes. Each cell gets 16 scrambled-Sobol designs. Each (cell, design) is
-simulated as one chained physics year, with $u_d$ drawn uniformly from $\mathcal{U}$
-\emph{independently every day}. One year therefore yields $\sim$365 rows that cover the
-control space, and the states in those rows are the ones real operation produces. Each
-year's first day is dropped, because its start state comes from the Aitken extrapolation
-rather than from a simulated previous day. About 15\% of cells per regime are held out
-\emph{whole}: a split by row would leak each climate across train and test.
+Each cell is summarized by a 55-dimensional descriptor: the annual mean and standard
+deviation of every day feature, plus the seasonal RH amplitude. Sampling, the train/test
+split and out-of-distribution flags are all computed on standardized descriptors.
+
+\subsection{Training locations}
+
+The training locations are chosen in two stages (\code{climate.select\_cells}). Both use
+greedy space-filling subset selection (algorithm 16.8), with the coverage metric
+\begin{equation}
+d_{\max}(X, S) = \max_{x \in X} \min_{s \in S} \lVert s - x \rVert_2 ,
+\end{equation}
+the largest distance from any cell to its nearest selected cell (eq.~16.4). Starting from one
+random cell, each step adds the cell that most reduces $d_{\max}$
+(\code{climate.greedy\_maximin\_subset}).
+\begin{enumerate}
+\item \textbf{Space-filling stage:} 750 cells, chosen from all $\approx$14.7k.
+\item \textbf{Desert stage:} 250 more cells, by the same greedy restricted to the
+K\"oppen--Geiger hot and cold deserts (BWh, BWk; Rubel et al.\ 2017, 2,417 cells). It is
+seeded with the deserts the first stage already took. The extra cells therefore fill gaps in
+desert climate space rather than piling onto its densest part. Deserts are oversampled because
+they are rare by area but decisive for the headline result.
+\end{enumerate}
+The minimax criterion spends samples evenly across climate space, whatever the density of
+real cells. That differs from density-weighted schemes such as $k$-means.
+
+The 1,000 cells are split 70/15/15 into training, validation and test sets, stratified by
+K\"oppen group. The split is by \emph{cell}, never by row. A cell's rows are thousands of
+correlated days of one climate, and a row split would leak each climate across the split.
+
+\subsection{Training data}
+
+Each cell gets 5 thicknesses by stratified sampling (section 16.4): one uniform draw inside
+each fifth of $\mathcal{X}$ (\code{simulate.stratified\_thicknesses}). Each (cell, thickness)
+pair is simulated as one chained physics year, with $u_d$ drawn \emph{independently every
+day} (\code{simulate.random\_controls}):
+\begin{itemize}
+\item the offsets are drawn uniformly from $\mathcal{S}$;
+\item on half the days, a single tilt from $\Theta_5$ is used for all three segments;
+\item on the other half, three independent tilts are drawn from $\Theta_5$.
+\end{itemize}
+The equal-tilt half is deliberate. The daily and seasonal scenarios only ever query equal
+tilts, a measure-zero set under fully independent draws.
+
+One year therefore yields $\sim$365 rows that cover the control space, and the states in
+those rows are ones real operation produces. Each year's first day is dropped, because its
+start state comes from the Aitken extrapolation rather than from a simulated previous day.
+The campaign totals 5,000 physics years, about $1.8\times10^6$ rows.
+
+\subsection{Model families and selection}
+
+Four families are each fitted over a hyperparameter grid (\code{surrogates.GRIDS}). Every fit
+sees the training cells only.
+
+\begin{table}[h]
+\centering
+\small
+\begin{tabular}{@{}lp{0.62\textwidth}@{}}
+\toprule
+\textbf{Family} & \textbf{Grid, and how it iterates} \\
+\midrule
+Ridge regression & $\alpha \in \{10^{-4}, \dots, 10^4\}$ (9 values); closed form \\
+Random forest & max features $\in \{0.33, 0.66, 1\}$ $\times$ min leaf $\in \{1, 5, 20\}$;
+grown 25 trees at a time to 300, each tree bagging 10\% of the rows \\
+Histogram gradient boosting & learning rate $\in \{0.03, 0.1, 0.3\}$ $\times$ max leaves $\in \{31, 127, 511\}$;
+one model per target, grown 50 iterations at a time to at most 3,000, stopped after 4 steps
+without validation improvement and refitted at the best count \\
+MLP & width $\in \{64, 128, 256, 512\}$ $\times$ depth $\in \{2, 3, 4\}$ $\times$
+learning rate $\in \{10^{-3}, 3\times10^{-3}\}$; SiLU activations; Adam with cosine decay;
+20,000 steps of batch 4,096; validation-best checkpoint, checked every 500 steps \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+The MLP fits the cap flag with a logistic loss, weighted equally with the three regression
+MSEs. The other families regress the flag as a score in $[0,1]$. Each configuration's
+convergence is recorded: MLP training and validation loss per step, forest size, and boosting
+rounds.
+
+Within each family, the configuration with the lowest daily water RMSE on the validation cells
+is selected. The test cells are scored once, for that configuration only. Two kinds of test
+error are reported:
+\begin{itemize}
+\item \textbf{daily error:} one-day water given the true start state;
+\item \textbf{annual error:} the surrogate chained through each test year under the physics'
+own controls, from the physics' first kept state. This is the number that says whether state
+error compounds, and the one LCOW depends on.
+\end{itemize}
+Both are broken out by K\"oppen group (\code{surrogates.evaluate}).
+
+The inner loop needs on the order of $10^{12}$ predictions per scenario, so the deployed model
+must run on the GPU. The deployed surrogate is therefore the better of ridge and the MLP on the
+validation criterion. A fitted ridge model is exactly a depth-0 MLP, so both families share
+one compiled JAX predictor (\code{surrogates.deployable}). The tree families are reported for
+comparison but cannot be deployed.
 
 \section{Solution method}
 
 \subsection{Inner level: enumeration on the surrogate}
 
 There is no gradient step and no local-minimum risk, and the result is a discrete schedule,
-which is what a real controller runs (\code{two\_stage}). Let $\mathcal{U}_\theta$ denote
-the 1089 schedules at tilt $\theta$. The \textbf{greedy daily walk} is
+which is what a real controller runs (\code{optimize.make\_year\_fn}). Let $\mathcal{U}_d$
+denote the day's candidate set. The \textbf{greedy daily walk} is
 \begin{align}
 u_d &= \argmax_{u \in \mathcal{U}_d} \hat m\bigl(x, u, \hat s_d, \tilde\phi_{c,d}\bigr), \\
 (\hat m_d, \hat s_{d+1}) &= g_\psi\bigl(x, u_d, \hat s_d, \phi_{c,d}\bigr),
 \end{align}
-where the candidate set $\mathcal{U}_d$ depends on the mode:
+where the candidate set depends on the tilt mode:
 \begin{itemize}
-\item \textbf{daily tilt:} $\mathcal{U}_d = \mathcal{U}$;
-\item \textbf{fixed tilt:} one greedy walk per $\theta \in \Theta$ over $\mathcal{U}_\theta$,
-keeping the $\theta$ with the largest $\sum_d \hat m_d$;
-\item \textbf{seasonal tilt:} the fixed-tilt procedure applied quarter by quarter, with
-each quarter's end state chained into the next.
+\item \textbf{three per day:} $\mathcal{S}^2 \times \Theta_{15}^3$, 136,125 candidates;
+\item \textbf{daily:} $\mathcal{S}^2 \times \Theta_5$ with equal tilts, 14,157 candidates;
+\item \textbf{seasonal:} $\mathcal{S}^2$ at the quarter's tilt, 1,089 candidates. At the
+start of each quarter, the walk is planned through the whole quarter under each of the 13
+levels, using the decision features only. The level with the largest planned water is kept,
+and the quarter is then lived under it, with its end state chained into the next quarter.
+The tilt is thus chosen with the same information as the daily controls, never with the
+real weather.
 \end{itemize}
-The \textbf{constant} regime is solved exactly. Every $u \in \mathcal{U}$ is chained through
-the whole year on $g_\psi$, and the one with the largest $\sum_d \hat m_d$ is kept. The
-cyclic start (Eq.~\eqref{eq:cyclic}) is approximated by 8 rounds of the day-1 greedy step
+The cyclic start (Eq.~\eqref{eq:cyclic}) is approximated by 8 rounds of the day-1 greedy step
 from the physics' initial loading.
 
-The greedy walk is \textbf{myopic}: it ignores what today's choice does to tomorrow's
-starting state. Dynamic programming over a discretized state would be the exact version of
-Eq.~\eqref{eq:bilevel}. The \code{validate-bo} gap measures what the myopia costs.
+The greedy walk is \textbf{myopic}: it ignores what today's choice does to tomorrow's starting
+state. The exact version of Eq.~\eqref{eq:bilevel} is the dynamic program
+\begin{equation}
+V_d(s) = \max_{u \in \mathcal{U}_d} \Bigl[\hat m(x, u, s, \tilde\phi_{c,d})
++ V_{d+1}\bigl(\hat s'(x, u, s, \tilde\phi_{c,d})\bigr)\Bigr],
+\end{equation}
+solved backwards over a discretized state. Greedy is exact when overnight absorption
+saturates, because the start state then does not depend on yesterday's choice. Its cost
+elsewhere is not measured (Section~\ref{sec:validation}).
 
 \subsection{Outer level: constrained Bayesian optimization over $\mathcal{X}$}
 
-For each cell, the outer level minimizes $J_c(x) = \mathrm{LCOW}(x, \hat{\bar m}^\ast(x))$,
-or $\mathrm{LCOW}_{pen}$ if $x$ is infeasible. The setup:
-\begin{itemize}
-\item \textbf{Models:} a GP regressor with a Mat\'ern-5/2 plus white-noise kernel, fitted on
-the unit cube to feasible points only, and a GP classifier for $P(\text{feasible}\mid x)$.
-\item \textbf{Acquisition:} constrained expected improvement, maximized by differential
-evolution:
+For each cell, the outer level minimizes
+$J_c(x) = \mathrm{LCOW}(x, \hat{\bar m}^\ast(x))$ subject to $g(x) \le 0$, over the
+finite candidate set
 \begin{equation}
-\alpha(x) = \mathrm{EI}(x)\cdot P(\text{feasible}\mid x),
-\qquad
-\mathrm{EI}(x) = (y^\ast - \mu - \xi)\,\Phi(z) + \sigma\,\varphi(z),
-\quad z = \frac{y^\ast - \mu - \xi}{\sigma}.
+\mathcal{X}_h = \{1.00, 1.05, \dots, 10.00\}\,\si{\milli\metre} \quad (181 \text{ thicknesses}),
 \end{equation}
-\item \textbf{Batches:} 4 proposals per round, via Kriging-Believer.
-\item \textbf{Budget:} 8 Sobol initial points and 24 evaluations in total for the training
-(``anchor'') cells. Every other cell is warm-started from the optima of its 3 nearest
-solved anchors in standardized climate-descriptor space, with a budget of 12.
-\end{itemize}
-Cells advance in lockstep, so each round costs one vmapped surrogate sweep across all cells.
-
-\subsection{Active refinement}
-
-The surrogate needs to be accurate near each cell's optimum, not uniformly over the box. So
-after a first solve, the pipeline runs further physics on selected cells:
+which is fabrication resolution. BO, its tuning ground truth and the global run all evaluate
+this same set (\code{optimize.run\_bo}, \code{optimize.propose}). The setup:
 \begin{itemize}
-\item cells are drawn with probability $\propto \hat\sigma_m/\hat m$ at their optimum;
-\item each drawn cell's optimum and 4 perturbations (within $\pm10\%$ of each span) are run
-under the surrogate's own schedule, with jitter;
-\item $g_\psi$ is then refit. This takes one or two rounds.
+\item \textbf{Objective model:} a GP regressor fitted on the unit interval to the feasible
+points only, with a normalized target. The kernel is chosen by tuning (Section~\ref{sec:tuning}).
+\item \textbf{Constraint model} (Gardner et al.\ 2014): a second GP, Mat\'ern-5/2 plus white
+noise, fitted to every evaluated constraint value $g$. Its predictive distribution gives
+\begin{equation}
+P(\text{feasible} \mid x) = \Phi\!\left(-\mu_g(x)/\sigma_g(x)\right).
+\end{equation}
+Modelling the continuous $g$ is used rather than classifying the binary label because a
+Laplace GP classifier's probabilities stay soft (about 0.2--0.3) even inside a region ringed
+by infeasible samples. EI's large extrapolated variance there then outweighs them; this was
+observed on a synthetic test.
+\item \textbf{Acquisition} (chapter 19), maximized exactly over $\mathcal{X}_h$, with
+$z = (y^\ast - \mu - \xi)/\sigma$ and $y^\ast$ the best feasible value so far:
+\begin{align}
+\text{EI:} &\quad \bigl[(y^\ast - \mu - \xi)\,\Phi(z) + \sigma\,\varphi(z)\bigr]\, P(\text{feasible}), \\
+\text{PI:} &\quad \Phi(z)\, P(\text{feasible}), \\
+\text{error-based:} &\quad \sigma\, P(\text{feasible}), \\
+\text{LCB:} &\quad -(\mu - \kappa\sigma) \text{ over } \{P(\text{feasible}) \ge 0.5\}, \\
+\text{prediction-based:} &\quad -\mu \text{ over } \{P(\text{feasible}) \ge 0.5\}.
+\end{align}
+Signed scores cannot be weighted by a probability, so LCB and prediction-based search are
+restricted to the region the constraint model calls feasible.
+\item \textbf{Initial design:} a Latin hypercube (section 16.3) snapped to the candidates.
+Until two feasible points exist there is nothing to regress, so the next point is the one
+most likely to be feasible (Gelbart et al.\ 2014), with ties broken by distance from
+everything tried.
+\item \textbf{Batches:} where a round proposes several points, Kriging-Believer (Ginsbourger
+et al.\ 2010).
 \end{itemize}
+Cells advance in lockstep, so each round costs one batched surrogate sweep across all cells.
 
-\section{Reference problem: per-site BO on true physics}
-\label{sec:reference}
+\subsection{Tuning the optimizer}
+\label{sec:tuning}
 
-The validation reference (\code{bayesopt}, \code{evaluator}) solves Eq.~\eqref{eq:full}
-directly, with no surrogate, under the constant regime with fixed tilt. Tilt and the
-schedule move into the design vector:
+The kernel, the acquisition and the GP settings are chosen against known optima (the
+\code{tune-grid} and \code{tune-bo} stages of \code{train}). On 60 validation cells,
+stratified by K\"oppen group, the surrogate-optimal year is evaluated at every
+$x \in \mathcal{X}_h$ under daily tilt and hindsight. The feasible minimum of that grid is
+each cell's true optimum $J_c^\ast$ on the surrogate. Each BO configuration is then replayed
+against those values and scored by the mean relative simple regret
 \begin{equation}
-\min_{x' \in \mathcal{X}'} \mathrm{LCOW}\bigl(x', \bar m_F(x')\bigr),
-\qquad
-x' = (H_0, L_g, SL, \theta, \delta_s, \delta_o),
+r_c(n) = \frac{\min_{k \le n,\; g_k \le 0} J_c(x_k)}{J_c^\ast} - 1 .
 \end{equation}
-with $\theta \in [0, 60]\si{\degree}$ continuous, offsets snapped to the \SI{0.25}{\hour}
-grid, and $\bar m_F$ the true-physics annual mean. It uses the same GP, constrained EI and
-Kriging-Believer code: 24 Latin-hypercube initial points, a budget of 50, batches of 3, and
-it stops after 3 rounds with less than 0.5\% improvement.
+Two sweeps are run:
+\begin{enumerate}
+\item every kernel (RBF; Mat\'ern-1/2, -3/2 and -5/2; rational quadratic; Mat\'ern-5/2 plus
+linear) $\times$ every acquisition (EI with $\xi \in \{0, 0.01, 0.1\}$; PI with
+$\xi \in \{0.01, 0.1\}$; LCB with $\kappa \in \{1, 2, 3\}$; prediction-based; error-based),
+at 3 initial points and a budget of 15;
+\item for the winner, initial points $\in \{2,3,4,6\}$ $\times$ GP restarts
+$\in \{0,2,8\}$ $\times$ white-noise term on or off.
+\end{enumerate}
+Configurations are ranked by mean regret at the end of the budget, with ties broken by the
+area under the regret curve. The run budget is the first evaluation count at which the
+chosen configuration's mean regret falls to 0.5\%, capped at 15. Validation cells are used so
+that tuning never touches the test cells the validation in Section~\ref{sec:validation}
+scores.
 
-The \code{validate-bo} stage scores the two-stage design and schedule with true physics on
-held-out cells. The headline number is the gap
+\section{Validation}
+\label{sec:validation}
+
+Validation (\code{validate}) compares BO with and without the surrogate, on the same problem,
+at 40 test cells stratified by K\"oppen group. Test cells are untouched by training, early
+stopping, model selection and BO tuning.
+
+\paragraph{The shared problem.} True physics cannot afford daily control: that would be
+14k candidates $\times$ 366 days per evaluation. The shared problem is therefore the one it
+can afford, thickness plus one annual schedule:
 \begin{equation}
-\Delta_c = \mathrm{LCOW}_F\bigl(x_c^{2s}, u^{2s}_{c,1:D}\bigr) - \mathrm{LCOW}_F\bigl(x_c'^{\,BO}\bigr)
-\quad [\text{USD/m}^3].
+\begin{gathered}
+\min_{x' \in \mathcal{X}'} \mathrm{LCOW}\bigl(x', \bar m(x')\bigr) \;\;\text{s.t.}\;\; g(x') \le 0, \\
+x' = (H_0, \delta_s, \delta_o, \theta), \qquad u_d = (\delta_s, \delta_o, \theta, \theta, \theta)\;\; \forall d .
+\end{gathered}
 \end{equation}
-Under (fixed, constant), $\Delta_c$ is a like-for-like optimality gap. Under the daily
-modes, it also includes the value of daily control.
+Its candidate set is a 16,384-point scrambled Sobol cloud. In it, $H_0$ is snapped to the
+\SI{0.05}{\milli\metre} grid, the offsets to the \SI{0.25}{\hour} grid and $\theta$ to
+\SI{1}{\degree}.
 
-\paragraph{Differences between the two problems that $\Delta_c$ also absorbs:}
+\paragraph{The two searches.} Both run the tuned kernel and acquisition with automatic
+relevance determination over the 4 dimensions, 8 initial points, batches of 8 and a budget of
+40.
 \begin{itemize}
-\item \textbf{Tilt:} continuous in the reference, but on a \SI{5}{\degree} grid in the
-pipeline.
-\item \textbf{Swelling constraint:} the reference only \emph{records} the swelling-cap
-flag, and its feasibility is a finite positive yield and LCOW. The
-$\bar\kappa \le 0.05$ constraint is enforced only by the pipeline. So the reference
-optimizes over a feasible set that is at least as large, which biases $\Delta_c$ upward
-for cells where the constraint binds.
+\item \textbf{Surrogate BO:} evaluates $\bar m$ by chaining $g_\psi$ through the year under the
+schedule; its optimum is then re-scored with physics.
+\item \textbf{Physics BO:} evaluates $\bar m$ with true physics directly.
 \end{itemize}
+The headline number per cell is
+\begin{equation}
+\Delta_c = \mathrm{LCOW}_F\bigl(x_c'^{\,\text{surr}}\bigr) - \mathrm{LCOW}_F\bigl(x_c'^{\,\text{phys}}\bigr)
+\quad [\text{USD/m}^3],
+\end{equation}
+which is negative when the surrogate-assisted search found the better optimum.
+
+The report also gives the surrogate's prediction error at its own optimum. A positive bias
+there is the optimizer's winner's curse: it picks what the surrogate overrates. Finally,
+every scenario's design and daily schedule from the global run is re-scored with physics at
+the same cells. Compared with the physics-BO annual optimum, this shows the value of daily
+control under true physics, net of the greedy walk's myopia; the two cannot be separated.
 
 \section*{Summary of approximations}
 
 \begin{table}[h]
 \centering
 \small
-\begin{tabular}{@{}p{0.30\textwidth}p{0.62\textwidth}@{}}
+\begin{tabular}{@{}p{0.34\textwidth}p{0.58\textwidth}@{}}
 \toprule
 \textbf{Approximation} & \textbf{Where it is measured or bounded} \\
 \midrule
-$F \approx g_\psi$ & \code{holdout\_report.json}: daily and chained-annual error on held-out cells, by regime; design ranking and response signs \\
-Weather $\approx$ $k$ PCs + 7 scalars & \code{featval\_summary.csv}: physics on real vs.\ reconstructed years \\
-Inner level greedy, not DP & \code{validate-bo} gap under daily modes \\
-Inner level ignores the swelling constraint & Not measured; restriction of Eq.~\eqref{eq:full} \\
-Cyclic start by 8 surrogate rounds & Not separately measured \\
+$SL$ fixed at its maximum; $L_g = H_0 + \SI{7}{\milli\metre}$ & Not re-measured; justified by the previous three-variable campaign's optima \\
+$F \approx g_\psi$ & \code{surrogate\_comparison.json}: daily and chained-annual test error by K\"oppen group; \code{validate} re-scores optima with physics \\
+Weather $\approx$ 20 PCs + 7 scalars & Earlier \code{validate-features} study (physics on real vs.\ reconstructed years) \\
+Training climates $\approx$ 1,000 greedy space-filling cells & \code{coverage.npz}: $d_{\max}$ after each pick \\
 Climates outside training & Flagged: Mahalanobis distance above the training cells' 99th percentile (\code{ood} column in the maps) \\
+Inner level greedy, not DP & Not separately measured; folded into the physics re-scoring of each scenario \\
+Inner level ignores the swelling constraint & Not measured; restriction of Eq.~\eqref{eq:full} \\
+Three-per-day tilt on a \SI{15}{\degree} grid & Not measured; the daily mode uses \SI{5}{\degree} \\
+Monthly and yearly means from the same year & Not measured; no multi-year weather in the cache \\
+Cyclic start by 8 surrogate rounds & Not separately measured \\
+Outer optimum on a \SI{0.05}{\milli\metre} grid, BO budget from tuning & \code{bo\_tuning.npz}: regret against grid-search truth on validation cells \\
 \bottomrule
 \end{tabular}
 \end{table}

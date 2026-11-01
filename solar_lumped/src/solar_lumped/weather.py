@@ -508,6 +508,11 @@ class PhaseProfile:
     # Decouples condenser cooling from the absorber/glass h_amb (Wilson's Atacama system
     # fan-forces ~0.5 m/s over the condenser, Fig. S2). None → use h_amb.
     h_amb_cond_w_m2_k: tuple[float, ...] | None = None
+    # Per-step aperture tilt, for a panel re-tilted during the phase (profile_from_day_df's
+    # tuple poa_tilt_deg). Both backends read it where they read SystemConfig.tilt_deg --
+    # the gap's Hollands convection -- and the solar series is already transposed at it.
+    # None → the system's constant tilt_deg.
+    tilt_deg: tuple[float, ...] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -523,7 +528,7 @@ FIXED_H_AMB_W_M2_K = BASELINE_H_AMB_W_M2_K
 def profile_from_day_df(
     day_df: pd.DataFrame,
     *,
-    poa_tilt_deg: float | None = POA_DEFAULT_TILT_DEG,
+    poa_tilt_deg: float | tuple[float, ...] | None = POA_DEFAULT_TILT_DEG,
     poa_surface_azimuth_deg: float | None = None,
     poa_albedo: float = POA_DEFAULT_ALBEDO,
     seal_offset_h: float = 0.0,
@@ -549,10 +554,28 @@ def profile_from_day_df(
     Complex mode (B4) also sets ``condenser_air_speed_m_s``, which fills the profile's
     ``h_amb_cond_w_m2_k`` channel so the condenser is cooled by forced air independent of
     ambient wind, rather than sharing the absorber's h_amb.
+
+    A tuple ``poa_tilt_deg`` re-tilts the panel during the sealed (desorption) window:
+    the window is split into ``len(poa_tilt_deg)`` chronological segments of equal sample
+    count, each held at its own tilt, and the desorption profile carries that per-step tilt
+    (``PhaseProfile.tilt_deg``) for the gap convection as well as transposing at it. The
+    night is transposed at the first segment's tilt, which is moot: POA is zero below the
+    horizon. A one-element tuple is a constant tilt that still sets the channel.
     """
     deltas = day_df.index.to_series().diff().dropna().dt.total_seconds()
     native_dt_s = float(deltas.median()) if len(deltas) else PHASE_DT_S
     solar = day_df.get("shortwave_radiation", pd.Series(0.0, index=day_df.index)).astype(float)
+    if seal_offset_h or open_offset_h:
+        is_day = _shifted_desorption_mask(day_df, solar, seal_offset_h, open_offset_h)
+    else:
+        is_day = solar >= SOLAR_NIGHT_THRESHOLD_W_M2
+    if isinstance(poa_tilt_deg, tuple):
+        # Segment by chronological rank within the sealed window, which is already in
+        # calendar order (it never wraps midnight).
+        rank = np.cumsum(np.asarray(is_day)) - 1
+        seg = np.clip(rank * len(poa_tilt_deg) // max(int(np.sum(is_day)), 1), 0, len(poa_tilt_deg) - 1)
+        row_tilt = np.where(np.asarray(is_day), np.asarray(poa_tilt_deg, float)[seg], float(poa_tilt_deg[0]))
+        day_df = day_df.assign(tilt_deg=row_tilt)
     if poa_tilt_deg is not None:
         if not _POA_COLUMNS.issubset(day_df.columns):
             raise ValueError(
@@ -566,15 +589,11 @@ def profile_from_day_df(
                 latitude_deg=float(day_df["latitude"].iloc[0]),
                 longitude_deg=float(day_df["longitude"].iloc[0]),
                 utc_offset_h=float(day_df["utc_offset_s"].iloc[0]) / 3600.0,
-                tilt_deg=float(poa_tilt_deg),
+                tilt_deg=day_df["tilt_deg"].to_numpy() if isinstance(poa_tilt_deg, tuple) else float(poa_tilt_deg),
                 surface_azimuth_deg=poa_surface_azimuth_deg,
                 albedo=poa_albedo,
             )
         )
-    if seal_offset_h or open_offset_h:
-        is_day = _shifted_desorption_mask(day_df, solar, seal_offset_h, open_offset_h)
-    else:
-        is_day = solar >= SOLAR_NIGHT_THRESHOLD_W_M2
     night = day_df[~is_day]
     day = day_df[is_day]
     if len(night) < 4:
@@ -671,6 +690,12 @@ def _resample_phase(
         solar_src = df.get(solar_col, pd.Series(0.0, index=df.index))
         solar = np.interp(x_tgt, x_src, solar_src.astype(float).values)
     solar = np.maximum(0.0, solar)
+    # Tilt is a held setting, not a signal: nearest row, never interpolated across a
+    # segment boundary into an angle the panel never sat at.
+    tilt = None
+    if "tilt_deg" in df:
+        nearest = np.round(np.linspace(0, len(df) - 1, n)).astype(int)
+        tilt = tuple(float(x) for x in df["tilt_deg"].astype(float).values[nearest])
     h_amb = (FIXED_H_AMB_W_M2_K,) * n  # ambient convection coefficient -- fixed, not wind-derived
     # B4: forced condenser air decouples condenser cooling from the absorber's h_amb.
     # Wilson's own fans hold ~0.5 m/s regardless of ambient wind (Note S2), so this is a
@@ -685,6 +710,7 @@ def _resample_phase(
         solar_w_m2=tuple(float(x) for x in solar),
         h_amb_w_m2_k=h_amb,
         h_amb_cond_w_m2_k=h_amb_cond,
+        tilt_deg=tilt,
     )
 
 

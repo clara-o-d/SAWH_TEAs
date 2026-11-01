@@ -16,8 +16,6 @@ from __future__ import annotations
 
 import importlib.util
 import math
-import sys
-from pathlib import Path
 
 import pytest
 
@@ -178,10 +176,6 @@ def test_air_property_clamp_bounds_wild_solver_iterates() -> None:
 
 # importorskip at module scope would skip this whole file, the source-checked tests above
 # included, in the default env -- jax lives only in solar_lumped/.venv_gpu.
-_GPU_SWEEP = Path(__file__).resolve().parents[1] / "gpu_sweep"
-if str(_GPU_SWEEP) not in sys.path:
-    sys.path.insert(0, str(_GPU_SWEEP))
-
 requires_jax = pytest.mark.skipif(
     importlib.util.find_spec("jax") is None, reason="jax not installed (see .venv_gpu)"
 )
@@ -191,7 +185,7 @@ requires_jax = pytest.mark.skipif(
 @pytest.mark.parametrize("t_film_c", [5.0, 25.0, 45.0, 65.0, 85.0, 110.0])
 @pytest.mark.parametrize("t_cond_c", [10.0, 30.0, 50.0])
 def test_backends_agree_on_air_properties(t_film_c: float, t_cond_c: float) -> None:
-    import jax_physics as jp
+    from solar_lumped import jax_physics as jp
 
     x_v_cpu = vapor_gap_water_mole_fraction(t_cond_c)
     x_v_jax = float(jp.vapor_gap_water_mole_fraction(t_cond_c))
@@ -216,7 +210,7 @@ def test_backends_agree_on_air_properties(t_film_c: float, t_cond_c: float) -> N
 def test_backends_agree_on_gap_conductance_and_mass_transfer() -> None:
     """The three consumers, at a representative desorption point and at an inverted
     iterate (condenser hotter), which takes the other Nu branch."""
-    import jax_physics as jp
+    from solar_lumped import jax_physics as jp
 
     from solar_lumped.physics import (
         mass_transfer_g_from_h_conv_m_s,
@@ -332,7 +326,7 @@ def test_config_elevation_reaches_both_params_objects() -> None:
 def test_backends_agree_at_elevation(elevation_m: float) -> None:
     """Pressure has to reach the same places in both backends. A p_atm_pa that reached the
     JAX vapor gap but not its glazing gaps, or vice versa, would show up here."""
-    import jax_physics as jp
+    from solar_lumped import jax_physics as jp
 
     p_atm = pressure_from_elevation_m(elevation_m)
     assert jp.P_ATM_SEA_LEVEL_PA == P_ATM_SEA_LEVEL_PA  # same workbook row on both sides

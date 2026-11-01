@@ -1,114 +1,42 @@
 # sawh-bayesopt
 
-Global design and operation optimization of the solar-driven PAM-LiCl hydrogel
-SAWH system (Wilson et al. 2025 / Díaz-Marín et al. 2024), built on
-`solar_lumped`'s physics and its JAX fast path (`solar_lumped/gpu_sweep`).
+Global design and operation of the solar PAM–LiCl hydrogel SAWH panel, on `solar_lumped`'s
+physics (its JAX path, `solar_lumped.jax_daily_cycle`).
 
-There are two optimizers:
+- **Design**, once per location: the hydrogel thickness H₀ (1–10 mm). The salt loading is
+  held at the top of its range. The vapor gap is H₀ + 7 mm, so the cast gel always fits.
+- **Operation**, every day: the seal and open offsets (15-minute grid), plus the tilt in
+  each third of the sealed window.
+- A **surrogate** of the daily physics map, (H₀, control, gel state, day weather) →
+  (water, next state, P(swelling cap)), connects the two. The outer loop is a constrained
+  Bayesian optimization over H₀. The inner loop enumerates every daily control on the
+  surrogate.
 
-1. **Two-stage surrogate pipeline** (`climate.py`, `daily_surrogate.py`,
-   `two_stage.py`, driven by `scripts/run_two_stage.py`). This is the main
-   pipeline and produces the maps.
-   - *Design* (hydrogel thickness, vapor gap, salt loading) is chosen once per
-     cell.
-   - *Control* (seal/open times on a 15-minute grid, plus tilt when it varies)
-     is re-chosen every day by exact enumeration.
-   - A daily surrogate `g(design, control, state, day features) -> water, end
-     state, P(swelling cap)` connects the two. It is trained on a fixed physics
-     campaign (~5k–50k instance-years) over a few hundred to ~2,000
-     representative climate cells.
-   - Tilt is handled at three levels (fixed, seasonal, daily), and schedules
-     under four information regimes (hindsight, persistence/day-ahead,
-     climatological, constant).
-2. **Per-site true-physics BO** (`evaluator.py`, `bayesopt.py`, and
-   `solar_lumped/gpu_sweep/run_bayesopt_sweep.py` across many sites). This is
-   the validation reference.
-   - GP + constrained EI directly on full-year JAX physics LCOW, one site at a
-     time.
-   - It covers the same design box plus tilt and one annual schedule, so its
-     optimum is the like-for-like benchmark for the pipeline's
-     (fixed tilt, constant schedule) mode.
+## Modules (`python -m sawh_bayesopt.<module> <stage>`)
 
-`docs/design_notes.md` explains both. It covers why the pipeline is split in
-two, why held-out validation is by whole cell, the enumeration/BO split, and
-what each validation measures.
+| Module | What it does |
+|---|---|
+| `train` | Featurize climates. Pick 750 space-filling locations (Kochenderfer & Wheeler alg. 16.8) plus 250 extra Köppen BWh/BWk desert cells, with a 70/15/15 split by cell. Run 5 thicknesses × 1 physics year each under random daily controls. Fit ridge, random forest, gradient boosting and MLP grids, then compare them on the validation cells, score them on the test cells and deploy one. Tune the BO kernel, acquisition and GP settings against grid-search truth. |
+| `run_global` | The tuned BO at every cell, for 12 scenarios (tilt 3×/day, daily or seasonal × hindsight, persistence, monthly or yearly-mean weather). Saves LCOW, yield, thickness, tilt and the full daily schedule. |
+| `validate` | BO with the surrogate against BO on true physics, on the same annual-schedule problem at held-out test cells. Also physics-scores every scenario's optimum. |
+| `plots` | Every methodology and result figure, from whatever is on disk. |
 
-## Scope
+Library modules: `climate` (features, sampling, Köppen, OOD), `simulate` (physics years),
+`surrogates` (the four model families), and `optimize` (inner enumeration, constrained BO).
 
-- LiCl + hydrogel only. The simple JAX path hardcodes LiCl's isotherm.
-- Physics sees T, RH and GHI only: `h_amb` is fixed, and there is no
-  sky-temperature radiation. Features follow the physics.
-- Financial parameters (`LCOEconomicParams`) are fixed scenario inputs, applied
-  *after* the surrogate, so maps regenerate when they change.
-- `insulation_gap_m` and `fin_area_ratio` are pinned at solar_lumped's
-  defaults (`design_space.SIMPLE_FIXED`). The reference BO's `--complex` mode
-  frees them along with 7 further dimensions.
-- One weather year (2024) from the Open-Meteo requests-cache, about 14.7k
-  sites.
+## Running on Sherlock
 
-## Install
-
-`solar_lumped` must already be installed (editable, from this same
-`SAWH_TEAs` checkout). Then:
+Submit from this directory, in order. Each script chains its stages with dependencies, and
+every stage skips work whose output already exists.
 
 ```bash
-pip install -e .
-pip install "jax[cuda12]"   # on a GPU node (e.g. Sherlock)
+bash scripts/submit_train.sh      # ~1 day; the physics campaign is 8 parallel ~2.1 h tasks
+bash scripts/submit_global.sh     # 12 scenarios x 30 cell blocks
+bash scripts/submit_validate.sh   # physics BO: 5 rounds of ~2.1 h
 ```
-
-The two-stage pipeline also needs `equinox`, which is already in
-`solar_lumped/.venv_gpu`.
-
-## Run the two-stage pipeline
-
-Every stage writes under `--run-dir`. Chunked stages are resumable, and the
-`scripts/sbatch_two_stage_*.sh` wrappers split them into Slurm arrays.
-
-```bash
-R="--run-dir outputs/two_stage/main"
-python scripts/run_two_stage.py $R features                        # scan the cache (CPU, once)
-python scripts/run_two_stage.py $R validate-features               # pick the retained PC count
-python scripts/run_two_stage.py $R select --n-components 12        # cells, split, campaign
-sbatch --array=0-N%8 scripts/sbatch_two_stage_physics.sh simulate  # physics campaign
-python scripts/run_two_stage.py $R fit                             # surrogate + holdout_report.json
-sbatch --array=0 scripts/sbatch_two_stage_optimize.sh anchors fixed persistence
-sbatch --array=0-5 scripts/sbatch_two_stage_physics.sh active --round 0 \
-    --tilt-mode fixed --schedule-mode persistence                  # then re-fit, 1-2 rounds
-sbatch --array=0-29%8 scripts/sbatch_two_stage_optimize.sh all fixed persistence
-python scripts/run_two_stage.py $R maps --tilt-mode fixed --schedule-mode persistence
-python scripts/run_two_stage.py $R validate-bo --emit-sites      # login node: held-out sites
-python ../solar_lumped/gpu_sweep/warm_weather_cache.py --sites-file outputs/two_stage/main/bo_sites.txt
-sbatch --array=0-4 scripts/sbatch_two_stage_validate_bo.sh bo     # per-site true-physics BO
-sbatch --time=08:00:00 scripts/sbatch_two_stage_validate_bo.sh score --modes fixed:constant,daily:hindsight
-```
-
-Outputs, all in the run directory:
-- `holdout_report.json`: error on never-seen climates, broken out by regime,
-  plus whether the surrogate ranks each cell's designs, and responds to thickness
-  and the sealed window, the way the physics does.
-- `featval_summary.csv`: real vs reconstructed-year yields.
-- `maps_<tilt>_<schedule>.csv`: one row per cell with the design, yield,
-  LCOW, ensemble spread and an `ood` flag.
-- `validate_bo_summary.csv`: the optimality gap in $/m3, by mode and regime.
-
-## Run the per-site reference BO
-
-```bash
-python scripts/run_bayesopt.py --n-init 24 --n-total 50            # one site
-python ../solar_lumped/gpu_sweep/run_bayesopt_sweep.py --lat-lon -23.65 -70.40 --output-dir out/
-```
-
-Outputs are written to `outputs/runs/<run_id>/`:
-- `cache.jsonl`: every evaluated design; the run resumes from it.
-- `gp_state.joblib`
-- `convergence.png`
-- `report.json`
 
 ## Tests
 
 ```bash
-solar_lumped/.venv_gpu/bin/python -m pytest solar_lumped/tests sawh_bayesopt/tests -q   # from SAWH_TEAs/
+solar_lumped/.venv_gpu/bin/python -m pytest sawh_bayesopt/tests -q   # from the repo root
 ```
-
-Run them with the GPU venv. Under the default interpreter, the JAX parity tests
-and `test_two_stage.py` skip, and the run still reports green.
