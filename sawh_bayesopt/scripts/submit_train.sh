@@ -4,10 +4,13 @@
 #
 #   bash scripts/submit_train.sh                   # features -> select -> ... -> tune-bo
 #   SKIP_FEATURES=1 bash scripts/submit_train.sh   # features.npz already in $RUN_DIR
+#   SKIP_SELECT=1 bash scripts/submit_train.sh     # selection done too: start at simulate
 #
-# Wall time is dominated by the physics campaign: 5,000 years in 8 tasks of ~2.1 h each
-# (an A100 year is ~366 sequential day-steps at ~20 s, whatever the width), all at once.
-# Every stage skips work whose output exists, so resubmitting resumes.
+# Wall time is dominated by the physics campaign: 5,000 years in 8 tasks, all at once. A
+# full 700-year task measured 3.0-4+ h on the first run (2.2 h for the 100-year last task):
+# the per-day weather profiles are built serially on the CPU, so time grows with width.
+# A task killed mid-year loses the whole year. Every stage skips work whose output exists,
+# so resubmitting resumes -- finished physics chunks exit at once.
 set -euo pipefail
 export RUN_DIR="${RUN_DIR:-outputs/main}"
 mkdir -p logs "${RUN_DIR}"
@@ -16,14 +19,18 @@ GPU=scripts/sbatch_gpu.sh
 CPU=scripts/sbatch_cpu.sh
 T=sawh_bayesopt.train
 
-if [ -z "${SKIP_FEATURES:-}" ]; then
-  FEAT=$(sbatch --parsable --job-name=features --time=06:00:00 $CPU $T features)
-  SEL=$(sbatch --parsable $(after "$FEAT") --job-name=select --time=02:00:00 $CPU $T select)
-else
-  SEL=$(sbatch --parsable --job-name=select --time=02:00:00 $CPU $T select)
+SIM_DEP=()
+if [ -z "${SKIP_SELECT:-}" ]; then
+  if [ -z "${SKIP_FEATURES:-}" ]; then
+    FEAT=$(sbatch --parsable --job-name=features --time=06:00:00 $CPU $T features)
+    SEL=$(sbatch --parsable $(after "$FEAT") --job-name=select --time=02:00:00 $CPU $T select)
+  else
+    SEL=$(sbatch --parsable --job-name=select --time=02:00:00 $CPU $T select)
+  fi
+  SIM_DEP=($(after "$SEL"))
 fi
 # 1,000 cells x 5 thicknesses = 5,000 years at 700 per task -> tasks 0-7 (select prints it).
-SIM=$(sbatch --parsable $(after "$SEL") --job-name=simulate --time=04:00:00 --array=0-7%8 \
+SIM=$(sbatch --parsable ${SIM_DEP[@]+"${SIM_DEP[@]}"} --job-name=simulate --time=08:00:00 --array=0-7%8 \
   $GPU $T simulate --chunk-index TASK)
 # One task per hyperparameter config (surrogates.GRIDS): 9 ridge alphas run in one job.
 RIDGE=$(sbatch --parsable $(after "$SIM") --job-name=fit-ridge --time=02:00:00 $CPU $T fit --family ridge)
@@ -36,4 +43,4 @@ MLP=$(sbatch --parsable $(after "$SIM") --job-name=fit-mlp --time=02:00:00 --arr
 CMP=$(sbatch --parsable $(after "$RIDGE" "$RF" "$GB" "$MLP") --job-name=compare --time=01:00:00 $CPU $T compare)
 GRID=$(sbatch --parsable $(after "$CMP") --job-name=tune-grid --time=08:00:00 $GPU $T tune-grid)
 TUNE=$(sbatch --parsable $(after "$GRID") --job-name=tune-bo --time=12:00:00 $CPU $T tune-bo)
-echo "submitted: select $SEL, simulate $SIM, fits $RIDGE $RF $GB $MLP, compare $CMP, tune $GRID $TUNE"
+echo "submitted: select ${SEL:-skipped}, simulate $SIM, fits $RIDGE $RF $GB $MLP, compare $CMP, tune $GRID $TUNE"
