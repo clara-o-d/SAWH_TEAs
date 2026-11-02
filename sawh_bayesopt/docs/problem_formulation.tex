@@ -310,7 +310,7 @@ The campaign totals 5,000 physics years, about $1.8\times10^6$ rows.
 
 \subsection{Model families and selection}
 
-Four families are each fitted over a hyperparameter grid (\code{surrogates.GRIDS}). Every fit
+Three families are each fitted over a hyperparameter grid (\code{surrogates.GRIDS}). Every fit
 sees the training cells only.
 
 \begin{table}[h]
@@ -323,9 +323,6 @@ sees the training cells only.
 Ridge regression & $\alpha \in \{10^{-4}, \dots, 10^4\}$ (9 values); closed form \\
 Random forest & max features $\in \{0.33, 0.66, 1\}$ $\times$ min leaf $\in \{1, 5, 20\}$;
 grown 25 trees at a time to 300, each tree bagging 10\% of the rows \\
-Histogram gradient boosting & learning rate $\in \{0.03, 0.1, 0.3\}$ $\times$ max leaves $\in \{31, 127, 511\}$;
-one model per target, grown 50 iterations at a time to at most 3,000, stopped after 4 steps
-without validation improvement and refitted at the best count \\
 MLP & width $\in \{64, 128, 256, 512\}$ $\times$ depth $\in \{2, 3, 4\}$ $\times$
 learning rate $\in \{10^{-3}, 3\times10^{-3}\}$; SiLU activations; Adam with cosine decay;
 20,000 steps of batch 4,096; validation-best checkpoint, checked every 500 steps \\
@@ -335,8 +332,7 @@ learning rate $\in \{10^{-3}, 3\times10^{-3}\}$; SiLU activations; Adam with cos
 
 The MLP fits the cap flag with a logistic loss, weighted equally with the three regression
 MSEs. The other families regress the flag as a score in $[0,1]$. Each configuration's
-convergence is recorded: MLP training and validation loss per step, forest size, and boosting
-rounds.
+convergence is recorded: MLP training and validation loss per step, and forest size.
 
 Within each family, the configuration with the lowest daily water RMSE on the validation cells
 is selected. The test cells are scored once, for that configuration only. Two kinds of test
@@ -352,7 +348,7 @@ Both are broken out by K\"oppen group (\code{surrogates.evaluate}).
 The inner loop needs on the order of $10^{12}$ predictions per scenario, so the deployed model
 must run on the GPU. The deployed surrogate is therefore the better of ridge and the MLP on the
 validation criterion. A fitted ridge model is exactly a depth-0 MLP, so both families share
-one compiled JAX predictor (\code{surrogates.deployable}). The tree families are reported for
+one compiled JAX predictor (\code{surrogates.deployable}). The random forest is reported for
 comparison but cannot be deployed.
 
 \section{Solution method}
@@ -455,7 +451,7 @@ $\in \{0,2,8\}$ $\times$ white-noise term on or off.
 \end{enumerate}
 Configurations are ranked by mean regret at the end of the budget, with ties broken by the
 area under the regret curve. The run budget is the first evaluation count at which the
-chosen configuration's mean regret falls to 0.5\%, capped at 15. Validation cells are used so
+chosen configuration's worst-cell regret falls to 0.1\%, capped at 15. Validation cells are used so
 that tuning never touches the test cells the validation in Section~\ref{sec:validation}
 scores.
 

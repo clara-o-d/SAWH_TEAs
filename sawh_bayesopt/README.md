@@ -16,7 +16,7 @@ physics (its JAX path, `solar_lumped.jax_daily_cycle`).
 
 | Module | What it does |
 |---|---|
-| `train` | Featurize climates. Pick 750 space-filling locations (Kochenderfer & Wheeler alg. 16.8) plus 250 extra Köppen BWh/BWk desert cells, with a 70/15/15 split by cell. Run 5 thicknesses × 1 physics year each under random daily controls. Fit ridge, random forest, gradient boosting and MLP grids, then compare them on the validation cells, score them on the test cells and deploy one. Tune the BO kernel, acquisition and GP settings against grid-search truth. |
+| `train` | Featurize climates. Pick 750 space-filling locations (Kochenderfer & Wheeler alg. 16.8) plus 250 extra Köppen BWh/BWk desert cells, with a 70/15/15 split by cell. Run 5 thicknesses × 1 physics year each under random daily controls. Fit ridge, random forest and MLP grids, then compare them on the validation cells, score them on the test cells and deploy one. Tune the BO kernel, acquisition and GP settings against grid-search truth. |
 | `run_global` | The tuned BO at every cell, for 12 scenarios (tilt 3×/day, daily or seasonal × hindsight, persistence, monthly or yearly-mean weather). Saves LCOW, yield, thickness, tilt and the full daily schedule. |
 | `validate` | BO with the surrogate against BO on true physics, on the same annual-schedule problem at held-out test cells. Also physics-scores every scenario's optimum. |
 | `plots` | Every methodology and result figure, from whatever is on disk. |

@@ -51,7 +51,7 @@ def main(argv: list[str] | None = None) -> int:
     p = sub.add_parser("simulate")
     p.add_argument("--chunk-index", type=int, required=True)
     p = sub.add_parser("fit")
-    p.add_argument("--family", choices=("ridge", "random_forest", "gradient_boosting", "mlp"), required=True)
+    p.add_argument("--family", choices=("ridge", "random_forest", "mlp"), required=True)
     p.add_argument("--config-index", type=int, help="Fit one config of the grid (array jobs); default all.")
     sub.add_parser("compare")
     p = sub.add_parser("tune-grid")
@@ -199,7 +199,8 @@ def stage_tune_bo(args) -> int:
       2. the winner's n_init x GP restarts x white-noise term.
     Score: mean relative simple regret at the end of the budget, ties broken by the area
     under the regret curve. The run budget is the first evaluation count at which the
-    final config's mean regret falls to 0.5%, capped at 15."""
+    final config's worst-cell regret falls to 0.1%, capped at 15: a mean target lets a few
+    cells end well short of their optimum (at the mean's 0.5%, the worst was 1.2%)."""
     from dataclasses import replace
 
     from sawh_bayesopt.optimize import ACQUISITIONS, KERNELS, BOConfig, bo_regret, run_bo
@@ -236,8 +237,7 @@ def stage_tune_bo(args) -> int:
                 results[f"sweep2|{n_init}|{restarts}|{white}"] = (cfg, reg, s)
                 print(f"  n_init {n_init} restarts {restarts} white {white}: final regret {s[0]:.4%}", flush=True)
     final, reg, _s = min(results.values(), key=lambda v: v[2])
-    mean = reg.mean(axis=0)
-    hit = np.flatnonzero(mean <= 0.005)
+    hit = np.flatnonzero(reg.max(axis=0) <= 0.001)
     final = replace(final, budget=int(hit[0] + 1) if len(hit) else final.budget)
     np.savez(args.run_dir / "bo_tuning.npz", keys=np.array(list(results)),
              configs=np.array([json.dumps(v[0].to_dict()) for v in results.values()]),

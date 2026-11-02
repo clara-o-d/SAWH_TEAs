@@ -6,11 +6,9 @@ and the protocol they are compared under. The map is fitted on physics outputs, 
 dollars: LCOW is applied afterwards (optimize.lcow_and_constraint), so every map regenerates
 under new cost assumptions without retraining.
 
-Four families, each over a hyperparameter grid (GRIDS):
+Three families, each over a hyperparameter grid (GRIDS):
   * ridge regression (Hoerl & Kennard 1970) on standardized inputs -- the linear baseline;
   * random forest (Breiman 2001), multi-output, grown in steps to record convergence;
-  * histogram gradient boosting (Friedman 2001; Ke et al. 2017's binned trees), one model
-    per target, grown in steps with early stopping on the validation cells;
   * a multilayer perceptron with SiLU activations, Adam (Kingma & Ba 2015) with cosine
     learning-rate decay, early stopping on the validation cells.
 
@@ -33,13 +31,11 @@ from pathlib import Path
 
 import numpy as np
 
-FAMILIES: tuple[str, ...] = ("ridge", "random_forest", "gradient_boosting", "mlp")
+FAMILIES: tuple[str, ...] = ("ridge", "random_forest", "mlp")
 GRIDS: dict[str, list[dict]] = {
     "ridge": [{"alpha": float(a)} for a in 10.0 ** np.arange(-4, 5)],
     "random_forest": [{"max_features": mf, "min_samples_leaf": leaf}
                       for mf in (0.33, 0.66, 1.0) for leaf in (1, 5, 20)],
-    "gradient_boosting": [{"learning_rate": lr, "max_leaf_nodes": leaves}
-                          for lr in (0.03, 0.1, 0.3) for leaves in (31, 127, 511)],
     "mlp": [{"width": w, "depth": d, "lr": lr}
             for w in (64, 128, 256, 512) for d in (2, 3, 4) for lr in (1e-3, 3e-3)],
 }
@@ -78,30 +74,6 @@ def fit_family(family: str, hyper: dict, data: dict, *, seed: int) -> tuple[dict
             trees.append(n_trees)
             val_rmse.append(_water_rmse(surrogate, data["val"]))
         convergence = {"iteration": np.array(trees), "val_water_rmse": np.array(val_rmse)}
-
-    elif family == "gradient_boosting":
-        from sklearn.ensemble import HistGradientBoostingRegressor
-
-        models = [HistGradientBoostingRegressor(learning_rate=hyper["learning_rate"],
-                                                max_leaf_nodes=hyper["max_leaf_nodes"], max_iter=0,
-                                                early_stopping=False, warm_start=True, random_state=seed)
-                  for _ in range(Ytr.shape[1])]
-        surrogate = {"family": family, "hyper": hyper, "norm": norm, "model": models}
-        iters, val_rmse, best, since_best, step, patience = [], [], np.inf, 0, 50, 4
-        for n_iter in range(step, 3001, step):
-            for k, m in enumerate(models):
-                m.set_params(max_iter=n_iter).fit(Xtr, Ytr[:, k])
-            iters.append(n_iter)
-            val_rmse.append(_water_rmse(surrogate, data["val"]))
-            best, since_best = (val_rmse[-1], 0) if val_rmse[-1] < best else (best, since_best + 1)
-            if since_best >= patience:
-                break
-        # Keep the best iteration count, not the last: refit to it from scratch (warm start
-        # cannot remove trees).
-        n_best = iters[int(np.argmin(val_rmse))]
-        for k, m in enumerate(models):
-            m.set_params(max_iter=n_best, warm_start=False).fit(Xtr, Ytr[:, k])
-        convergence = {"iteration": np.array(iters), "val_water_rmse": np.array(val_rmse)}
 
     elif family == "mlp":
         surrogate, convergence = _fit_mlp(hyper, norm, Xtr, Ytr, Xva, Yva, data["val"], seed=seed)
@@ -183,8 +155,6 @@ def predict(surrogate: dict, X: np.ndarray, *, chunk: int = 262_144) -> dict:
         Xz = (X[a:a + chunk] - norm["x_mean"]) / norm["x_std"]
         if surrogate["family"] == "mlp":
             out.append(np.asarray(_mlp_forward(surrogate["model"], Xz.astype(np.float32))))
-        elif surrogate["family"] == "gradient_boosting":
-            out.append(np.column_stack([m.predict(Xz) for m in surrogate["model"]]))
         else:
             out.append(surrogate["model"].predict(Xz))
     z = np.concatenate(out)

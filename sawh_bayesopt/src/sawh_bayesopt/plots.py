@@ -84,12 +84,11 @@ def fig_surrogate_grids(run_dir: Path, out: Path) -> None:
     """Validation water RMSE over every family's hyperparameter grid (heat maps; ridge as a
     curve over alpha)."""
     grid = pd.read_csv(run_dir / "surrogate_grid.csv")
-    fig, axes = plt.subplots(1, 5, figsize=(22, 4.2), layout="constrained")
+    fig, axes = plt.subplots(1, 4, figsize=(18, 4.2), layout="constrained")
     r = grid[grid.family == "ridge"].sort_values("hyper_alpha")
     axes[0].semilogx(r.hyper_alpha, r.val_water_rmse, marker="o")
     axes[0].set(xlabel="alpha", ylabel="validation water RMSE (kg/m²/day)", title="ridge")
     panels = [("random_forest", "hyper_max_features", "hyper_min_samples_leaf", None),
-              ("gradient_boosting", "hyper_learning_rate", "hyper_max_leaf_nodes", None),
               *[("mlp", "hyper_width", "hyper_depth", lr) for lr in sorted({g["lr"] for g in GRIDS["mlp"]})]]
     for ax, (family, rows_col, cols_col, lr) in zip(axes[1:], panels):
         g = grid[grid.family == family]
@@ -113,11 +112,10 @@ def fig_surrogate_grids(run_dir: Path, out: Path) -> None:
 
 def fig_surrogate_convergence(run_dir: Path, out: Path) -> None:
     """Validation error against training iterations: MLP loss per step (train and val, every
-    config faint, the selected one bold), forest size, boosting rounds."""
+    config faint, the selected one bold), forest size."""
     comp = json.loads((run_dir / "surrogate_comparison.json").read_text())
-    fig, axes = plt.subplots(1, 3, figsize=(17, 4.2), layout="constrained")
-    for ax, family, xlabel in zip(axes, ("mlp", "random_forest", "gradient_boosting"),
-                                  ("optimizer step", "trees", "boosting iterations")):
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4.2), layout="constrained")
+    for ax, family, xlabel in zip(axes, ("mlp", "random_forest"), ("optimizer step", "trees")):
         for d in sorted((run_dir / "surrogates" / family).glob("config_*")):
             c = np.load(d / "convergence.npz")
             chosen = family in comp and comp[family]["config"] == d.name

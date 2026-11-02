@@ -36,11 +36,9 @@ SIM=$(sbatch --parsable ${SIM_DEP[@]+"${SIM_DEP[@]}"} --job-name=simulate --time
 RIDGE=$(sbatch --parsable $(after "$SIM") --job-name=fit-ridge --time=02:00:00 $CPU $T fit --family ridge)
 RF=$(sbatch --parsable $(after "$SIM") --job-name=fit-rf --time=12:00:00 --array=0-8 \
   $CPU $T fit --family random_forest --config-index TASK)
-GB=$(sbatch --parsable $(after "$SIM") --job-name=fit-gb --time=12:00:00 --array=0-8 \
-  $CPU $T fit --family gradient_boosting --config-index TASK)
 MLP=$(sbatch --parsable $(after "$SIM") --job-name=fit-mlp --time=02:00:00 --array=0-23%8 \
   $GPU $T fit --family mlp --config-index TASK)
-CMP=$(sbatch --parsable $(after "$RIDGE" "$RF" "$GB" "$MLP") --job-name=compare --time=01:00:00 $CPU $T compare)
+CMP=$(sbatch --parsable $(after "$RIDGE" "$RF" "$MLP") --job-name=compare --time=01:00:00 $CPU $T compare)
 GRID=$(sbatch --parsable $(after "$CMP") --job-name=tune-grid --time=08:00:00 $GPU $T tune-grid)
 TUNE=$(sbatch --parsable $(after "$GRID") --job-name=tune-bo --time=12:00:00 $CPU $T tune-bo)
-echo "submitted: select ${SEL:-skipped}, simulate $SIM, fits $RIDGE $RF $GB $MLP, compare $CMP, tune $GRID $TUNE"
+echo "submitted: select ${SEL:-skipped}, simulate $SIM, fits $RIDGE $RF $MLP, compare $CMP, tune $GRID $TUNE"
