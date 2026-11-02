@@ -30,9 +30,9 @@ Submit from this directory, in order. Each script chains its stages with depende
 every stage skips work whose output already exists.
 
 ```bash
-bash scripts/submit_train.sh      # ~1 day; the physics campaign is 8 parallel ~2.1 h tasks
+bash scripts/submit_train.sh      # ~1 day; the physics campaign is 8 parallel 3-4.5 h tasks
 bash scripts/submit_global.sh     # 12 scenarios x 30 cell blocks
-bash scripts/submit_validate.sh   # physics BO: 5 rounds of ~2.1 h
+bash scripts/submit_validate.sh   # physics BO: 5 rounds of ~4-4.5 h
 ```
 
 ## Tests
