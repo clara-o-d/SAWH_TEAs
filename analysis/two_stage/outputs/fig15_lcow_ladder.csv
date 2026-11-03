@@ -1,5 +1,0 @@
-,min,25%,50%,75%,max
-baseline design |lat| tilt sunrise/sunset,3.77,5.27,8.14,11.26,33.64
-baseline design fixed tilt day-ahead sched.,3.7,5.02,7.29,9.7,21.93
-optimized design fixed tilt day-ahead sched.,3.49,4.87,7.0,9.11,19.81
-optimized design daily tilt hindsight sched.,3.46,4.72,6.76,8.78,18.94

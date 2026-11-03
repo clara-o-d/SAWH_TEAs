@@ -28,6 +28,11 @@ from sawh_bayesopt.train import DEFAULT_RUN_DIR  # noqa: E402
 
 MAP_COLUMNS = (("lcow_usd_m3", "LCOW (USD/m³)"), ("water_kg_m2_day", "yield (kg/m²/day)"),
                ("hydrogel_thickness_mm", "hydrogel thickness (mm)"), ("tilt_mean_deg", "mean tilt (deg)"))
+# Maps show cells between the polar circles only, and LCOW up to LCOW_MAX; the rest is gray.
+POLAR_CIRCLE_DEG = 66.56
+LCOW_MAX = 10.0
+# Per-cell population (GHS-POP 2020), from scripts/build_population.py.
+POPULATION_CSV = Path(__file__).resolve().parents[2] / "data" / "population.csv"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -205,24 +210,47 @@ def fig_bo_tuning(run_dir: Path, out: Path) -> None:
 
 
 def fig_global_maps(run_dir: Path, out: Path) -> None:
-    """For each merged scenario: LCOW, yield, thickness and mean tilt at every cell."""
+    """For each merged scenario: LCOW, yield, thickness and mean tilt at every cell between
+    the polar circles. Gray: cells beyond them, infeasible cells, and on the LCOW panel LCOW
+    above LCOW_MAX. Also prints the land-area share (between the polar circles) and the world
+    population share where LCOW < 5 USD/m³ and where the yield exceeds 2 L/m²/day."""
+    from scipy.spatial import cKDTree
+
+    population = pd.read_csv(POPULATION_CSV)
+    tree = cKDTree(population[["lat", "lon"]].to_numpy())
     drew = False
     for tilt_mode, info in SCENARIOS:
         path = run_dir / f"maps_{tilt_mode}_{info}.csv"
         if not path.exists():
             continue
         m = pd.read_csv(path)
-        m = m[m.feasible]
+        dist, idx = tree.query(m[["lat", "lon"]].to_numpy())
+        if (dist > 1e-3).any():
+            raise ValueError(f"{int((dist > 1e-3).sum())} cell(s) have no entry in {POPULATION_CSV}")
+        pop = population.population.to_numpy()[idx]
+        band = m.lat.abs().to_numpy() < POLAR_CIRCLE_DEG
+        shown = band & m.feasible.to_numpy()
+        # ponytail: cos(lat) cell area assumes the cells are a uniform-degree grid (they are,
+        # ~1 deg); weight by Voronoi area if the grid ever goes irregular.
+        area = np.cos(np.radians(m.lat.to_numpy()))
+        print(f"{tilt_mode}/{info}:")
+        for name, hit in (("LCOW < 5 USD/m³", m.lcow_usd_m3 < 5.0), ("yield > 2 L/m²/day", m.water_kg_m2_day > 2.0)):
+            hit = shown & hit.to_numpy()
+            print(f"  {name:20s} {area[hit].sum() / area[band].sum():6.1%} of land area between the polar circles, "
+                  f"{pop[hit].sum() / population.population.sum():6.1%} of world population")
         fig = plt.figure(figsize=(20, 9), layout="constrained")
         for k, (col, label) in enumerate(MAP_COLUMNS):
             ax = _map_axes(fig, (2, 2, k + 1))
-            hi = m[col].quantile(0.98) if col == "lcow_usd_m3" else m[col].max()
-            sc = ax.scatter(m.lon, m.lat, c=m[col], s=4, cmap="viridis", vmin=m[col].min(), vmax=hi,
-                            transform=_plate())
+            ok = shown & (m[col].to_numpy() <= LCOW_MAX) if col == "lcow_usd_m3" else shown
+            ax.scatter(m.lon[~ok], m.lat[~ok], color="0.9", s=4, transform=_plate())
+            s = m[ok]
+            sc = ax.scatter(s.lon, s.lat, c=s[col], s=4, cmap="viridis", vmin=s[col].min(),
+                            vmax=LCOW_MAX if col == "lcow_usd_m3" else s[col].max(), transform=_plate())
             fig.colorbar(sc, ax=ax, shrink=0.7, label=label, extend="max" if col == "lcow_usd_m3" else "neither")
-            ax.set_title(f"{label}: median {m[col].median():.2f}", loc="left")
-        fig.suptitle(f"Global optimum, tilt {tilt_mode.replace('_', ' ')}, {info} weather ({len(m):,} feasible cells)",
-                     x=0.01, ha="left", fontweight="bold")
+            ax.set_title(f"{label}: median {m.loc[shown, col].median():.2f}", loc="left")
+        fig.suptitle(f"Global optimum, tilt {tilt_mode.replace('_', ' ')}, {info} weather "
+                     f"({int(shown.sum()):,} feasible cells between the polar circles; gray: beyond them, "
+                     f"infeasible, or LCOW > {LCOW_MAX:g} USD/m³)", x=0.01, ha="left", fontweight="bold")
         _save(fig, out / f"map_{tilt_mode}_{info}.png")
         drew = True
     if not drew:
